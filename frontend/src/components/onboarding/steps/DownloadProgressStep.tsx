@@ -54,8 +54,6 @@ export function DownloadProgressStep() {
   });
 
   const [isCompleting, setIsCompleting] = useState(false);
-  const parakeetDownloadStartedRef = useRef(false);
-  const summaryDownloadStartedRef = useRef(false);
   const retryingRef = useRef(false);
   const retryingSummaryRef = useRef(false);
 
@@ -163,35 +161,6 @@ export function DownloadProgressStep() {
 
     checkPlatform();
   }, []);
-
-  // Start the required transcription model immediately; summary readiness must not block it.
-  useEffect(() => {
-    if (parakeetDownloadStartedRef.current) return;
-    parakeetDownloadStartedRef.current = true;
-
-    if (!parakeetDownloaded) {
-      setParakeetState((prev) => ({ ...prev, status: 'downloading' }));
-    }
-
-    startBackgroundDownloads({
-      includeParakeet: true,
-      includeSummary: false,
-    }).catch((error) => {
-      console.error('Failed to start Parakeet download:', error);
-      if (!parakeetDownloaded) {
-        setParakeetState((prev) => ({ ...prev, status: 'error', error: String(error) }));
-      }
-    });
-  }, []);
-
-  // Start the selected summary model only after the backend recommendation is known.
-  useEffect(() => {
-    if (summaryDownloadStartedRef.current) return;
-    if (!selectedSummaryModel) return;
-    summaryDownloadStartedRef.current = true;
-
-    startSummaryDownload();
-  }, [selectedSummaryModel]);
 
   // Listen to Parakeet download progress
   useEffect(() => {
@@ -328,6 +297,21 @@ export function DownloadProgressStep() {
     }
   };
 
+  const startParakeetDownload = async () => {
+    if (parakeetDownloaded || parakeetState.status === 'downloading') return;
+
+    try {
+      setParakeetState((prev) => ({ ...prev, status: 'downloading', error: undefined }));
+      await startBackgroundDownloads({
+        includeParakeet: true,
+        includeSummary: false,
+      });
+    } catch (error) {
+      console.error('Failed to start Parakeet download:', error);
+      setParakeetState((prev) => ({ ...prev, status: 'error', error: String(error) }));
+    }
+  };
+
   const handleContinue = async () => {
     // Verify actual model availability (catches state drift)
     try {
@@ -352,14 +336,9 @@ export function DownloadProgressStep() {
       console.warn('[DownloadProgressStep] Failed to verify model:', error);
     }
 
-    // Check if downloads are complete for toast notification
-    const downloadsComplete = parakeetState.status === 'completed' &&
-      summaryState.status === 'completed';
-
-    // Show toast if downloads still in progress
-    if (!downloadsComplete) {
+    if (summaryState.status === 'downloading') {
       toast.info('Downloads will continue in the background', {
-        description: 'You can start using the app. Recording will be available once speech recognition is ready.',
+        description: 'The optional local summary model will keep downloading after setup.',
         duration: 5000,
       });
     }
@@ -392,7 +371,9 @@ export function DownloadProgressStep() {
     icon: React.ReactNode,
     state: DownloadState,
     modelSize: string,
-    sizeUnit = 'MB'
+    sizeUnit = 'MB',
+    onDownload?: () => void,
+    downloadLabel = 'Download'
   ) => (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <div className="flex items-center justify-between mb-4">
@@ -406,8 +387,11 @@ export function DownloadProgressStep() {
           </div>
         </div>
         <div>
-          {state.status === 'waiting' && (
-            <span className="text-sm text-gray-500">Waiting...</span>
+          {state.status === 'waiting' && onDownload && (
+            <Button size="sm" variant="outline" onClick={onDownload}>
+              <Download className="w-4 h-4 mr-2" />
+              {downloadLabel}
+            </Button>
           )}
           {state.status === 'downloading' && (
             <Loader2 className="w-5 h-5 text-gray-700 animate-spin" />
@@ -473,8 +457,8 @@ export function DownloadProgressStep() {
 
   return (
     <OnboardingContainer
-      title="Getting things ready"
-      description="You can start using Meetily after downloading the Transcription Engine."
+      title="Choose what to download"
+      description="Mingtily downloads models only after you click. The transcription model is required for recording; the local summary model is optional."
       step={3}
       totalSteps={isMac ? 4 : 3}
     >
@@ -485,7 +469,10 @@ export function DownloadProgressStep() {
             'Transcription Engine',
             <Mic className="w-5 h-5 text-gray-600" />,
             parakeetState,
-            '~670 MB'
+            '~670 MB',
+            'MB',
+            startParakeetDownload,
+            'Download transcription model'
           )}
 
           {renderDownloadCard(
@@ -493,7 +480,9 @@ export function DownloadProgressStep() {
             <Sparkles className="w-5 h-5 text-gray-600" />,
             summaryState,
             getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
-            'MiB'
+            'MiB',
+            selectedSummaryModel ? startSummaryDownload : undefined,
+            'Download optional model'
           )}
         </div>
 
@@ -510,9 +499,9 @@ export function DownloadProgressStep() {
               <div className="flex items-start gap-3">
                 <Download className="w-5 h-5 text-gray-600 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-medium">You can continue while this finishes</p>
+                  <p className="font-medium">The local summary model is optional</p>
                   <p className="text-gray-700 mt-1">
-                    Download will continue in the background.
+                    Skip it now and configure Ollama, an external provider, or a built-in model later in Settings.
                   </p>
                 </div>
               </div>

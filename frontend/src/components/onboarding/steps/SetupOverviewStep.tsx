@@ -35,7 +35,7 @@ export function SetupOverviewStep() {
     {
       number: 2,
       type: 'summarization',
-      title: 'Download Summarization Engine',
+      title: 'Optionally download a local summary model',
     },
   ];
 
@@ -46,7 +46,7 @@ export function SetupOverviewStep() {
   return (
     <OnboardingContainer
       title="Setup Overview"
-      description="Meetily requires that you download the Transcription & Summarization AI models for the software to work."
+      description="Mingtily needs a local transcription model to record. Summary generation can use an optional local model, Ollama, or an external provider you configure."
       step={2}
       totalSteps={isMac ? 4 : 3}
     >
@@ -98,7 +98,7 @@ export function SetupOverviewStep() {
           </Button>
           <div className="text-center">
             <a
-              href="https://github.com/Zackriya-Solutions/meeting-minutes"
+              href="https://github.com/Coco422/mingtily"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-gray-600 hover:underline"

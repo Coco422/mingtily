@@ -1,127 +1,45 @@
-# Meetily Privacy Policy
+# Mingtily Privacy Policy
 
-*Last updated: [Current Date]*
+Last updated: July 23, 2026
 
-## Our Privacy-First Commitment
+## Local-first data handling
 
-Meetily is built on the principle that your meeting data should remain private and under your control. This privacy policy explains how we handle data in our open-source meeting assistant.
+Mingtily stores meeting audio, transcripts, speaker labels, summaries, recovery data, settings, templates, and downloaded local models on the user's device. Mingtily does not operate a hosted account or meeting-storage service.
 
-## Data Processing Philosophy
+Mingtily does not include usage analytics, telemetry clients, advertising identifiers, or a background application updater.
 
-### Local-First Processing
-- **Meeting transcription**: Processed entirely on your device using local Whisper models
-- **Audio recordings**: Never transmitted to external servers
-- **Meeting content**: Remains on your infrastructure
-- **AI summaries**: Generated locally or through your chosen LLM provider
+## Network activity
 
-### Your Data Ownership
-- You own all meeting data, transcripts, and recordings
-- Data is stored locally on your device
-- No vendor lock-in - export your data anytime
-- Complete control over data retention and deletion
+A normal application cold start is designed not to contact non-loopback services. Mingtily may probe explicitly supported localhost services such as Ollama; loopback traffic remains on the device.
 
-## Usage Analytics
+Non-loopback network requests occur only after a user action or configuration that requires them:
 
-### What We Collect
-Usage analytics is optional and off by default. When you choose to enable it, Meetily collects minimal, anonymized usage data:
+- Downloading an ASR, speaker diarization, Whisper, or built-in summary model.
+- Using an external summary provider such as OpenAI, Anthropic, Groq, OpenRouter, or a custom OpenAI-compatible endpoint.
+- Opening an external link selected by the user.
 
-**Application Usage:**
-- Feature usage patterns (which tools you use most)
-- Session duration and frequency
-- Performance metrics (transcription success rates, error frequencies)
-- UI interaction patterns (button clicks, navigation flows)
+Model downloads are never started automatically during onboarding or application startup.
 
-**Technical Metrics:**
-- Application version and platform information
-- Error logs and crash reports (anonymized)
-- Performance benchmarks (processing times, resource usage)
+## External LLM providers
 
-### What We DON'T Collect
-We never collect:
-- ❌ Meeting content, transcripts, or recordings
-- ❌ Personal information or identifiable data
-- ❌ File names, meeting titles, or metadata
-- ❌ Audio data or voice patterns
-- ❌ Participant names or contact information
-- ❌ LLM conversations or AI-generated content
+External providers are optional. When a user selects an external provider and generates a summary, the relevant transcript content and prompt are sent to the configured service. That provider's privacy policy, retention rules, location, and account settings apply.
 
-### Why We Collect This Data
-When enabled, analytics helps us with:
-- **Product Quality**: Identifying and fixing bugs that impact user experience
-- **Performance Optimization**: Understanding resource usage and system bottlenecks
-- **Security**: Detecting potential security issues and vulnerabilities
-- **Feature Development**: Making data-driven decisions about new features
-- **Open Source Sustainability**: Ensuring the project meets user needs effectively
+Mingtily does not proxy those requests through a Mingtily-operated service. API credentials are stored locally by the application and are sent only to the configured provider endpoint when required.
 
-### Analytics Implementation
-- **Provider**: PostHog (privacy-focused analytics platform)
-- **Default**: Off by default; analytics starts only after you enable it in settings
-- **Anonymization**: All data linked to generated user IDs only - no personal identification
-- **Data retention**: 12 months maximum, then automatically deleted
-- **Encryption**: All data encrypted in transit using industry-standard protocols
-- **Location**: Data processed in accordance with PostHog's privacy policy
-- **Access Control**: Strictly limited to core development team members
+Use Ollama or a downloaded built-in model when transcript content must remain on the device.
 
-## Third-Party Services
+## User control
 
-### LLM Providers (Optional)
-If you choose to use external LLM providers:
-- **Anthropic Claude**: Subject to Anthropic's privacy policy
-- **Groq**: Subject to Groq's privacy policy
-- **Local Ollama**: Processed entirely on your device
+Users can inspect, export, or delete local meeting data through the application and the operating system's application data directory. Uninstalling the application may not automatically remove user-created recordings or application data; remove those directories manually if complete deletion is required.
 
-### Analytics Service (Optional)
-- **PostHog**: Used for usage analytics when enabled
-- **Data**: Only anonymized usage patterns, no meeting content
-- **Control**: Completely optional, off by default, and user-controlled
+## Security scope
 
-## Your Privacy Rights
+Local data is protected by the device's operating-system account, filesystem permissions, and any disk encryption enabled by the user. Mingtily does not claim to add independent at-rest encryption to every stored artifact.
 
-### Data Control
-- **Access**: View all data stored locally on your device
-- **Export**: Export your data in standard formats
-- **Delete**: Remove all data from your device
+## Open-source transparency
 
+The source code is available for review. Third-party components and model weights have their own licenses and terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-### Analytics Transparency
-- **Open source**: Full analytics implementation available for review in our source code
-- **Opt-in**: New and existing installs have analytics disabled until you turn it on
-- **Questions**: Contact us for any analytics-related concerns
+Mingtily is an independent community fork of Meetily. It is not affiliated with or endorsed by the Meetily project.
 
-## Data Security
-
-### Local Security
-- Data encrypted at rest using your device's security features
-- No transmission of sensitive meeting data
-- Standard file system permissions protect your data
-
-### Open Source Transparency
-- Full source code available for security review
-- Community-audited privacy implementations
-- No hidden data collection or tracking
-
-## Changes to This Policy
-
-We will notify users of any material changes to this privacy policy through:
-- Updates to this document in our GitHub repository
-- Release notes for application updates
-- In-app notifications for significant privacy changes
-
-## Contact Us
-
-For privacy-related questions or concerns:
-- **GitHub Issues**: [Create an issue](https://github.com/Zackriya-Solutions/meeting-minutes/issues)
-- **Email**: [Contact form](https://www.zackriya.com/service-interest-form/)
-- **Community**: [Discord](https://discord.gg/crRymMQBFH)
-
-## Open Source Commitment
-
-As an open-source project under MIT license, you can:
-- Review our complete privacy implementation
-- Modify data handling to meet your requirements
-- Deploy entirely on your own infrastructure
-- Contribute to privacy improvements
-
----
-
-*This privacy policy applies to Meetily v0.0.5 and later versions. For enterprise deployments, additional privacy controls may be available.*
+Privacy questions and security reports can be filed in the Mingtily GitHub repository.

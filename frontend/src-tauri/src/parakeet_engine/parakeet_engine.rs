@@ -1,14 +1,120 @@
 use crate::parakeet_engine::model::ParakeetModel;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::time::timeout;
+
+const PARAKEET_V3_MODEL_NAME: &str = "parakeet-tdt-0.6b-v3-int8";
+const PARAKEET_V3_REVISION: &str = "8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce";
+const PARAKEET_V3_REPOSITORY: &str = "istupakov/parakeet-tdt-0.6b-v3-onnx";
+
+#[derive(Clone, Copy)]
+struct ModelFileSpec {
+    name: &'static str,
+    size: u64,
+    sha256: &'static str,
+}
+
+const PARAKEET_V3_INT8_FILES: [ModelFileSpec; 4] = [
+    ModelFileSpec {
+        name: "encoder-model.int8.onnx",
+        size: 652_183_999,
+        sha256: "6139d2fa7e1b086097b277c7149725edbab89cc7c7ae64b23c741be4055aff09",
+    },
+    ModelFileSpec {
+        name: "decoder_joint-model.int8.onnx",
+        size: 18_202_004,
+        sha256: "eea7483ee3d1a30375daedc8ed83e3960c91b098812127a0d99d1c8977667a70",
+    },
+    ModelFileSpec {
+        name: "nemo128.onnx",
+        size: 139_764,
+        sha256: "a9fde1486ebfcc08f328d75ad4610c67835fea58c73ba57e3209a6f6cf019e9f",
+    },
+    ModelFileSpec {
+        name: "vocab.txt",
+        size: 93_939,
+        sha256: "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d",
+    },
+];
+
+fn parakeet_v3_base_url() -> String {
+    format!(
+        "https://huggingface.co/{}/resolve/{}",
+        PARAKEET_V3_REPOSITORY,
+        PARAKEET_V3_REVISION
+    )
+}
+
+fn exact_file_specs(model_name: &str) -> Option<&'static [ModelFileSpec]> {
+    if model_name == PARAKEET_V3_MODEL_NAME {
+        Some(&PARAKEET_V3_INT8_FILES)
+    } else {
+        None
+    }
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| anyhow!("Failed to open {} for checksum: {}", path.display(), e))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
+
+    loop {
+        let read = file.read(&mut buffer)
+            .map_err(|e| anyhow!("Failed to read {} for checksum: {}", path.display(), e))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+async fn verify_exact_file(path: &Path, spec: ModelFileSpec) -> Result<()> {
+    let metadata = fs::metadata(path).await
+        .map_err(|e| anyhow!("Failed to read {} metadata: {}", spec.name, e))?;
+    if metadata.len() != spec.size {
+        return Err(anyhow!(
+            "{} has unexpected size: {} bytes (expected {} bytes)",
+            spec.name,
+            metadata.len(),
+            spec.size
+        ));
+    }
+
+    let checksum_path = path.to_path_buf();
+    let actual_sha256 = tokio::task::spawn_blocking(move || sha256_file(&checksum_path))
+        .await
+        .map_err(|e| anyhow!("Checksum task failed for {}: {}", spec.name, e))??;
+
+    if actual_sha256 != spec.sha256 {
+        if let Err(error) = fs::remove_file(path).await {
+            log::warn!(
+                "Failed to remove corrupted Parakeet model file {}: {}",
+                path.display(),
+                error
+            );
+        }
+        return Err(anyhow!(
+            "{} checksum mismatch: expected {}, got {}; corrupted file removed",
+            spec.name,
+            spec.sha256,
+            actual_sha256
+        ));
+    }
+
+    Ok(())
+}
 
 /// Quantization type for Parakeet models
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -139,7 +245,7 @@ impl ParakeetEngine {
                 dirs::data_dir()
                     .or_else(|| dirs::home_dir())
                     .ok_or_else(|| anyhow!("Could not find system data directory"))?
-                    .join("Meetily")
+                    .join("Mingtily")
                     .join("models")
                     .join("parakeet")
             }
@@ -260,6 +366,16 @@ impl ParakeetEngine {
 
     /// Validate model directory by checking if all required files exist AND have valid sizes
     async fn validate_model_directory(&self, model_dir: &PathBuf) -> Result<()> {
+        let model_name = model_dir.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if let Some(file_specs) = exact_file_specs(model_name) {
+            for spec in file_specs {
+                verify_exact_file(&model_dir.join(spec.name), *spec).await?;
+            }
+            return Ok(());
+        }
+
         // Check if vocab.txt exists and is readable
         let vocab_path = model_dir.join("vocab.txt");
         if !vocab_path.exists() {
@@ -592,10 +708,9 @@ impl ParakeetEngine {
 
         // HuggingFace base URL for Parakeet models (version-specific)
         let base_url = if model_name.contains("-v2-") {
-            "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/main"
+            "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/main".to_string()
         } else {
-            // Default to v3 for v3 models
-            "https://meetily.towardsgeneralintelligence.com/models/parakeet-tdt-0.6b-v3-onnx"
+            parakeet_v3_base_url()
         };
 
         // Determine which files to download based on quantization
@@ -656,13 +771,9 @@ impl ParakeetEngine {
                         ("vocab.txt", 9_380u64),                           // 9.38 KB
                     ].iter().cloned().collect()
                 } else {
-                    // V3 model sizes (default)
-                    [
-                        ("encoder-model.int8.onnx", 652_000_000u64),       // 652 MB
-                        ("decoder_joint-model.int8.onnx", 18_200_000u64),  // 18.2 MB
-                        ("nemo128.onnx", 140_000u64),                      // 140 KB
-                        ("vocab.txt", 93_900u64),                          // 93.9 KB
-                    ].iter().cloned().collect()
+                    PARAKEET_V3_INT8_FILES.iter()
+                        .map(|spec| (spec.name, spec.size))
+                        .collect()
                 }
             }
             QuantizationType::FP32 => {
@@ -717,7 +828,7 @@ impl ParakeetEngine {
             let file_path = model_dir.join(filename);
 
             // Check for existing partial file to resume
-            let existing_size: u64 = if file_path.exists() {
+            let mut existing_size: u64 = if file_path.exists() {
                 fs::metadata(&file_path).await.map(|m| m.len()).unwrap_or(0)
             } else {
                 0
@@ -725,9 +836,28 @@ impl ParakeetEngine {
 
             let expected_size = file_sizes.get(*filename).copied().unwrap_or(0);
 
-            // Skip if file is already complete (with 1% tolerance for size variations)
-            let size_tolerance = (expected_size as f64 * 0.99) as u64;
-            if existing_size >= size_tolerance && expected_size > 0 {
+            let exact_spec = exact_file_specs(model_name)
+                .and_then(|specs| specs.iter().find(|spec| spec.name == *filename))
+                .copied();
+
+            // Reuse an existing file only after exact checksum validation for pinned v3 assets.
+            let existing_file_is_complete = if let Some(spec) = exact_spec {
+                if existing_size == spec.size && verify_exact_file(&file_path, spec).await.is_ok() {
+                    true
+                } else {
+                    if file_path.exists() {
+                        fs::remove_file(&file_path).await.map_err(|e| {
+                            anyhow!("Failed to remove invalid file {}: {}", filename, e)
+                        })?;
+                    }
+                    existing_size = 0;
+                    false
+                }
+            } else {
+                let size_tolerance = (expected_size as f64 * 0.99) as u64;
+                existing_size >= size_tolerance && expected_size > 0
+            };
+            if existing_file_is_complete {
                 log::info!(
                     "Skipping complete file: {} ({:.2} MB, expected: {:.2} MB)",
                     filename,
@@ -999,6 +1129,26 @@ impl ParakeetEngine {
 
                 return Err(anyhow!("Failed to flush file {}: {}", filename, e));
             }
+            drop(writer);
+
+            if let Some(spec) = exact_spec {
+                if let Err(e) = verify_exact_file(&file_path, spec).await {
+                    {
+                        let mut active = self.active_downloads.write().await;
+                        active.remove(model_name);
+                    }
+                    {
+                        let mut models = self.available_models.write().await;
+                        if let Some(model) = models.get_mut(model_name) {
+                            model.status = ModelStatus::Corrupted {
+                                file_size: file_downloaded,
+                                expected_min_size: spec.size,
+                            };
+                        }
+                    }
+                    return Err(e);
+                }
+            }
 
             log::info!(
                 "Completed download: {} ({:.2} MB, overall progress: {:.1}%)",
@@ -1006,6 +1156,23 @@ impl ParakeetEngine {
                 file_downloaded as f64 / 1_048_576.0,
                 (total_downloaded as f64 / total_size_bytes as f64) * 100.0
             );
+        }
+
+        if let Err(e) = self.validate_model_directory(model_dir).await {
+            {
+                let mut active = self.active_downloads.write().await;
+                active.remove(model_name);
+            }
+            {
+                let mut models = self.available_models.write().await;
+                if let Some(model) = models.get_mut(model_name) {
+                    model.status = ModelStatus::Corrupted {
+                        file_size: total_downloaded,
+                        expected_min_size: total_size_bytes,
+                    };
+                }
+            }
+            return Err(anyhow!("Downloaded model failed integrity verification: {}", e));
         }
 
         // Report 100% progress with final speed
@@ -1084,5 +1251,38 @@ impl ParakeetEngine {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn v3_download_url_is_pinned_to_a_revision() {
+        assert_eq!(
+            parakeet_v3_base_url(),
+            "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce"
+        );
+        assert_eq!(PARAKEET_V3_INT8_FILES.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn checksum_mismatch_removes_corrupted_file() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let file_path = temp_dir.path().join("model.onnx");
+        std::fs::write(&file_path, b"hello").expect("write test model");
+        let spec = ModelFileSpec {
+            name: "model.onnx",
+            size: 5,
+            sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+        };
+
+        let error = verify_exact_file(&file_path, spec)
+            .await
+            .expect_err("checksum mismatch should fail");
+
+        assert!(error.to_string().contains("checksum mismatch"));
+        assert!(!file_path.exists());
     }
 }

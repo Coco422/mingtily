@@ -171,36 +171,52 @@ pub async fn reset_onboarding_status_cmd<R: Runtime>(
 pub async fn complete_onboarding<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
-    model: String,
+    model: Option<String>,
+    parakeet_downloaded: bool,
+    summary_downloaded: bool,
 ) -> Result<(), String> {
-    info!("Completing onboarding with builtin-ai model: {}", model);
+    info!(
+        "Completing onboarding (parakeet_downloaded={}, summary_downloaded={}, summary_model={:?})",
+        parakeet_downloaded,
+        summary_downloaded,
+        model
+    );
 
     // Step 1: Save model configuration to SQLite database FIRST
     let pool = state.db_manager.pool();
 
-    // Onboarding always uses builtin-ai (local LLM)
-    if let Err(e) = SettingsRepository::save_model_config(
-        pool,
-        "builtin-ai",
-        &model,
-        "large-v3",
-        None,
-    ).await {
-        error!("Failed to save builtin-ai model config: {}", e);
-        return Err(format!("Failed to save builtin-ai model config: {}", e));
-    }
-    info!("Saved builtin-ai model config: model={}", model);
+    // A local summary model is optional. Only select it when the user actually downloaded it.
+    let selected_summary_model = model.filter(|value| !value.trim().is_empty());
+    if summary_downloaded {
+        let selected_summary_model = selected_summary_model.as_deref().ok_or_else(|| {
+            "Summary model was marked as downloaded but no model was selected".to_string()
+        })?;
 
-    // Save transcription model config (parakeet provider) - always parakeet
-    if let Err(e) = SettingsRepository::save_transcript_config(
-        pool,
-        "parakeet",
-        crate::config::DEFAULT_PARAKEET_MODEL,
-    ).await {
-        error!("Failed to save transcription model config: {}", e);
-        return Err(format!("Failed to save transcription model config: {}", e));
+        if let Err(e) = SettingsRepository::save_model_config(
+            pool,
+            "builtin-ai",
+            selected_summary_model,
+            "large-v3",
+            None,
+        ).await {
+            error!("Failed to save builtin-ai model config: {}", e);
+            return Err(format!("Failed to save builtin-ai model config: {}", e));
+        }
+        info!("Saved builtin-ai model config: model={}", selected_summary_model);
     }
-    info!("Saved transcription model config: provider=parakeet, model={}", crate::config::DEFAULT_PARAKEET_MODEL);
+
+    // Completing onboarding never starts a download or pretends a model exists.
+    if parakeet_downloaded {
+        if let Err(e) = SettingsRepository::save_transcript_config(
+            pool,
+            "parakeet",
+            crate::config::DEFAULT_PARAKEET_MODEL,
+        ).await {
+            error!("Failed to save transcription model config: {}", e);
+            return Err(format!("Failed to save transcription model config: {}", e));
+        }
+        info!("Saved transcription model config: provider=parakeet, model={}", crate::config::DEFAULT_PARAKEET_MODEL);
+    }
 
     // Step 2: Only NOW mark onboarding as complete (after DB operations succeed)
     let mut status = load_onboarding_status(&app)
@@ -209,15 +225,19 @@ pub async fn complete_onboarding<R: Runtime>(
 
     status.completed = true;
     status.current_step = 4; // Max step (4 on macOS with permissions, 3 on other platforms)
-    status.model_status.parakeet = "downloaded".to_string();
-    status.model_status.summary = "downloaded".to_string();
-    status.model_status.selected_summary_model = Some(model.clone());
+    status.model_status.parakeet = if parakeet_downloaded { "downloaded" } else { "not_downloaded" }.to_string();
+    status.model_status.summary = if summary_downloaded { "downloaded" } else { "not_downloaded" }.to_string();
+    status.model_status.selected_summary_model = if summary_downloaded {
+        selected_summary_model.clone()
+    } else {
+        None
+    };
 
     save_onboarding_status(&app, &status)
         .await
         .map_err(|e| format!("Failed to save completed onboarding status: {}", e))?;
 
-    info!("Onboarding completed successfully with model: {}", model);
+    info!("Onboarding completed successfully");
     Ok(())
 }
 
