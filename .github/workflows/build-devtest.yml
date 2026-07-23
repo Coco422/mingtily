@@ -97,7 +97,7 @@ jobs:
         uses: swatinem/rust-cache@v2.9.1
         with:
           workspaces: ". -> target"
-          key: ${{ matrix.platform }}-${{ matrix.target }}
+          key: ${{ matrix.platform }}-${{ matrix.target }}-native-runtime-v3
 
       # Platform-specific dependencies
       - name: Install dependencies (Ubuntu 24.04)
@@ -368,6 +368,14 @@ jobs:
 
           echo "Copied llama-helper to frontend/src-tauri/binaries/llama-helper-${{ matrix.target }}${EXT}"
           ls -la frontend/src-tauri/binaries/
+
+      - name: Align MSVC runtime for native ASR libraries
+        if: contains(matrix.platform, 'windows')
+        shell: pwsh
+        run: |
+          # sherpa-onnx's Windows static archive uses /MT. Build whisper.cpp
+          # with the same runtime to avoid LNK2038/LNK2005 conflicts.
+          "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       # Build step (with code signing)
       - name: Build Tauri app (with code signing)

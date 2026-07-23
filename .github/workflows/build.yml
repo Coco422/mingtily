@@ -111,7 +111,7 @@ jobs:
         uses: swatinem/rust-cache@v2.9.1
         with:
           workspaces: ". -> target"
-          key: ${{ inputs.platform }}-${{ inputs.target }}-vulkan-v2
+          key: ${{ inputs.platform }}-${{ inputs.target }}-native-runtime-v3
 
       - name: install dependencies (ubuntu 24.04)
         if: contains(inputs.platform, 'ubuntu-24.04')
@@ -565,6 +565,14 @@ jobs:
         with:
           path: frontend/src-tauri/binaries/ffmpeg-*
           key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}    
+
+      - name: Align MSVC runtime for native ASR libraries
+        if: contains(inputs.platform, 'windows')
+        shell: pwsh
+        run: |
+          # sherpa-onnx's Windows static archive uses /MT. Build whisper.cpp
+          # with the same runtime to avoid LNK2038/LNK2005 conflicts.
+          "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build with Tauri
         id: tauri-build
