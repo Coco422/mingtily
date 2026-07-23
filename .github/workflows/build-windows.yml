@@ -504,7 +504,7 @@ jobs:
         uses: swatinem/rust-cache@v2.9.1
         with:
           workspaces: ". -> target"
-          key: windows-x64-vulkan-v3-msvc-static-crt
+          key: windows-x64-vulkan-v4-msvc-static-crt
 
       - name: Install Vulkan SDK
         uses: humbletim/install-vulkan-sdk@v1.2
@@ -670,8 +670,12 @@ jobs:
         shell: pwsh
         run: |
           # sherpa-onnx's Windows static archive uses /MT. Build whisper.cpp
-          # with the same runtime to avoid LNK2038/LNK2005 conflicts.
+          # and the Rust target with the same runtime to avoid LNK2038/LNK2005.
+          "CMAKE_POLICY_DEFAULT_CMP0091=NEW" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_C_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_CXX_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-C target-feature=+crt-static" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v1.0.0

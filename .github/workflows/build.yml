@@ -111,7 +111,7 @@ jobs:
         uses: swatinem/rust-cache@v2.9.1
         with:
           workspaces: ". -> target"
-          key: ${{ inputs.platform }}-${{ inputs.target }}-native-runtime-v3
+          key: ${{ inputs.platform }}-${{ inputs.target }}-native-runtime-v4
 
       - name: install dependencies (ubuntu 24.04)
         if: contains(inputs.platform, 'ubuntu-24.04')
@@ -571,8 +571,12 @@ jobs:
         shell: pwsh
         run: |
           # sherpa-onnx's Windows static archive uses /MT. Build whisper.cpp
-          # with the same runtime to avoid LNK2038/LNK2005 conflicts.
+          # and the Rust target with the same runtime to avoid LNK2038/LNK2005.
+          "CMAKE_POLICY_DEFAULT_CMP0091=NEW" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_C_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_CXX_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-C target-feature=+crt-static" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build with Tauri
         id: tauri-build
