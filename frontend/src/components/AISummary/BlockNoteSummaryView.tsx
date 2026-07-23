@@ -9,6 +9,7 @@ import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { blocksToMarkdownSafely } from '@/lib/blocknote-markdown';
 import "@blocknote/shadcn/style.css";
+import { useTranslation } from 'react-i18next';
 
 // Dynamically import BlockNote Editor to avoid SSR issues
 const Editor = dynamic(() => import('../BlockNoteEditor/Editor'), { ssr: false });
@@ -75,6 +76,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   meeting,
   onDirtyChange
 }, ref) => {
+  const { t } = useTranslation('errors');
   const { format, data } = detectSummaryFormat(summaryData);
   const [isDirty, setIsDirty] = useState(false);
   const [currentBlocks, setCurrentBlocks] = useState<Block[]>([]);
@@ -159,7 +161,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
       console.log('✅ Save successful');
     } catch (err) {
       console.error('❌ Save failed:', err);
-      alert('Failed to save changes. Please try again.');
+      alert(t('saveSummaryFailed'));
     } finally {
       setIsSaving(false);
     }

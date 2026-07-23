@@ -15,7 +15,8 @@
 ## Testing
 - [ ] Unit tests added/updated
 - [ ] Manual testing performed
-- [ ] All tests pass
+- [ ] `pnpm check:i18n` completed when UI copy changed
+- [ ] Relevant frontend/Rust checks pass, or missing coverage is explained
 
 ## Documentation
 - [ ] Documentation updated
@@ -26,11 +27,11 @@
 - [ ] Self-reviewed the code
 - [ ] Added comments for complex code
 - [ ] Updated README if needed
-- [ ] Branch is up to date with devtest
+- [ ] Privacy and offline-network boundaries are preserved
 - [ ] No merge conflicts
 
 ## Screenshots (if applicable)
 [Add screenshots here if your changes affect the UI]
 
 ## Additional Notes
-[Add any additional information that might be helpful for reviewers] 
+[Add any additional information that might be helpful for reviewers]

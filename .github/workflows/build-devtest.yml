@@ -52,7 +52,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
@@ -65,13 +65,13 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6.0.9
         with:
-          version: 8
+          version: 10
           run_install: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.0.0
         with:
           node-version: '20'
 
@@ -81,7 +81,7 @@ jobs:
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: Setup pnpm cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -94,10 +94,10 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@v2.9.1
         with:
           workspaces: ". -> target"
-          key: ${{ matrix.platform }}-${{ matrix.target }}
+          key: ${{ matrix.platform }}-${{ matrix.target }}-native-runtime-v4
 
       # Platform-specific dependencies
       - name: Install dependencies (Ubuntu 24.04)
@@ -177,7 +177,7 @@ jobs:
       # Windows signing setup
       - name: Setup DigiCert KeyLocker
         if: contains(matrix.platform, 'windows') && github.event.inputs.sign-build == 'true'
-        uses: digicert/ssm-code-signing@v1.1.1
+        uses: digicert/ssm-code-signing@v1.2.1
 
       - name: Setup DigiCert Environment
         if: contains(matrix.platform, 'windows') && github.event.inputs.sign-build == 'true'
@@ -354,7 +354,7 @@ jobs:
           fi
 
           # Build llama-helper from workspace root
-          cargo build --release -p llama-helper $LLAMA_FEATURES
+          cargo build --release --target "${{ matrix.target }}" -p llama-helper $LLAMA_FEATURES
 
           # Determine binary extension
           EXT=""
@@ -364,15 +364,27 @@ jobs:
 
           # Copy binary to binaries directory
           mkdir -p frontend/src-tauri/binaries
-          cp target/release/llama-helper${EXT} frontend/src-tauri/binaries/llama-helper-${{ matrix.target }}${EXT}
+          cp target/${{ matrix.target }}/release/llama-helper${EXT} frontend/src-tauri/binaries/llama-helper-${{ matrix.target }}${EXT}
 
           echo "Copied llama-helper to frontend/src-tauri/binaries/llama-helper-${{ matrix.target }}${EXT}"
           ls -la frontend/src-tauri/binaries/
 
+      - name: Align MSVC runtime for native ASR libraries
+        if: contains(matrix.platform, 'windows')
+        shell: pwsh
+        run: |
+          # sherpa-onnx's Windows static archive uses /MT. Build whisper.cpp
+          # and the Rust target with the same runtime to avoid LNK2038/LNK2005.
+          "CMAKE_POLICY_DEFAULT_CMP0091=NEW" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_C_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_CXX_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-C target-feature=+crt-static" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       # Build step (with code signing)
       - name: Build Tauri app (with code signing)
         if: github.event.inputs.sign-build == 'true'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS platform code signing
@@ -383,32 +395,16 @@ jobs:
           APPLE_CERTIFICATE: ${{ contains(matrix.platform, 'macos') && secrets.APPLE_CERTIFICATE || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ contains(matrix.platform, 'macos') && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ contains(matrix.platform, 'macos') && env.CERT_ID || '' }}
-          # Tauri updater signing (ALWAYS enabled for .sig files)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # License validation RSA public key (embedded at build time)
-          MEETILY_RSA_PUBLIC_KEY: ${{ secrets.MEETILY_RSA_PUBLIC_KEY }}
-          # Supabase configuration (for online license verification)
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         with:
           projectPath: frontend
           args: ${{ matrix.args }} ${{ steps.build-features.outputs.features }}
 
-      # Build step (without code signing - updater signing only)
+      # Build step (without platform code signing)
       - name: Build Tauri app (unsigned)
         if: github.event.inputs.sign-build != 'true'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Tauri updater signing (ALWAYS enabled for .sig files)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # License validation RSA public key (embedded at build time)
-          MEETILY_RSA_PUBLIC_KEY: ${{ secrets.MEETILY_RSA_PUBLIC_KEY }}
-          # Supabase configuration (for online license verification)
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         with:
           projectPath: frontend
           args: ${{ matrix.args }} ${{ steps.build-features.outputs.features }}
@@ -470,18 +466,14 @@ jobs:
       # Upload artifacts
       - name: Upload artifacts
         if: github.event.inputs.upload-artifacts == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
-          name: meetily-devtest-${{ matrix.platform-name }}-${{ matrix.target }}-${{ steps.get-version.outputs.version }}
+          name: mingtily-devtest-${{ matrix.platform-name }}-${{ matrix.target }}-${{ steps.get-version.outputs.version }}
           path: |
             target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             target/aarch64-apple-darwin/release/bundle/macos/*.app
-            target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
-            target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
             target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
-            target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi.sig
             target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-            target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
             target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
             target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
             target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm

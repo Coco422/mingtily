@@ -1,11 +1,11 @@
 # Legacy Backend Archive
 
 This directory contains the archived Python/FastAPI, Docker, and standalone
-whisper-server backend implementation from older Meetily releases.
+whisper-server backend implementation from older upstream releases.
 
 ## Current Supported Architecture
 
-Meetily no longer uses this backend as the supported application path. The
+Mingtily does not use this backend as the supported application path. The
 current app is a self-contained Tauri desktop application:
 
 - Next.js provides the desktop UI from `frontend/src`.
@@ -14,11 +14,11 @@ current app is a self-contained Tauri desktop application:
 - Local transcription, meeting storage, and summary workflows are handled by
   the bundled desktop app rather than a separate FastAPI service.
 
-Use these docs for supported setup and development:
+Use these documents for supported setup and development:
 
 - [Top-level README](../README.md)
-- [Building from Source](../docs/BUILDING.md)
-- [Architecture](../docs/architecture.md)
+- [Roadmap](../ROADMAP.md)
+- [Project rules](../AGENTS.md)
 
 ## Status of This Directory
 

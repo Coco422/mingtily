@@ -60,6 +60,14 @@ export function normaliseLanguageCode(raw: string | null | undefined): string | 
   return null;
 }
 
-export function labelForCode(code: string): string {
+export function labelForCode(code: string, locale?: string): string {
+  if (locale) {
+    try {
+      const localized = new Intl.DisplayNames([locale], { type: 'language' }).of(code);
+      if (localized) return localized;
+    } catch {
+      // Fall through to the bundled English label for unsupported runtimes/codes.
+    }
+  }
   return LANGUAGE_OPTIONS.find((l) => l.code === code)?.label ?? code;
 }

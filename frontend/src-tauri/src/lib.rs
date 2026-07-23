@@ -35,27 +35,28 @@ pub(crate) use perf_trace;
 // Re-export async logging macros for external use (removed due to macro conflicts)
 
 // Declare audio module
-pub mod analytics;
+pub mod anthropic;
 pub mod api;
 pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod groq;
+pub mod localization;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
-pub mod anthropic;
-pub mod groq;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod speaker_diarization;
 pub mod state;
 pub mod summary;
 pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
 
-use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
+use audio::{list_audio_devices, trigger_audio_permission, AudioDevice};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
@@ -124,10 +125,7 @@ async fn start_recording<R: Runtime>(
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording started notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording started notification: {}", e);
             } else {
                 log_info!("Successfully showed recording started notification");
             }
@@ -185,10 +183,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording stopped notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording stopped notification: {}", e);
             } else {
                 log_info!("Successfully showed recording stopped notification");
             }
@@ -277,8 +272,6 @@ async fn is_audio_level_monitoring() -> bool {
     audio::simple_level_monitor::is_monitoring()
 }
 
-// Analytics commands are now handled by analytics::commands module
-
 // Whisper commands are now handled by whisper_engine::commands module
 
 #[tauri::command]
@@ -301,6 +294,11 @@ async fn start_recording_with_devices<R: Runtime>(
     system_device_name: Option<String>,
 ) -> Result<(), String> {
     start_recording_with_devices_and_meeting(app, mic_device_name, system_device_name, None).await
+}
+
+#[tauri::command]
+async fn validate_transcription_model_ready<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    audio::transcription::validate_transcription_model_ready(&app).await
 }
 
 #[tauri::command]
@@ -357,10 +355,7 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording started notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording started notification: {}", e);
             }
 
             Ok(())
@@ -409,14 +404,14 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
-        .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
+        .manage(summary::summary_engine::ModelManagerState(Arc::new(
+            tokio::sync::Mutex::new(None),
+        )))
         .setup(|_app| {
             log::info!("Application setup complete");
 
@@ -430,7 +425,11 @@ pub fn run() {
             let app_for_notif = _app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let notif_state = app_for_notif.state::<NotificationManagerState<tauri::Wry>>();
-                match notifications::commands::initialize_notification_manager(app_for_notif.clone()).await {
+                match notifications::commands::initialize_notification_manager(
+                    app_for_notif.clone(),
+                )
+                .await
+                {
                     Ok(manager) => {
                         // Set default consent and permissions on first launch
                         if let Err(e) = manager.set_consent(true).await {
@@ -474,7 +473,11 @@ pub fn run() {
             // Initialize ModelManager for summary engine (async, non-blocking)
             let app_handle_for_model_manager = _app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                match summary::summary_engine::commands::init_model_manager_at_startup(&app_handle_for_model_manager).await {
+                match summary::summary_engine::commands::init_model_manager_at_startup(
+                    &app_handle_for_model_manager,
+                )
+                .await
+                {
                     Ok(_) => log::info!("ModelManager initialized successfully at startup"),
                     Err(e) => {
                         log::warn!("Failed to initialize ModelManager at startup: {}", e);
@@ -503,7 +506,10 @@ pub fn run() {
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
                 let templates_dir = resource_path.join("templates");
-                log::info!("Setting bundled templates directory to: {:?}", templates_dir);
+                log::info!(
+                    "Setting bundled templates directory to: {:?}",
+                    templates_dir
+                );
                 summary::templates::set_bundled_templates_dir(templates_dir);
             } else {
                 log::warn!("Failed to resolve resource directory for templates");
@@ -530,31 +536,6 @@ pub fn run() {
             get_transcription_status,
             read_audio_file,
             save_transcript,
-            analytics::commands::init_analytics,
-            analytics::commands::disable_analytics,
-            analytics::commands::track_event,
-            analytics::commands::identify_user,
-            analytics::commands::track_meeting_started,
-            analytics::commands::track_recording_started,
-            analytics::commands::track_recording_stopped,
-            analytics::commands::track_meeting_deleted,
-            analytics::commands::track_settings_changed,
-            analytics::commands::track_feature_used,
-            analytics::commands::is_analytics_enabled,
-            analytics::commands::start_analytics_session,
-            analytics::commands::end_analytics_session,
-            analytics::commands::track_daily_active_user,
-            analytics::commands::track_user_first_launch,
-            analytics::commands::is_analytics_session_active,
-            analytics::commands::track_summary_generation_started,
-            analytics::commands::track_summary_generation_completed,
-            analytics::commands::track_summary_regenerated,
-            analytics::commands::track_model_changed,
-            analytics::commands::track_custom_prompt_used,
-            analytics::commands::track_meeting_ended,
-            analytics::commands::track_analytics_enabled,
-            analytics::commands::track_analytics_disabled,
-            analytics::commands::track_analytics_transparency_viewed,
             whisper_engine::commands::whisper_init,
             whisper_engine::commands::whisper_get_available_models,
             whisper_engine::commands::whisper_load_model,
@@ -582,6 +563,15 @@ pub fn run() {
             parakeet_engine::commands::parakeet_cancel_download,
             parakeet_engine::commands::parakeet_delete_corrupted_model,
             parakeet_engine::commands::open_parakeet_models_folder,
+            // Speaker diarization model commands
+            speaker_diarization::commands::speaker_diarization_get_config,
+            speaker_diarization::commands::speaker_diarization_save_config,
+            speaker_diarization::commands::speaker_diarization_get_status,
+            speaker_diarization::commands::speaker_diarization_download_model,
+            speaker_diarization::commands::speaker_diarization_delete_model,
+            // UI localization commands
+            localization::get_ui_locale,
+            localization::set_ui_locale,
             // Parallel processing commands
             whisper_engine::parallel_commands::initialize_parallel_processor,
             whisper_engine::parallel_commands::start_parallel_processing,
@@ -598,6 +588,7 @@ pub fn run() {
             trigger_microphone_permission,
             start_recording_with_devices,
             start_recording_with_devices_and_meeting,
+            validate_transcription_model_ready,
             start_audio_level_monitoring,
             stop_audio_level_monitoring,
             is_audio_level_monitoring,
@@ -720,11 +711,6 @@ pub fn run() {
             audio::permissions::trigger_system_audio_permission_command,
             // Database import commands
             database::commands::check_first_launch,
-            database::commands::select_legacy_database_path,
-            database::commands::detect_legacy_database,
-            database::commands::check_default_legacy_database,
-            database::commands::check_homebrew_database,
-            database::commands::import_and_initialize_database,
             database::commands::initialize_fresh_database,
             // Database and Models path commands
             database::commands::get_database_directory,
@@ -769,7 +755,9 @@ pub fn run() {
                                 log::info!("Database cleanup completed successfully");
                             }
                         } else {
-                            log::warn!("AppState not available for database cleanup (likely first launch)");
+                            log::warn!(
+                                "AppState not available for database cleanup (likely first launch)"
+                            );
                         }
 
                         // Clean up sidecar

@@ -19,7 +19,7 @@ on:
       asset-prefix:
         required: false
         type: string
-        default: "meetily"
+        default: "mingtily"
       asset-name-pattern:
         required: false
         type: string
@@ -51,7 +51,7 @@ jobs:
     runs-on: ${{ inputs.platform }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           repository: ${{ inputs.repository }}
           ref: ${{ inputs.ref }}
@@ -78,13 +78,13 @@ jobs:
           fi
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6.0.9
         with:
-          version: 8
+          version: 10
           run_install: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.0.0
         with:
           node-version: '20'
 
@@ -94,7 +94,7 @@ jobs:
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: Setup pnpm cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -108,10 +108,10 @@ jobs:
           targets: ${{ contains(inputs.platform, 'macos') && 'aarch64-apple-darwin' || '' }}
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@v2.9.1
         with:
           workspaces: ". -> target"
-          key: ${{ inputs.platform }}-${{ inputs.target }}-vulkan-v2
+          key: ${{ inputs.platform }}-${{ inputs.target }}-native-runtime-v4
 
       - name: install dependencies (ubuntu 24.04)
         if: contains(inputs.platform, 'ubuntu-24.04')
@@ -283,7 +283,7 @@ jobs:
 
       - name: Setup DigiCert KeyLocker
         if: contains(inputs.platform, 'windows') && inputs.sign-binaries
-        uses: digicert/ssm-code-signing@v1.1.1
+        uses: digicert/ssm-code-signing@v1.2.1
 
       - name: Sync Certificate to Windows Certificate Store
         if: contains(inputs.platform, 'windows') && inputs.sign-binaries
@@ -380,7 +380,7 @@ jobs:
           # Check environment variables
           Write-Host "Environment Variables:"
           Write-Host "  SM_HOST: $env:SM_HOST"
-          Write-Host "  SM_API_KEY: $($env:SM_API_KEY.Substring(0, [Math]::Min(20, $env:SM_API_KEY.Length)))..."
+          Write-Host "  SM_API_KEY: $(if ($env:SM_API_KEY) { '***SET***' } else { 'NOT SET' })"
           Write-Host "  SM_CLIENT_CERT_FILE: $env:SM_CLIENT_CERT_FILE"
           Write-Host "  SM_CLIENT_CERT_PASSWORD: $(if ($env:SM_CLIENT_CERT_PASSWORD) { '***SET***' } else { 'NOT SET' })"
           Write-Host ""
@@ -515,7 +515,7 @@ jobs:
           # llama-helper is for LLM inference and works fine on CPU
           Write-Host "Building llama-helper sidecar (CPU-only)..."
 
-          cargo build --release -p llama-helper
+          cargo build --release --target "${{ inputs.target }}" -p llama-helper
 
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Failed to build llama-helper"
@@ -524,7 +524,7 @@ jobs:
 
           # Copy binary to binaries directory
           New-Item -ItemType Directory -Force -Path "frontend/src-tauri/binaries" | Out-Null
-          Copy-Item "target/release/llama-helper.exe" -Destination "frontend/src-tauri/binaries/llama-helper-x86_64-pc-windows-msvc.exe"
+          Copy-Item "target/${{ inputs.target }}/release/llama-helper.exe" -Destination "frontend/src-tauri/binaries/llama-helper-${{ inputs.target }}.exe"
 
           Write-Host "Copied llama-helper to frontend/src-tauri/binaries/"
           Get-ChildItem "frontend/src-tauri/binaries/"
@@ -544,31 +544,43 @@ jobs:
             echo "Using CPU-only mode for Linux"
           fi
 
-          # Build llama-helper from workspace root
-          cargo build --release -p llama-helper $LLAMA_FEATURES
-
-          # Determine target triple and binary extension
+          # Determine target triple
           TARGET="${{ inputs.target }}"
           if [[ -z "$TARGET" ]]; then
             TARGET=$(rustc -vV | grep "host:" | awk '{print $2}')
           fi
 
+          # Build llama-helper for the same architecture as the Tauri bundle
+          cargo build --release --target "$TARGET" -p llama-helper $LLAMA_FEATURES
+
           # Copy binary to binaries directory
           mkdir -p frontend/src-tauri/binaries
-          cp target/release/llama-helper frontend/src-tauri/binaries/llama-helper-${TARGET}
+          cp target/${TARGET}/release/llama-helper frontend/src-tauri/binaries/llama-helper-${TARGET}
 
           echo "Copied llama-helper to frontend/src-tauri/binaries/llama-helper-${TARGET}"
           ls -la frontend/src-tauri/binaries/
 
       - name: Cache FFmpeg binary
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: frontend/src-tauri/binaries/ffmpeg-*
           key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}    
 
+      - name: Align MSVC runtime for native ASR libraries
+        if: contains(inputs.platform, 'windows')
+        shell: pwsh
+        run: |
+          # sherpa-onnx's Windows static archive uses /MT. Build whisper.cpp
+          # and the Rust target with the same runtime to avoid LNK2038/LNK2005.
+          "CMAKE_POLICY_DEFAULT_CMP0091=NEW" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_C_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_CXX_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-C target-feature=+crt-static" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build with Tauri
         id: tauri-build
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_ID: ${{ inputs.sign-binaries && secrets.APPLE_ID || '' }}
@@ -578,31 +590,21 @@ jobs:
           APPLE_CERTIFICATE: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
-          # Tauri updater signing (ALWAYS enabled for .sig files)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # License validation RSA public key (embedded at build time)
-          MEETILY_RSA_PUBLIC_KEY: ${{ secrets.MEETILY_RSA_PUBLIC_KEY }}
-          # Supabase configuration (for online license verification)
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         with:
           projectPath: frontend
           tagName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
-          releaseName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
+          releaseName: ${{ inputs.release-id && format('Mingtily v{0}', steps.get-version.outputs.version) || '' }}
           releaseId: ${{ inputs.release-id }}
           args: ${{ inputs.build-args }} ${{ steps.build-features.outputs.features }}
 
       - name: Upload artifacts (macOS)
         if: inputs.upload-artifacts && contains(inputs.platform, 'macos')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ inputs.asset-prefix }}-${{ inputs.target }}
           path: |
             target/${{ inputs.target }}/${{ steps.build-profile.outputs.profile }}/bundle/dmg/*.dmg
             target/${{ inputs.target }}/${{ steps.build-profile.outputs.profile }}/bundle/macos/*.app
-            target/${{ inputs.target }}/${{ steps.build-profile.outputs.profile }}/bundle/macos/*.app.tar.gz
-            target/${{ inputs.target }}/${{ steps.build-profile.outputs.profile }}/bundle/macos/*.app.tar.gz.sig
           retention-days: 30
 
       - name: Install FUSE for AppImage processing
@@ -658,7 +660,7 @@ jobs:
 
       - name: Upload artifacts (Linux)
         if: inputs.upload-artifacts && contains(inputs.platform, 'ubuntu')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ inputs.asset-prefix }}-${{ inputs.platform }}-${{ inputs.target }}
           path: |
@@ -669,12 +671,10 @@ jobs:
 
       - name: Upload artifacts (Windows)
         if: inputs.upload-artifacts && contains(inputs.platform, 'windows')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ inputs.asset-prefix }}-${{ inputs.target }}
           path: |
             target/${{ steps.build-profile.outputs.profile }}/bundle/msi/*.msi
-            target/${{ steps.build-profile.outputs.profile }}/bundle/msi/*.msi.sig
             target/${{ steps.build-profile.outputs.profile }}/bundle/nsis/*.exe
-            target/${{ steps.build-profile.outputs.profile }}/bundle/nsis/*.exe.sig
           retention-days: 30

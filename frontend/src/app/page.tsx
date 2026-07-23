@@ -9,7 +9,6 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { StatusOverlays } from '@/app/_components/StatusOverlays';
-import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
 import { TranscriptPanel } from './_components/TranscriptPanel';
 import { useModalState } from '@/hooks/useModalState';
@@ -21,8 +20,10 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { useTranslation } from 'react-i18next';
 
 export default function Home() {
+  const { t } = useTranslation(['meeting', 'errors']);
   // Local page state (not moved to contexts)
   const [isRecording, setIsRecordingState] = useState(false);
   const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
@@ -61,11 +62,6 @@ export default function Home() {
   } = useTranscriptRecovery();
 
   const router = useRouter();
-
-  useEffect(() => {
-    // Track page view
-    Analytics.trackPageView('home');
-  }, []);
 
   // Startup recovery check
   useEffect(() => {
@@ -124,12 +120,12 @@ export default function Home() {
       const result = await recoverMeeting(meetingId);
 
       if (result.success) {
-        toast.success('Meeting recovered successfully!', {
+        toast.success(t('meeting:recovered'), {
           description: result.audioRecoveryStatus?.status === 'success'
-            ? 'Transcripts and audio recovered'
-            : 'Transcripts recovered (no audio available)',
+            ? t('meeting:recoveryWithAudio')
+            : t('meeting:recoveryWithoutAudio'),
           action: result.meetingId ? {
-            label: 'View Meeting',
+            label: t('meeting:viewMeeting'),
             onClick: () => {
               router.push(`/meeting-details?id=${result.meetingId}`);
             }
@@ -153,8 +149,8 @@ export default function Home() {
         }
       }
     } catch (error) {
-      toast.error('Failed to recover meeting', {
-        description: error instanceof Error ? error.message : 'Unknown error occurred',
+      toast.error(t('errors:recoverFailed'), {
+        description: error instanceof Error ? error.message : t('errors:unknown'),
       });
       throw error;
     }

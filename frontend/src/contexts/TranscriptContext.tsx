@@ -7,6 +7,9 @@ import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { indexedDBService } from '@/services/indexedDBService';
+import { formatSpeakerLabel } from '@/lib/speaker-label';
+import { trackSpeakerLabelRefinement } from '@/lib/speaker-label-refinement';
+import { useTranslation } from 'react-i18next';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -25,6 +28,7 @@ interface TranscriptContextType {
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
 
 export function TranscriptProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation(['recording', 'errors', 'common']);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
@@ -37,6 +41,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   const isUserAtBottomRef = useRef<boolean>(true);
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
   const finalFlushRef = useRef<(() => void) | null>(null);
+  const speakerWarningShownRef = useRef(false);
 
   // Keep ref updated with current transcripts
   useEffect(() => {
@@ -177,6 +182,62 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
   }, [currentMeetingId]);
 
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    const setup = async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      unlisten = await listen<{ labels: Array<{ sequence_id: number; speaker?: string | null }> }>(
+        'speaker-labels-refined',
+        ({ payload }) => {
+          trackSpeakerLabelRefinement((async () => {
+            const bySequence = new Map(payload.labels.map(label => [label.sequence_id, label.speaker ?? null]));
+            const refined = transcriptsRef.current.map(transcript => {
+              if (transcript.sequence_id === undefined || !bySequence.has(transcript.sequence_id)) {
+                return transcript;
+              }
+              return {
+                ...transcript,
+                speaker: bySequence.get(transcript.sequence_id) ?? null,
+                speaker_is_provisional: false,
+              };
+            });
+            transcriptsRef.current = refined;
+            setTranscripts(refined);
+
+            const meetingId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
+            if (meetingId) {
+              await indexedDBService.updateSpeakerLabels(meetingId, payload.labels);
+            }
+          })());
+        }
+      );
+    };
+    setup().catch(error => console.warn('Failed to listen for refined speaker labels:', error));
+    return () => unlisten?.();
+  }, [currentMeetingId]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    const setup = async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      unlisten = await listen<{ reason?: string; error?: string }>(
+        'speaker-diarization-warning',
+        ({ payload }) => {
+          if (speakerWarningShownRef.current) return;
+          speakerWarningShownRef.current = true;
+          const inferenceFailed = payload.reason === 'inference-failed';
+          toast.warning(t('recording:speakerUnavailable'), {
+            description: inferenceFailed
+              ? t('recording:speakerInferenceFallback')
+              : t('recording:speakerModelFallback'),
+          });
+        }
+      );
+    };
+    setup().catch(error => console.warn('Failed to listen for speaker warnings:', error));
+    return () => unlisten?.();
+  }, [t]);
+
   // Main transcript buffering logic with sequence_id ordering
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
@@ -315,6 +376,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             audio_start_time: update.audio_start_time,
             audio_end_time: update.audio_end_time,
             duration: update.duration,
+            speaker: update.speaker,
+            speaker_is_provisional: update.speaker_is_provisional,
           };
 
           // Add to buffer
@@ -338,7 +401,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
-        alert('Failed to setup transcript listener. Check console for details.');
+        alert(t('errors:transcriptListenerFailed'));
       }
     };
 
@@ -356,7 +419,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
       }
     };
-  }, [currentMeetingId]); // Add currentMeetingId dependency
+  }, [currentMeetingId, t]); // Add currentMeetingId dependency
 
   // Sync transcript history and meeting name from backend on reload
   // This fixes the issue where reloading during active recording causes state desync
@@ -383,6 +446,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             audio_start_time: segment.audio_start_time,
             audio_end_time: segment.audio_end_time,
             duration: segment.duration,
+            speaker: segment.speaker,
+            speaker_is_provisional: segment.speaker_is_provisional ?? false,
           }));
 
           setTranscripts(formattedTranscripts);
@@ -424,6 +489,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       audio_start_time: update.audio_start_time,
       audio_end_time: update.audio_end_time,
       duration: update.duration,
+      speaker: update.speaker,
+      speaker_is_provisional: update.speaker_is_provisional,
     };
 
     setTranscripts(prev => {
@@ -465,12 +532,15 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
 
     const fullTranscript = transcripts
-      .map(t => `${formatTime(t.audio_start_time)} ${t.text}`)
+      .map(segment => {
+        const speaker = formatSpeakerLabel(segment.speaker, t);
+        return `${formatTime(segment.audio_start_time)} ${speaker ? `${speaker}: ` : ''}${segment.text}`;
+      })
       .join('\n');
     navigator.clipboard.writeText(fullTranscript);
 
-    toast.success("Transcript copied to clipboard");
-  }, [transcripts]);
+    toast.success(t('recording:copied'));
+  }, [t, transcripts]);
 
   // Force flush buffer (for final transcript processing)
   const flushBuffer = useCallback(() => {

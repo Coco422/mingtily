@@ -1,16 +1,16 @@
 // Audio file decoder for retranscription feature
-// Uses Symphonia to decode MP4/AAC audio files, with ffmpeg fallback for
-// formats Symphonia can't handle (MKV, WebM, WMA)
+// Uses Symphonia to decode supported audio files, with ffmpeg fallback for
+// containers or codecs Symphonia can't handle.
 
 use anyhow::{anyhow, Result};
 use log::{debug, error, info, warn};
 use rayon::prelude::*;
-use std::borrow::Cow;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
@@ -50,7 +50,10 @@ impl DecodedAudio {
     }
 
     /// Convert decoded audio to Whisper format with optional progress callback
-    pub fn to_whisper_format_with_progress(&self, progress_callback: Option<ProgressCallback>) -> Vec<f32> {
+    pub fn to_whisper_format_with_progress(
+        &self,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Vec<f32> {
         // Step 1: Convert to mono if needed
         let mono_samples = if self.channels > 1 {
             info!(
@@ -84,7 +87,12 @@ impl DecodedAudio {
                     self.sample_rate,
                     WHISPER_SAMPLE_RATE
                 );
-                chunked_resample_with_progress(&mono_samples, self.sample_rate, WHISPER_SAMPLE_RATE, progress_callback)
+                chunked_resample_with_progress(
+                    &mono_samples,
+                    self.sample_rate,
+                    WHISPER_SAMPLE_RATE,
+                    progress_callback,
+                )
             } else {
                 info!(
                     "Resampling {} samples from {}Hz to {}Hz",
@@ -261,12 +269,17 @@ fn normalize_audio_samples(mut samples: Vec<f32>) -> Vec<f32> {
     samples
 }
 
-/// Check if a file extension requires ffmpeg pre-conversion
-fn needs_ffmpeg_conversion(path: &Path) -> bool {
+/// Check if a file extension always requires ffmpeg pre-conversion.
+fn extension_requires_ffmpeg(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .map(|ext| FFMPEG_ONLY_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+/// Unsupported codecs can still be decoded through the bundled FFmpeg binary.
+fn decoder_error_requires_ffmpeg(error: &SymphoniaError) -> bool {
+    matches!(error, SymphoniaError::Unsupported(_))
 }
 
 /// Convert an audio file to WAV using ffmpeg for formats Symphonia can't decode.
@@ -291,7 +304,7 @@ fn convert_to_wav_with_ffmpeg(
     // Create temp file in the same directory as the input to avoid cross-device issues
     let parent_dir = input_path.parent().unwrap_or_else(|| Path::new("."));
     let temp_file = tempfile::Builder::new()
-        .prefix(".meetily_decode_")
+        .prefix(".mingtily_decode_")
         .suffix(".wav")
         .tempfile_in(parent_dir)
         .map_err(|e| anyhow!("Failed to create temporary WAV file: {}", e))?;
@@ -322,10 +335,12 @@ fn convert_to_wav_with_ffmpeg(
     let mut command = Command::new(&ffmpeg_path);
     command
         .args([
-            "-i", input_str,
-            "-vn",                  // Strip video tracks
-            "-acodec", "pcm_s16le", // Output PCM WAV (Symphonia handles natively)
-            "-y",                   // Overwrite without prompt
+            "-i",
+            input_str,
+            "-vn", // Strip video tracks
+            "-acodec",
+            "pcm_s16le", // Output PCM WAV (Symphonia handles natively)
+            "-y",        // Overwrite without prompt
             output_str,
         ])
         .stdin(Stdio::null())
@@ -388,6 +403,15 @@ fn convert_to_wav_with_ffmpeg(
     Ok(temp_path)
 }
 
+/// Convert an unsupported source to a temporary WAV, then decode that WAV.
+fn decode_with_ffmpeg_fallback(
+    path: &Path,
+    progress_callback: Option<ProgressCallback>,
+) -> Result<DecodedAudio> {
+    let temp_path = convert_to_wav_with_ffmpeg(path, progress_callback.as_ref())?;
+    decode_audio_file_with_progress(temp_path.as_ref(), progress_callback)
+}
+
 /// Decode an audio file (MP4, M4A, WAV, etc.) to raw samples
 pub fn decode_audio_file(path: &Path) -> Result<DecodedAudio> {
     decode_audio_file_with_progress(path, None)
@@ -400,35 +424,25 @@ pub fn decode_audio_file_with_progress(
 ) -> Result<DecodedAudio> {
     info!("Decoding audio file: {}", path.display());
 
-    // FFmpeg pre-conversion for unsupported formats (MKV, WebM, WMA).
-    // If the file is in a format Symphonia can't decode, use ffmpeg to convert
-    // it to a temporary WAV file first, then decode the WAV with Symphonia.
-    // The _temp_wav_guard keeps the temp file alive until decoding completes,
-    // then auto-deletes it when dropped (even on error/panic).
-    let (_temp_wav_guard, decode_path): (Option<tempfile::TempPath>, Cow<'_, Path>) =
-        if needs_ffmpeg_conversion(path) {
-            info!(
-                "Format requires ffmpeg pre-conversion: .{}",
-                path.extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("unknown")
-            );
-            let temp_path = convert_to_wav_with_ffmpeg(path, progress_callback.as_ref())?;
-            let wav_path = temp_path.to_path_buf();
-            (Some(temp_path), Cow::Owned(wav_path))
-        } else {
-            (None, Cow::Borrowed(path))
-        };
+    // Known unsupported containers always need FFmpeg pre-conversion.
+    if extension_requires_ffmpeg(path) {
+        info!(
+            "Container requires ffmpeg pre-conversion: .{}",
+            path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("unknown")
+        );
+        return decode_with_ffmpeg_fallback(path, progress_callback);
+    }
 
-    // Open the file (use decode_path which may be the temp WAV)
-    let file = std::fs::File::open(decode_path.as_ref())
-        .map_err(|e| anyhow!("Failed to open audio file '{}': {}", decode_path.display(), e))?;
+    let file = std::fs::File::open(path)
+        .map_err(|e| anyhow!("Failed to open audio file '{}': {}", path.display(), e))?;
 
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
     // Set up format hint based on file extension
     let mut hint = Hint::new();
-    if let Some(ext) = decode_path.extension().and_then(|e| e.to_str()) {
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         hint.with_extension(ext);
     }
 
@@ -471,19 +485,31 @@ pub fn decode_audio_file_with_progress(
     );
 
     // Create the decoder
-    let mut decoder = symphonia::default::get_codecs()
+    let mut decoder = match symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| anyhow!("Failed to create decoder: {}", e))?;
+    {
+        Ok(decoder) => decoder,
+        Err(e) if decoder_error_requires_ffmpeg(&e) => {
+            info!(
+                "Codec {} is not supported by Symphonia; falling back to ffmpeg",
+                track.codec_params.codec
+            );
+            return decode_with_ffmpeg_fallback(path, progress_callback);
+        }
+        Err(e) => return Err(anyhow!("Failed to create decoder: {}", e)),
+    };
 
     // Decode all packets
     let mut all_samples: Vec<f32> = Vec::new();
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
 
     // Calculate expected samples for progress tracking
-    let expected_duration = track.codec_params.n_frames
+    let expected_duration = track
+        .codec_params
+        .n_frames
         .map(|frames| frames as f64 / sample_rate as f64);
-    let expected_samples = expected_duration
-        .map(|dur| (dur * sample_rate as f64 * channels as f64) as usize);
+    let expected_samples =
+        expected_duration.map(|dur| (dur * sample_rate as f64 * channels as f64) as usize);
 
     let mut last_progress = 0u32;
 
@@ -535,10 +561,14 @@ pub fn decode_audio_file_with_progress(
 
                 // Emit progress updates (every 10%)
                 if let (Some(callback), Some(expected)) = (&progress_callback, expected_samples) {
-                    let current_progress = ((all_samples.len() as f64 / expected as f64) * 100.0) as u32;
+                    let current_progress =
+                        ((all_samples.len() as f64 / expected as f64) * 100.0) as u32;
                     if current_progress >= last_progress + 10 && current_progress <= 100 {
                         last_progress = current_progress;
-                        callback(current_progress, &format!("Decoding audio: {}%", current_progress));
+                        callback(
+                            current_progress,
+                            &format!("Decoding audio: {}%", current_progress),
+                        );
                     }
                 }
             }
@@ -607,7 +637,7 @@ mod tests {
 
         let result = audio.to_whisper_format();
         assert_eq!(result.len(), 2); // Should be mono now
-        // Average of (0.2, 0.4) = 0.3 and (0.6, 0.8) = 0.7
+                                     // Average of (0.2, 0.4) = 0.3 and (0.6, 0.8) = 0.7
         assert!((result[0] - 0.3).abs() < 0.001);
         assert!((result[1] - 0.7).abs() < 0.001);
     }
@@ -628,8 +658,11 @@ mod tests {
         // Output length should be approximately input_len / 3 (16000/48000 ratio)
         // 4800 / 3 = 1600
         assert!(!result.is_empty(), "Result should not be empty");
-        assert!(result.len() > 1000 && result.len() < 2000,
-            "Expected ~1600 samples, got {}", result.len());
+        assert!(
+            result.len() > 1000 && result.len() < 2000,
+            "Expected ~1600 samples, got {}",
+            result.len()
+        );
     }
 
     #[test]
@@ -804,22 +837,33 @@ mod tests {
 
     #[test]
     fn test_needs_ffmpeg_conversion() {
-        assert!(needs_ffmpeg_conversion(Path::new("video.mkv")));
-        assert!(needs_ffmpeg_conversion(Path::new("audio.webm")));
-        assert!(needs_ffmpeg_conversion(Path::new("audio.wma")));
+        assert!(extension_requires_ffmpeg(Path::new("video.mkv")));
+        assert!(extension_requires_ffmpeg(Path::new("audio.webm")));
+        assert!(extension_requires_ffmpeg(Path::new("audio.wma")));
         // Case insensitive
-        assert!(needs_ffmpeg_conversion(Path::new("meeting.MKV")));
-        assert!(needs_ffmpeg_conversion(Path::new("audio.WMA")));
-        assert!(needs_ffmpeg_conversion(Path::new("audio.WebM")));
-        // Symphonia-native formats should NOT need ffmpeg
-        assert!(!needs_ffmpeg_conversion(Path::new("audio.mp4")));
-        assert!(!needs_ffmpeg_conversion(Path::new("audio.wav")));
-        assert!(!needs_ffmpeg_conversion(Path::new("audio.mp3")));
-        assert!(!needs_ffmpeg_conversion(Path::new("audio.flac")));
-        assert!(!needs_ffmpeg_conversion(Path::new("audio.ogg")));
-        assert!(!needs_ffmpeg_conversion(Path::new("audio.aac")));
-        assert!(!needs_ffmpeg_conversion(Path::new("audio.m4a")));
+        assert!(extension_requires_ffmpeg(Path::new("meeting.MKV")));
+        assert!(extension_requires_ffmpeg(Path::new("audio.WMA")));
+        assert!(extension_requires_ffmpeg(Path::new("audio.WebM")));
+        // Symphonia-native containers are decided by their actual codec.
+        assert!(!extension_requires_ffmpeg(Path::new("audio.m4a")));
+        assert!(!extension_requires_ffmpeg(Path::new("audio.mp4")));
         // No extension
-        assert!(!needs_ffmpeg_conversion(Path::new("noext")));
+        assert!(!extension_requires_ffmpeg(Path::new("noext")));
+    }
+
+    #[test]
+    fn test_unregistered_opus_codec_requires_ffmpeg_fallback() {
+        use symphonia::core::codecs::{CodecParameters, CODEC_TYPE_OPUS};
+
+        let mut params = CodecParameters::new();
+        params.for_codec(CODEC_TYPE_OPUS);
+
+        match symphonia::default::get_codecs().make(&params, &DecoderOptions::default()) {
+            Ok(_) => panic!("Opus unexpectedly has a native Symphonia decoder"),
+            Err(error) => assert!(decoder_error_requires_ffmpeg(&error)),
+        }
+
+        let malformed = SymphoniaError::DecodeError("malformed packet");
+        assert!(!decoder_error_requires_ffmpeg(&malformed));
     }
 }

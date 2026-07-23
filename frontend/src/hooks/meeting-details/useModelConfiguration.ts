@@ -2,13 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import Analytics from '@/lib/analytics';
+import { useTranslation } from 'react-i18next';
 
 interface UseModelConfigurationProps {
   serverAddress: string | null;
 }
 
 export function useModelConfiguration({ serverAddress }: UseModelConfigurationProps) {
+  const { t } = useTranslation(['summary', 'errors']);
   // Note: No hardcoded defaults - DB is the source of truth
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
@@ -118,19 +119,6 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
       };
       console.log('Saving model config with payload:', payload);
 
-      // Track model configuration change
-      if (updatedConfig && (
-        updatedConfig.provider !== modelConfig.provider ||
-        updatedConfig.model !== modelConfig.model
-      )) {
-        await Analytics.trackModelChanged(
-          modelConfig.provider,
-          modelConfig.model,
-          updatedConfig.provider,
-          updatedConfig.model
-        );
-      }
-
       await invokeTauri('api_save_model_config', {
         provider: payload.provider,
         model: payload.model,
@@ -146,19 +134,18 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
       const { emit } = await import('@tauri-apps/api/event');
       await emit('model-config-updated', payload);
 
-      toast.success("Summary settings Saved successfully");
+      toast.success(t('summary:settingsSaved'));
 
-      await Analytics.trackSettingsChanged('model_config', `${payload.provider}_${payload.model}`);
     } catch (error) {
       console.error('Failed to save model config:', error);
-      toast.error("Failed to save summary settings", { description: String(error) });
+      toast.error(t('summary:settingsSaveFailed'), { description: String(error) });
       if (error instanceof Error) {
         setError(error.message);
       } else {
-        setError('Failed to save model config: Unknown error');
+        setError(t('errors:unknown'));
       }
     }
-  }, [modelConfig]);
+  }, [modelConfig, t]);
 
   return {
     modelConfig,

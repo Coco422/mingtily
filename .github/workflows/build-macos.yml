@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
@@ -67,13 +67,13 @@ jobs:
           fi
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6.0.9
         with:
-          version: 8
+          version: 10
           run_install: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.0.0
         with:
           node-version: '20'
 
@@ -83,7 +83,7 @@ jobs:
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: Setup pnpm cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -96,7 +96,7 @@ jobs:
           targets: aarch64-apple-darwin
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@v2.9.1
         with:
           workspaces: ". -> target"
           key: macos-latest-aarch64-apple-darwin
@@ -138,24 +138,24 @@ jobs:
       - name: Build llama-helper sidecar
         run: |
           echo "Building llama-helper sidecar with Metal support..."
-          cargo build --release -p llama-helper --features metal
+          cargo build --release --target aarch64-apple-darwin -p llama-helper --features metal
 
           # Copy binary to binaries directory
           mkdir -p frontend/src-tauri/binaries
-          cp target/release/llama-helper frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin
+          cp target/aarch64-apple-darwin/release/llama-helper frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin
 
           echo "Copied llama-helper to frontend/src-tauri/binaries/"
           ls -la frontend/src-tauri/binaries/
 
       - name: Cache FFmpeg binary
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: frontend/src-tauri/binaries/ffmpeg-*
           key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}
 
       - name: Build Tauri app (with code signing)
         if: ${{ github.event.inputs.sign-build == 'true' }}
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS code signing
@@ -166,31 +166,15 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ env.CERT_ID }}
-          # Tauri updater signing (ALWAYS enabled for .sig files)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # License validation RSA public key (embedded at build time)
-          MEETILY_RSA_PUBLIC_KEY: ${{ secrets.MEETILY_RSA_PUBLIC_KEY }}
-          # Supabase configuration (for online license verification)
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         with:
           projectPath: frontend
           args: --target aarch64-apple-darwin ${{ steps.build-profile.outputs.args }}
 
       - name: Build Tauri app (unsigned)
         if: ${{ github.event.inputs.sign-build != 'true' }}
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Tauri updater signing (ALWAYS enabled for .sig files)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # License validation RSA public key (embedded at build time)
-          MEETILY_RSA_PUBLIC_KEY: ${{ secrets.MEETILY_RSA_PUBLIC_KEY }}
-          # Supabase configuration (for online license verification)
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         with:
           projectPath: frontend
           args: --target aarch64-apple-darwin ${{ steps.build-profile.outputs.args }}
@@ -240,14 +224,12 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ github.event.inputs.upload-artifacts == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
-          name: meetily-macos-aarch64-${{ steps.build-profile.outputs.profile }}-${{ steps.get-version.outputs.version }}
+          name: mingtily-macos-aarch64-${{ steps.build-profile.outputs.profile }}-${{ steps.get-version.outputs.version }}
           path: |
             target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/dmg/*.dmg
             target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/macos/*.app
-            target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/macos/*.app.tar.gz
-            target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/macos/*.app.tar.gz.sig
           retention-days: 30
 
       - name: Generate build summary
@@ -267,14 +249,12 @@ jobs:
           echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| DMG Installers | $(find target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/dmg -name "*.dmg" 2>/dev/null | wc -l) |" >> $GITHUB_STEP_SUMMARY
           echo "| APP Bundles | $(find target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/macos -name "*.app" -type d 2>/dev/null | wc -l) |" >> $GITHUB_STEP_SUMMARY
-          echo "| APP Archives | $(find target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/macos -name "*.app.tar.gz" 2>/dev/null | wc -l) |" >> $GITHUB_STEP_SUMMARY
-          echo "| APP Signatures | $(find target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/macos -name "*.app.tar.gz.sig" 2>/dev/null | wc -l) |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "<details>" >> $GITHUB_STEP_SUMMARY
           echo "<summary>📋 File List</summary>" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          find target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle -type f \( -name "*.dmg" -o -name "*.tar.gz" -o -name "*.sig" \) 2>/dev/null >> $GITHUB_STEP_SUMMARY
+          find target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle -type f -name "*.dmg" 2>/dev/null >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "</details>" >> $GITHUB_STEP_SUMMARY

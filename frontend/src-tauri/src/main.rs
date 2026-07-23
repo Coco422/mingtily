@@ -3,8 +3,8 @@
     windows_subsystem = "windows"
 )]
 
-use log;
 use env_logger;
+use log;
 
 fn main() {
     std::env::set_var("RUST_LOG", "info");
@@ -12,5 +12,5 @@ fn main() {
 
     // Async logger will be initialized lazily when first needed (after Tauri runtime starts)
     log::info!("Starting application...");
-    app_lib::run();
+    mingtily_lib::run();
 }

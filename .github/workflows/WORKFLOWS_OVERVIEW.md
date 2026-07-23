@@ -2,9 +2,24 @@
 
 This document provides a quick overview of all available CI/CD workflows in this repository.
 
-**Note:** All workflows in this repository use **manual triggers only** (`workflow_dispatch`). There are no automatic triggers from push or pull request events.
+The lightweight `ci.yml` workflow runs automatically for pull requests and pushes to `main` or `codex/**`. Platform bundles and releases remain manually triggered.
 
 ## Workflow Files
+
+### 0. **ci.yml** - Automatic Validation
+**Purpose:** Fast, secret-free validation for normal development
+
+**Key Features:**
+- Validates `en-US` and `zh-CN` resource parity
+- Runs the Next.js production build and TypeScript checks
+- Uses no signing credentials
+
+**Triggers:**
+- Pull requests
+- Pushes to `main` and `codex/**`
+- Manual dispatch
+
+---
 
 ### 1. **build-devtest.yml** - DevTest Builds
 **Purpose:** Fast builds for development and testing
@@ -77,7 +92,7 @@ This document provides a quick overview of all available CI/CD workflows in this
 **Key Features:**
 - Support for Ubuntu 22.04 and 24.04
 - Multiple bundle formats (DEB, AppImage, RPM)
-- Tauri updater signing
+- Package verification without an application updater
 - AppImage compatibility fixes
 - Package verification
 
@@ -104,7 +119,7 @@ This document provides a quick overview of all available CI/CD workflows in this
 - All platforms in parallel
 - Uses reusable `build.yml` workflow
 - 30-day artifact retention
-- Artifacts prefixed with `meetily-test-`
+- Artifacts prefixed with `mingtily-test-`
 
 **Triggers:**
 - Manual dispatch only
@@ -137,7 +152,6 @@ This document provides a quick overview of all available CI/CD workflows in this
 - Version tags from `tauri.conf.json`
 - Uploads release assets
 - **macOS and Windows only** (Linux excluded from production releases)
-- Auto-generates `latest.json` for Tauri updater
 - **Auto-increment versioning**: If tag exists, auto-increments (e.g., `0.1.1` -> `0.1.1.1` -> `0.1.1.2`, up to `.100`)
 
 **Triggers:**
@@ -149,9 +163,8 @@ This document provides a quick overview of all available CI/CD workflows in this
 
 **Outputs:**
 - GitHub Release (draft)
-- macOS: DMG installer, app.tar.gz (updater), .sig
-- Windows: MSI installer (signed), NSIS installer (signed), .sig files
-- Updater manifest: latest.json
+- macOS: DMG installer
+- Windows: MSI installer (signed), NSIS installer (signed)
 - Release notes auto-generated
 
 **Version Behavior:**
@@ -238,6 +251,7 @@ build.yml (reusable)
     |-- release.yml (calls build.yml)
 
 Standalone (don't use build.yml):
+    |-- ci.yml (automatic frontend and i18n validation)
     |-- build-macos.yml
     |-- build-windows.yml
     |-- build-linux.yml
@@ -251,6 +265,7 @@ Standalone (don't use build.yml):
 
 | Workflow | Platforms | Default Signing | Speed | Retention | Use Case |
 |----------|-----------|----------------|-------|-----------|----------|
+| `ci.yml` | Ubuntu | OFF | Fast | N/A | PR and push validation |
 | `build-devtest.yml` | All | OFF | Fast | 14 days | Development |
 | `build-macos.yml` | macOS | Optional | Medium | 30 days | macOS dev |
 | `build-windows.yml` | Windows | Optional | Medium | 30 days | Windows dev |
@@ -263,19 +278,19 @@ Standalone (don't use build.yml):
 ## Artifact Naming Convention
 
 ```
-meetily-{workflow}-{platform}-{target}-{version}
+mingtily-{workflow}-{platform}-{target}-{version}
 ```
 
 **Examples:**
-- `meetily-devtest-macOS-aarch64-apple-darwin-0.1.3`
-- `meetily-test-windows-x86_64-pc-windows-msvc-0.1.3`
-- `meetily-macos-aarch64-release-0.1.3`
+- `mingtily-devtest-macOS-aarch64-apple-darwin-0.5.0`
+- `mingtily-test-windows-x86_64-pc-windows-msvc-0.5.0`
+- `mingtily-macos-aarch64-release-0.5.0`
 
 ---
 
 ## Required Secrets
 
-All workflows require these secrets to be configured:
+`ci.yml` and unsigned DevTest builds do not require signing secrets. The following secrets are needed only for the corresponding signed workflows:
 
 ### macOS Signing
 - `APPLE_CERTIFICATE` - Developer ID certificate (base64)
@@ -291,15 +306,6 @@ All workflows require these secrets to be configured:
 - `SM_CLIENT_CERT_FILE_B64` - Client cert (base64)
 - `SM_CLIENT_CERT_PASSWORD` - Client cert password
 - `SM_CODE_SIGNING_CERT_SHA1_HASH` - Certificate hash
-
-### Tauri Updater (All Platforms)
-- `TAURI_SIGNING_PRIVATE_KEY` - Ed25519 private key
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` - Key password
-
-### Application Configuration
-- `MEETILY_RSA_PUBLIC_KEY` - License validation public key
-- `SUPABASE_URL` - Online license verification
-- `SUPABASE_ANON_KEY` - Supabase anonymous key
 
 ---
 

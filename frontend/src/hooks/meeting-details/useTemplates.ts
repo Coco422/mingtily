@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import Analytics from '@/lib/analytics';
+import { useTranslation } from 'react-i18next';
 
 export function useTemplates() {
+  const { t } = useTranslation('summary');
   const [availableTemplates, setAvailableTemplates] = useState<Array<{
     id: string;
     name: string;
@@ -32,11 +33,10 @@ export function useTemplates() {
   // Handle template selection
   const handleTemplateSelection = useCallback((templateId: string, templateName: string) => {
     setSelectedTemplate(templateId);
-    toast.success('Template selected', {
-      description: `Using "${templateName}" template for summary generation`,
+    toast.success(t('templateSelected'), {
+      description: t('templateSelectedHint', { template: templateName }),
     });
-    Analytics.trackFeatureUsed('template_selected');
-  }, []);
+  }, [t]);
 
   return {
     availableTemplates,

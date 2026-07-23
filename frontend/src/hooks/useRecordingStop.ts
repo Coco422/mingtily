@@ -7,11 +7,12 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
-import Analytics from '@/lib/analytics';
+import { waitForSpeakerLabelRefinement } from '@/lib/speaker-label-refinement';
 import {
   applyPinnedSummaryLanguageToMeeting,
   detectAndCacheSummaryLanguage,
 } from '@/lib/summary-language-preferences';
+import { useTranslation } from 'react-i18next';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -32,7 +33,6 @@ interface UseRecordingStopReturn {
  * - Transcription completion polling (60s max, 500ms interval)
  * - Transcript buffer flush coordination
  * - SQLite meeting save with folder_path from sessionStorage
- * - Comprehensive analytics tracking (duration, word count, activation)
  * - Auto-navigation to meeting details
  * - Toast notifications for success/error
  * - Window exposure for Rust callbacks
@@ -41,6 +41,7 @@ export function useRecordingStop(
   setIsRecording: (value: boolean) => void,
   setIsRecordingDisabled: (value: boolean) => void
 ): UseRecordingStopReturn {
+  const { t } = useTranslation(['recording', 'meeting', 'summary', 'errors']);
   // USE global state instead
   const recordingState = useRecordingState();
   const {
@@ -146,7 +147,7 @@ export function useRecordingStop(
       console.log('Recording already stopped by RecordingControls, processing transcription...');
 
       // Wait for transcription to complete
-      setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, 'Waiting for transcription...');
+      setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, t('recording:waitingForTranscript'));
       console.log('Waiting for transcription to complete...');
 
       const MAX_WAIT_TIME = 60000; // 60 seconds maximum wait (increased for longer processing)
@@ -183,7 +184,7 @@ export function useRecordingStop(
           // Update user with current status
           if (status.chunks_in_queue > 0) {
             console.log(`Processing ${status.chunks_in_queue} remaining audio chunks...`);
-            setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, `Processing ${status.chunks_in_queue} remaining chunks...`);
+            setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, t('recording:processingRemainingChunks', { count: status.chunks_in_queue }));
           }
 
           // Wait before next check
@@ -215,7 +216,7 @@ export function useRecordingStop(
         time_since_stop: flushStartTime - stopStartTime,
         current_transcript_count: transcriptsRef.current.length
       });
-      setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, 'Flushing transcript buffer...');
+      setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, t('recording:flushingBuffer'));
       flushBuffer();
       const flushEndTime = Date.now();
       console.log('✅ Final buffer flush completed', {
@@ -235,7 +236,12 @@ export function useRecordingStop(
       // This ensures user sees all transcripts streaming in before database save
       if (isCallApi && transcriptionComplete == true) {
 
-        setStatus(RecordingStatus.SAVING, 'Saving meeting to database...');
+        setStatus(RecordingStatus.SAVING, t('recording:savingMeeting'));
+
+        // The backend emits speaker-labels-refined before recording-stopped.
+        // Wait until the frontend state and IndexedDB have applied that event
+        // before taking the final snapshot for SQLite persistence.
+        await waitForSpeakerLabelRefinement();
 
         // Get fresh transcript state (ALL transcripts including late ones)
         const freshTranscripts = [...transcriptsRef.current];
@@ -254,7 +260,7 @@ export function useRecordingStop(
 
         try {
           const responseData = await storageService.saveMeeting(
-            savedMeetingName || meetingTitle || 'New Meeting',  // PREFER savedMeetingName (backend source)
+            savedMeetingName || meetingTitle || t('meeting:untitled'),  // PREFER savedMeetingName (backend source)
             freshTranscripts,
             folderPath
           );
@@ -262,7 +268,7 @@ export function useRecordingStop(
           const meetingId = responseData.meeting_id;
           if (!meetingId) {
             console.error('No meeting_id in response:', responseData);
-            throw new Error('No meeting ID received from save operation');
+            throw new Error(t('errors:meetingIdMissing'));
           }
 
           let shouldDetectSummaryLanguage = false;
@@ -270,8 +276,8 @@ export function useRecordingStop(
             shouldDetectSummaryLanguage = !(await applyPinnedSummaryLanguageToMeeting(meetingId));
           } catch (error) {
             console.warn('Failed to apply pinned summary language preference for new meeting:', error);
-            toast.warning('Could not apply default summary language', {
-              description: 'The meeting was saved, but the default summary language was not applied.',
+            toast.warning(t('summary:defaultLanguageNotApplied'), {
+              description: t('summary:meetingLanguageNotAppliedHint'),
             });
           }
 
@@ -283,8 +289,8 @@ export function useRecordingStop(
               );
             } catch (error) {
               console.warn('Failed to detect summary language for new meeting:', error);
-              toast.warning('Could not detect summary language', {
-                description: 'The meeting was saved, but Auto could not detect the summary language.',
+              toast.warning(t('summary:languageDetectionFailed'), {
+                description: t('summary:meetingLanguageDetectionHint'),
               });
             }
           }
@@ -316,20 +322,19 @@ export function useRecordingStop(
             }
           } catch (error) {
             console.warn('Could not fetch meeting details, using ID only:', error);
-            setCurrentMeeting({ id: meetingId, title: savedMeetingName || meetingTitle || 'New Meeting' });
+            setCurrentMeeting({ id: meetingId, title: savedMeetingName || meetingTitle || t('meeting:untitled') });
           }
 
           // Mark as completed
           setStatus(RecordingStatus.COMPLETED);
 
           // Show success toast with navigation option
-          toast.success('Recording saved successfully!', {
-            description: `${freshTranscripts.length} transcript segments saved.`,
+          toast.success(t('recording:saved'), {
+            description: t('recording:savedSegments', { count: freshTranscripts.length }),
             action: {
-              label: 'View Meeting',
+              label: t('meeting:viewMeeting'),
               onClick: () => {
                 router.push(`/meeting-details?id=${meetingId}`);
-                Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
               }
             },
             duration: 10000,
@@ -339,67 +344,15 @@ export function useRecordingStop(
           setTimeout(() => {
             router.push(`/meeting-details?id=${meetingId}&source=recording`);
             clearTranscripts()
-            Analytics.trackPageView('meeting_details');
 
             // Reset to IDLE after navigation
             setStatus(RecordingStatus.IDLE);
           }, 2000);
-          // Track meeting completion analytics
-          try {
-            // Calculate meeting duration from transcript timestamps
-            let durationSeconds = 0;
-            if (freshTranscripts.length > 0 && freshTranscripts[0].audio_start_time !== undefined) {
-              // Use audio_end_time of last transcript if available
-              const lastTranscript = freshTranscripts[freshTranscripts.length - 1];
-              durationSeconds = lastTranscript.audio_end_time || lastTranscript.audio_start_time || 0;
-            }
-
-            // Calculate word count
-            const transcriptWordCount = freshTranscripts
-              .map(t => t.text.split(/\s+/).length)
-              .reduce((a, b) => a + b, 0);
-
-            // Calculate words per minute
-            const wordsPerMinute = durationSeconds > 0 ? transcriptWordCount / (durationSeconds / 60) : 0;
-
-            // Get meetings count today
-            const meetingsToday = await Analytics.getMeetingsCountToday();
-
-            // Track meeting completed
-            await Analytics.trackMeetingCompleted(meetingId, {
-              duration_seconds: durationSeconds,
-              transcript_segments: freshTranscripts.length,
-              transcript_word_count: transcriptWordCount,
-              words_per_minute: wordsPerMinute,
-              meetings_today: meetingsToday
-            });
-
-            // Update meeting count in analytics.json
-            await Analytics.updateMeetingCount();
-
-            // Check for activation (first meeting)
-            const { Store } = await import('@tauri-apps/plugin-store');
-            const store = await Store.load('analytics.json');
-            const totalMeetings = await store.get<number>('total_meetings');
-
-            if (totalMeetings === 1) {
-              const daysSinceInstall = await Analytics.calculateDaysSince('first_launch_date');
-              await Analytics.track('user_activated', {
-                meetings_count: '1',
-                days_since_install: daysSinceInstall?.toString() || 'null',
-                first_meeting_duration_seconds: durationSeconds.toString()
-              });
-            }
-          } catch (analyticsError) {
-            console.error('Failed to track meeting completion analytics:', analyticsError);
-            // Don't block user flow on analytics errors
-          }
-
         } catch (saveError) {
           console.error('Failed to save meeting to database:', saveError);
-          setStatus(RecordingStatus.ERROR, saveError instanceof Error ? saveError.message : 'Unknown error');
-          toast.error('Failed to save meeting', {
-            description: saveError instanceof Error ? saveError.message : 'Unknown error'
+          setStatus(RecordingStatus.ERROR, saveError instanceof Error ? saveError.message : t('errors:unknown'));
+          toast.error(t('recording:saveFailed'), {
+            description: saveError instanceof Error ? saveError.message : t('errors:unknown')
           });
           throw saveError;
         }
@@ -413,7 +366,7 @@ export function useRecordingStop(
       setIsRecordingDisabled(false);
     } catch (error) {
       console.error('Error in handleRecordingStop:', error);
-      setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Unknown error');
+      setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : t('errors:unknown'));
       // isRecording already set to false at function start
       setIsRecordingDisabled(false);
     } finally {
@@ -435,6 +388,7 @@ export function useRecordingStop(
     meetings,
     setIsMeetingActive,
     router,
+    t,
   ]);
 
   // Expose handleRecordingStop function to window for Rust callbacks

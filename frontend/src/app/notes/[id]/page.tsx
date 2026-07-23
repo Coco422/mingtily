@@ -1,5 +1,6 @@
 import React from 'react';
 import { Clock, Users, Calendar, Tag } from 'lucide-react';
+import { NoteNotFound } from './NoteNotFound';
 
 interface PageProps {
   params: {
@@ -129,7 +130,7 @@ Quarterly product review session with stakeholders.
   const note = sampleData[params.id as keyof typeof sampleData];
 
   if (!note) {
-    return <div className="p-8">Note not found</div>;
+    return <NoteNotFound />;
   }
 
   return (

@@ -5,7 +5,6 @@ import { Source_Sans_3 } from 'next/font/google'
 import Sidebar from '@/components/Sidebar'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
-import AnalyticsProvider from '@/components/AnalyticsProvider'
 import { Toaster, toast } from 'sonner'
 import "sonner/dist/styles.css"
 import { useState, useEffect, useCallback } from 'react'
@@ -20,11 +19,12 @@ import { OnboardingProvider } from '@/contexts/OnboardingContext'
 import { OnboardingFlow } from '@/components/onboarding'
 import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
-import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
 import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcessingProvider'
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
+import { I18nProvider } from '@/i18n/I18nProvider'
+import { useTranslation } from 'react-i18next'
 
 
 const sourceSans3 = Source_Sans_3({
@@ -46,6 +46,7 @@ function ConditionalImportDialog({
   importFilePath: string | null;
 }) {
   const { betaFeatures } = useConfig();
+  const { t } = useTranslation('recording');
 
   // Only mount ImportAudioDialog (and its hooks/listeners) when feature is enabled
   if (!betaFeatures.importAndRetranscribe) {
@@ -68,6 +69,7 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
+  const { t, i18n } = useTranslation(['recording', 'errors']);
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [onboardingCompleted, setOnboardingCompleted] = useState(false)
 
@@ -112,8 +114,8 @@ export default function RootLayout({
       console.log('[Layout] Received request-recording-toggle from tray');
 
       if (showOnboarding) {
-        toast.error("Please complete setup first", {
-          description: "You need to finish onboarding before you can start recording."
+        toast.error(t('errors:completeSetup'), {
+          description: t('errors:completeSetupDescription')
         });
       } else {
         // If in main app, forward to useRecordingStart via window event
@@ -133,8 +135,8 @@ export default function RootLayout({
     const betaFeatures = loadBetaFeatures();
 
     if (!betaFeatures.importAndRetranscribe) {
-      toast.error('Beta feature disabled', {
-        description: 'Enable "Import Audio & Retranscribe" in Settings > Beta to use this feature.'
+      toast.error(t('betaDisabled'), {
+        description: t('enableImport')
       });
       return;
     }
@@ -150,8 +152,8 @@ export default function RootLayout({
       setImportFilePath(audioFile);
       setShowImportDialog(true);
     } else if (paths.length > 0) {
-      toast.error('Please drop an audio file', {
-        description: `Supported formats: ${getAudioFormatsDisplayList()}`
+      toast.error(t('errors:audioFile'), {
+        description: t('supportedFormats', { formats: getAudioFormatsDisplayList() })
       });
     }
   }, []);
@@ -231,16 +233,15 @@ export default function RootLayout({
   }
 
   return (
-    <html lang="en">
+    <html lang={i18n.language} suppressHydrationWarning>
       <body className={`${sourceSans3.variable} font-sans antialiased`}>
-        <AnalyticsProvider>
-          <RecordingStateProvider>
+        <I18nProvider>
+        <RecordingStateProvider>
             <TranscriptProvider>
               <ConfigProvider>
                 <OllamaDownloadProvider>
                   <OnboardingProvider>
-                    <UpdateCheckProvider>
-                      <SidebarProvider>
+                    <SidebarProvider>
                         <TooltipProvider>
                           <RecordingPostProcessingProvider>
                             <ImportDialogProvider onOpen={handleOpenImportDialog}>
@@ -266,15 +267,14 @@ export default function RootLayout({
                             </ImportDialogProvider>
                           </RecordingPostProcessingProvider>
                         </TooltipProvider>
-                      </SidebarProvider>
-                    </UpdateCheckProvider>
+                    </SidebarProvider>
                   </OnboardingProvider>
 
                 </OllamaDownloadProvider>
               </ConfigProvider>
             </TranscriptProvider>
-          </RecordingStateProvider>
-        </AnalyticsProvider>
+        </RecordingStateProvider>
+        </I18nProvider>
 
         <Toaster position="bottom-center" richColors closeButton />
       </body>

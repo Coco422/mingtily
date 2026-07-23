@@ -14,14 +14,16 @@
 
 ## Environment
 - OS: [e.g., macOS, Windows, Linux]
-- Browser: [e.g., Chrome, Firefox, Safari]
-- Version: [e.g., 1.0.0]
+- Mingtily version: [e.g., 0.5.0]
+- Installation type: [local build, GitHub Actions artifact, release package]
+- Transcription Provider/model: [if relevant]
+- Speaker diarization: [enabled/disabled, if relevant]
 
 ## Screenshots
 [If applicable, add screenshots to help explain your problem]
 
 ## Additional Context
-[Add any other context about the problem here]
+[Add relevant logs or configuration details. Remove API keys, meeting content, and private file paths.]
 
 ## Possible Solution
-[If you have suggestions on how to fix the issue, please describe them here] 
+[If you have suggestions on how to fix the issue, please describe them here]
