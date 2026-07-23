@@ -1,0 +1,106 @@
+import { modelsResources } from './modelsResources';
+import { settingsResources } from './settingsResources';
+import { experienceResources } from './experienceResources';
+
+export const resources = {
+  'en-US': {
+    common: {
+      cancel: 'Cancel', close: 'Close', save: 'Save', copy: 'Copy', delete: 'Delete',
+      retry: 'Try again', loading: 'Loading…', processing: 'Processing…', language: 'Language',
+      selectLanguage: 'Select language', auto: 'Auto', model: 'Model', speakerCount: 'Speaker count',
+      autoDetect: 'Auto-detect', settings: 'Settings', recheck: 'Recheck', enabled: 'Enable', speaker: 'Speaker {{number}}', live: 'live', silence: '[Silence]',
+      openSettings: 'Open Settings', checking: 'Checking…', start: 'Start', stop: 'Stop', home: 'Home', meetingNotes: 'Meeting notes', searchMeetings: 'Search meeting content…', searching: 'Searching…', editMeeting: 'Edit meeting title', enterMeetingTitle: 'Enter a meeting title', match: 'Match:', recordingInProgress: 'Recording in progress…', about: 'About', version: 'Version {{version}}', download: 'Download', later: 'Later', done: 'Done', unknown: 'Unknown error', expandSidebar: 'Expand sidebar', collapseSidebar: 'Collapse sidebar', appLogo: 'Mingtily logo', aboutMingtily: 'About Mingtily',
+    },
+    recording: {
+      ...experienceResources['en-US'].recording,
+      start: 'Start recording', stop: 'Stop recording', pause: 'Pause recording', resume: 'Resume recording',
+      pausing: 'Pausing…', resuming: 'Resuming…', stopping: 'Stopping…', recording: 'Recording', paused: 'Paused',
+      processing: 'Processing recording…', validating: 'Validating speech recognition…',
+      finalizing: 'Finalizing transcription…', saving: 'Saving transcript…', copyTranscript: 'Copy transcript',
+      transcriptLanguage: 'Transcription language', permissionsRequired: 'Permissions required',
+      microphoneRequired: 'Microphone permission required', systemAudioRequired: 'System audio permission required',
+      openMicrophone: 'Microphone Settings', openScreenRecording: 'Screen Recording Settings',
+      micUnavailable: 'Mingtily needs microphone access to record meetings. No microphone device was detected.',
+      check: 'Please check:', micConnected: 'Your microphone is connected and powered on',
+      micPermission: 'Microphone permission is granted in System Settings', micNotBusy: 'No other app is using the microphone',
+      systemUnavailable: 'System audio capture is unavailable. You can still record your microphone, but not computer audio.',
+      systemAlsoUnavailable: 'System audio capture is also unavailable.', systemSetup: 'To enable system audio on macOS:',
+      installVirtualDevice: 'Install a virtual audio device (for example, BlackHole 2ch)',
+      grantScreenPermission: 'Grant Screen Recording permission to Mingtily', configureAudio: 'Configure audio routing in Audio MIDI Setup',
+      betaDisabled: 'Beta feature disabled', enableImport: 'Enable “Import Audio & Retranscribe” in Settings › Beta to use this feature.',
+      dropAudio: 'Drop an audio file', supportedFormats: 'Supported formats: {{formats}}',
+    },
+    meeting: {
+      ...experienceResources['en-US'].meeting,
+      modelHint: 'Choose a transcription model.',
+      languageHint: 'Choose a language for better accuracy, or keep automatic detection.',
+      speakerDisabledHint: 'Speaker diarization is turned off in Settings › Services.',
+      retranscriptionSuccess: 'Retranscription complete — {{count}} segments created.',
+      retranscriptionCancelled: 'Retranscription cancelled',
+      meetingFolderUnavailable: 'The meeting recording folder is unavailable.',
+      importAudio: 'Import audio', importing: 'Importing audio…', importFailed: 'Import failed', importComplete: 'Import complete',
+      importDescription: 'Import an audio file to create a meeting with transcripts.', processingAudio: 'Processing audio…',
+      selectAudio: 'Select audio file', chooseDifferent: 'Choose another file', meetingTitle: 'Meeting title', enterTitle: 'Enter a meeting title',
+      advanced: 'Advanced options', parakeetLanguage: 'Parakeet always detects language automatically.', loadingModels: 'Loading models…',
+      selectModel: 'Select model', speakerHint: 'Keep Auto unless you know the exact number of speakers.', import: 'Import',
+      importSuccess: 'Import complete — {{count}} segments created.', importCancelled: 'Import cancelled',
+      retransfer: 'Retranscribe', retranscribe: 'Retranscribe', retranscribeMeeting: 'Retranscribe meeting', retranscriptionFailed: 'Retranscription failed',
+      noTranscript: 'No transcript available', openFolder: 'Open recording folder', addContext: 'Add context for the AI summary, such as attendees, goals, or background…',
+      recoverTitle: 'Recover interrupted meetings', recoverDescription: 'We found {{count}} interrupted meeting(s). Select one to preview and recover.',
+      interrupted: 'Interrupted meetings', audioAvailable: 'Audio available', noAudio: 'No audio', loadingPreview: 'Loading preview…',
+      noPreview: 'No transcripts to preview', selectPreview: 'Select a meeting to preview', recover: 'Recover',
+      deleteConfirm: 'Delete this meeting? This cannot be undone.', recoverFailed: 'Could not recover the meeting. Please try again.',
+      deleteFailed: 'Could not delete the meeting. Please try again.', recovered: 'Meeting recovered successfully!', preview: 'Preview', summaryLanguage: 'Summary language', setSummaryLanguage: 'Set summary language', searchLanguage: 'Search languages…', recentlyUsed: 'Recently used', otherLanguages: 'Other languages', allLanguages: 'All languages', noLanguageMatches: 'No matching languages', savedOnDevice: 'Saved on this device', savedOnDeviceForFolderlessMeeting: 'Saved on this device for a meeting without a recording folder', usesDominantTranscriptLanguage: 'Uses the dominant transcript language', generatingSummary: 'Generating AI summary…', meetingSummary: 'Meeting summary', keyPoints: 'Key points', actionItems: 'Action items', decisions: 'Decisions', mainTopics: 'Main topics', fullSummary: 'Full summary', stopSummaryGeneration: 'Stop summary generation', generateSummary: 'Generate summary', regenerateSummary: 'Regenerate summary', summarySettings: 'Summary settings', modelSettings: 'Model settings', aiModel: 'AI model', selectSummaryTemplate: 'Select summary template', template: 'Template', saveChanges: 'Save changes', saving: 'Saving…', copySummary: 'Copy summary', recordingNotice: 'Recording notice', informParticipants: 'Inform participants that this meeting is being recorded.', usComplianceRequired: 'US compliance required', localFirstDescription: 'A local-first AI meeting recorder and transcription app. Recordings, transcripts, and local models stay on your device by default.', externalAiTitle: 'Local-first, with optional external AI', externalAiDescription: 'External LLM providers remain available as an explicit user choice. When selected, transcript content is sent only to the provider you configure for summary generation.', licenseNotice: 'Mingtily is distributed under the MIT License and includes software and model integrations from multiple upstream projects. See LICENSE.md and THIRD_PARTY_NOTICES.md for details.',
+    },
+    summary: experienceResources['en-US'].summary,
+    onboarding: {
+      ...experienceResources['en-US'].onboarding,
+      welcome: 'Welcome to Mingtily', tagline: 'Record. Transcribe. Summarize. All on your device.',
+      private: 'Your data stays on your device', insights: 'Clear summaries and useful insights', offline: 'Works offline — no cloud required',
+      getStarted: 'Get started', takesMinutes: 'Takes less than 3 minutes', permissions: 'Grant permissions',
+      permissionsDescription: 'Mingtily needs microphone and system-audio access to record meetings.', microphone: 'Microphone',
+      microphoneDescription: 'Required to capture your voice during meetings', systemAudio: 'System audio',
+      systemAudioDescription: 'Choose Enable to grant Audio Capture permission', finish: 'Finish setup', later: 'I’ll do this later',
+      permissionHint: 'Recording will not work until permissions are granted. You can enable them later in Settings.',
+      accessGranted: 'Access granted', accessDenied: 'Access denied — grant access in System Settings',
+    },
+    errors: {
+      ...experienceResources['en-US'].errors,
+      completeSetup: 'Please complete setup first', completeSetupDescription: 'Finish onboarding before starting a recording.',
+      audioFile: 'Please drop an audio file', recoverFailed: 'Failed to recover meeting', unknown: 'An unknown error occurred', noBuiltInModel: 'No built-in AI model selected', selectModelInSettings: 'Select a model in Settings.', modelNotFound: 'Model not found', modelInfoNotFound: 'Could not find information for model: {{model}}', modelDownloadInProgress: 'Model download in progress', modelDownloading: '{{model}} is downloading ({{progress}}%). Wait for the download to finish.', modelNotDownloaded: 'Model not downloaded', modelNeedsDownload: '{{model}} must be downloaded before use. Opening model settings…', modelFileCorrupted: 'Model file is corrupted', modelFileCorruptedDescription: '{{model}} is corrupted. Delete it and download it again.', modelError: 'Model error', modelNotAvailable: 'Model not available', modelNotReady: 'The selected model is not ready to use.', checkModelStatusFailed: 'Failed to check model status', noOllamaModels: 'No Ollama models found. Download gemma2:2b from Model Settings.', ollamaNotInstalled: 'Ollama is not installed', installOllama: 'Download and install Ollama to use local models.', checkOllamaModelsFailed: 'Failed to check Ollama models. Make sure Ollama is running and download a model.', summaryLanguageLoadFailed: 'Could not load saved summary language', summaryLanguageLoadFallback: 'Using Auto until meeting metadata can be read.', summaryLanguageSaveFailed: 'Failed to save summary language',
+    },
+    settings: settingsResources['en-US'],
+    models: modelsResources['en-US'],
+  },
+  'zh-CN': {
+    common: {
+      cancel: '取消', close: '关闭', save: '保存', copy: '复制', delete: '删除', retry: '重试', loading: '加载中…', processing: '处理中…', language: '语言', selectLanguage: '选择语言', auto: '自动', model: '模型', speakerCount: '说话人数', autoDetect: '自动检测', settings: '设置', recheck: '重新检查', enabled: '启用', speaker: '说话人 {{number}}', live: '实时', silence: '[静音]', openSettings: '打开设置', checking: '检查中…', start: '开始', stop: '停止', home: '主页', meetingNotes: '会议记录', searchMeetings: '搜索会议内容…', searching: '搜索中…', editMeeting: '编辑会议标题', enterMeetingTitle: '输入会议标题', match: '匹配：', recordingInProgress: '正在录音…', about: '关于', version: '版本 {{version}}', download: '下载', later: '稍后', done: '完成', unknown: '未知错误', expandSidebar: '展开侧栏', collapseSidebar: '收起侧栏', appLogo: 'Mingtily 标志', aboutMingtily: '关于 Mingtily',
+    },
+    recording: {
+      ...experienceResources['zh-CN'].recording,
+      start: '开始录音', stop: '停止录音', pause: '暂停录音', resume: '继续录音', pausing: '正在暂停…', resuming: '正在继续…', stopping: '正在停止…', recording: '录音中', paused: '已暂停', processing: '正在处理录音…', validating: '正在检查语音识别…', finalizing: '正在完成转写…', saving: '正在保存转写…', copyTranscript: '复制转写', transcriptLanguage: '转写语言', permissionsRequired: '需要权限', microphoneRequired: '需要麦克风权限', systemAudioRequired: '需要系统音频权限', openMicrophone: '麦克风设置', openScreenRecording: '屏幕录制设置', micUnavailable: 'Mingtily 需要麦克风权限来录制会议，但未检测到可用麦克风。', check: '请检查：', micConnected: '麦克风已连接并开启', micPermission: '已在系统设置中授予麦克风权限', micNotBusy: '没有其他应用正在独占麦克风', systemUnavailable: '暂时无法采集系统音频。仍可录制麦克风，但无法录制电脑声音。', systemAlsoUnavailable: '暂时也无法采集系统音频。', systemSetup: '在 macOS 上启用系统音频：', installVirtualDevice: '安装虚拟音频设备（如 BlackHole 2ch）', grantScreenPermission: '为 Mingtily 授予屏幕录制权限', configureAudio: '在“音频 MIDI 设置”中配置音频路由', betaDisabled: 'Beta 功能已关闭', enableImport: '请在“设置 › Beta”中启用“导入音频并重新转写”。', dropAudio: '拖入音频文件', supportedFormats: '支持的格式：{{formats}}',
+    },
+    meeting: {
+      ...experienceResources['zh-CN'].meeting,
+      modelHint: '选择用于本次转写的模型。',
+      languageHint: '指定语言可提高准确率；不确定时保持自动检测。',
+      speakerDisabledHint: '说话人分离已在“设置 › 服务”中关闭。',
+      retranscriptionSuccess: '重新转写完成，已生成 {{count}} 个片段。',
+      retranscriptionCancelled: '已取消重新转写',
+      meetingFolderUnavailable: '无法读取会议录音文件夹。',
+      importAudio: '导入音频', importing: '正在导入音频…', importFailed: '导入失败', importComplete: '导入完成', importDescription: '导入音频文件，创建包含转写的会议。', processingAudio: '正在处理音频…', selectAudio: '选择音频文件', chooseDifferent: '选择其他文件', meetingTitle: '会议标题', enterTitle: '输入会议标题', advanced: '高级选项', parakeetLanguage: 'Parakeet 会自动检测语言，暂不支持手动选择。', loadingModels: '正在加载模型…', selectModel: '选择模型', speakerHint: '不确定准确说话人数时，请保持“自动”。', import: '导入', importSuccess: '导入完成，已生成 {{count}} 个片段。', importCancelled: '已取消导入', retransfer: '重新转写', retranscribe: '重新转写', retranscribeMeeting: '重新转写会议', retranscriptionFailed: '重新转写失败', noTranscript: '暂无转写', openFolder: '打开录音文件夹', addContext: '补充 AI 摘要所需的背景，例如参会者、目标或会议背景…', recoverTitle: '恢复中断的会议', recoverDescription: '发现 {{count}} 个中断的会议。选择一个即可预览并恢复。', interrupted: '中断的会议', audioAvailable: '有音频', noAudio: '无音频', loadingPreview: '正在加载预览…', noPreview: '没有可预览的转写', selectPreview: '选择一个会议进行预览', recover: '恢复', deleteConfirm: '确定删除这个会议吗？此操作无法撤销。', recoverFailed: '无法恢复会议，请重试。', deleteFailed: '无法删除会议，请重试。', recovered: '会议已恢复！', preview: '预览', summaryLanguage: '摘要语言', setSummaryLanguage: '设置摘要语言', searchLanguage: '搜索语言…', recentlyUsed: '最近使用', otherLanguages: '其他语言', allLanguages: '全部语言', noLanguageMatches: '没有匹配的语言', savedOnDevice: '已保存到此设备', savedOnDeviceForFolderlessMeeting: '此会议没有录音文件夹，偏好已保存到本机', usesDominantTranscriptLanguage: '使用转写内容的主要语言', generatingSummary: '正在生成 AI 摘要…', meetingSummary: '会议摘要', keyPoints: '要点', actionItems: '待办事项', decisions: '决策', mainTopics: '主要议题', fullSummary: '完整摘要', stopSummaryGeneration: '停止生成摘要', generateSummary: '生成摘要', regenerateSummary: '重新生成摘要', summarySettings: '摘要设置', modelSettings: '模型设置', aiModel: 'AI 模型', selectSummaryTemplate: '选择摘要模板', template: '模板', saveChanges: '保存更改', saving: '保存中…', copySummary: '复制摘要', recordingNotice: '录音提示', informParticipants: '请告知参与者，本次会议正在录音。', usComplianceRequired: '需符合美国合规要求', localFirstDescription: '一款本地优先的 AI 会议录音与转写应用。默认情况下，录音、转写和本地模型都保留在你的设备上。', externalAiTitle: '本地优先，也可选用外部 AI', externalAiDescription: '外部 LLM 服务商始终是由你主动选择的选项。启用后，转写内容仅会发送给你配置用于生成摘要的服务商。', licenseNotice: 'Mingtily 以 MIT 许可证发布，并包含多个上游项目的软件及模型集成。详情请参阅 LICENSE.md 和 THIRD_PARTY_NOTICES.md。',
+    },
+    summary: experienceResources['zh-CN'].summary,
+    onboarding: {
+      ...experienceResources['zh-CN'].onboarding,
+      welcome: '欢迎使用 Mingtily', tagline: '录音、转写、总结，都在你的设备上完成。', private: '数据始终留在你的设备上', insights: '清晰总结，提炼关键信息', offline: '可离线使用，无需云端', getStarted: '开始使用', takesMinutes: '不到 3 分钟', permissions: '授予权限', permissionsDescription: 'Mingtily 需要麦克风和系统音频权限才能录制会议。', microphone: '麦克风', microphoneDescription: '用于采集会议中的人声', systemAudio: '系统音频', systemAudioDescription: '点击“启用”以授予音频采集权限', finish: '完成设置', later: '稍后再说', permissionHint: '未授予权限时无法录音。你可以稍后在设置中开启。', accessGranted: '已授权', accessDenied: '访问被拒绝，请在系统设置中授权',
+    },
+    errors: { completeSetup: '请先完成设置', completeSetupDescription: '完成引导后才能开始录音。', audioFile: '请拖入音频文件', recoverFailed: '恢复会议失败', unknown: '发生未知错误', noBuiltInModel: '未选择内置 AI 模型', selectModelInSettings: '请在设置中选择模型。', modelNotFound: '未找到模型', modelInfoNotFound: '找不到模型 {{model}} 的信息', modelDownloadInProgress: '模型正在下载', modelDownloading: '{{model}} 正在下载（{{progress}}%），请等待下载完成。', modelNotDownloaded: '模型尚未下载', modelNeedsDownload: '{{model}} 必须下载后才能使用，正在打开模型设置…', modelFileCorrupted: '模型文件已损坏', modelFileCorruptedDescription: '{{model}} 已损坏，请删除后重新下载。', modelError: '模型错误', modelNotAvailable: '模型不可用', modelNotReady: '所选模型尚未准备就绪。', checkModelStatusFailed: '检查模型状态失败', noOllamaModels: '未找到 Ollama 模型。请从“模型设置”下载 gemma2:2b。', ollamaNotInstalled: '未安装 Ollama', installOllama: '请下载并安装 Ollama 以使用本地模型。', checkOllamaModelsFailed: '检查 Ollama 模型失败。请确认 Ollama 正在运行并下载模型。', summaryLanguageLoadFailed: '无法加载已保存的摘要语言', summaryLanguageLoadFallback: '在读取会议元数据前，将暂时使用“自动”。', summaryLanguageSaveFailed: '保存摘要语言失败', },
+    settings: settingsResources['zh-CN'],
+    models: modelsResources['zh-CN'],
+  },
+} as const;
+
+Object.assign(resources['zh-CN'].errors, experienceResources['zh-CN'].errors);
+
+export type AppLocale = keyof typeof resources;

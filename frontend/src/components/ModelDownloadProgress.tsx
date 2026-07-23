@@ -1,6 +1,7 @@
 import React from 'react';
 import { ModelStatus } from '../lib/whisper';
 import { Button } from './ui/button';
+import { useTranslation } from 'react-i18next';
 
 interface ModelDownloadProgressProps {
   status: ModelStatus;
@@ -9,6 +10,7 @@ interface ModelDownloadProgressProps {
 }
 
 export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDownloadProgressProps) {
+  const { t } = useTranslation('meeting');
   if (typeof status !== 'object' || !('Downloading' in status)) {
     return null;
   }
@@ -22,7 +24,7 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
         <div className="flex items-center space-x-2">
           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
           <span className="text-sm font-medium text-blue-900">
-            {isCompleted ? 'Finalizing...' : `Downloading ${modelName}`}
+            {isCompleted ? t('finalizingDownload') : t('downloadingModel', { model: modelName })}
           </span>
         </div>
       </div>
@@ -35,16 +37,16 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
           />
         </div>
         <div className="flex justify-between text-xs text-blue-700 mt-1">
-          <span>{Math.round(progress)}% complete</span>
+          <span>{t('downloadPercentComplete', { percent: Math.round(progress) })}</span>
           {!isCompleted && (
-            <span className="animate-pulse">Downloading...</span>
+            <span className="animate-pulse">{t('downloading')}</span>
           )}
         </div>
       </div>
       
       {isCompleted && (
         <div className="mt-2 text-xs text-green-700">
-          ✓ Download completed, loading model...
+          ✓ {t('downloadCompletedLoadingModel')}
         </div>
       )}
     </div>

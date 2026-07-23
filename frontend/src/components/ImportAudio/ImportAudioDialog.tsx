@@ -37,6 +37,9 @@ import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
+import { useTranslation } from 'react-i18next';
+import { capabilityConfigService } from '@/services/capabilityConfigService';
+import { localizeAudioProgress } from '@/lib/audio-progress';
 
 
 interface ImportAudioDialogProps {
@@ -70,6 +73,7 @@ export function ImportAudioDialog({
   preselectedFile,
   onComplete,
 }: ImportAudioDialogProps) {
+  const { t, i18n } = useTranslation('meeting');
   const router = useRouter();
   const { refetchMeetings } = useSidebar();
   const { selectedLanguage, transcriptModelConfig } = useConfig();
@@ -78,6 +82,7 @@ export function ImportAudioDialog({
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [speakerCount, setSpeakerCount] = useState('auto');
+  const [speakerDiarizationEnabled, setSpeakerDiarizationEnabled] = useState(true);
   const [titleModifiedByUser, setTitleModifiedByUser] = useState(false);
 
   // Always start as false — represents "dialog has not yet been opened".
@@ -96,7 +101,7 @@ export function ImportAudioDialog({
   } = useTranscriptionModels(transcriptModelConfig);
 
   const handleImportComplete = useCallback((result: ImportResult) => {
-    toast.success(`Import complete! ${result.segments_count} segments created.`);
+    toast.success(t('importSuccess', { count: result.segments_count }));
 
     // Refresh meetings list then navigate to the imported meeting
     refetchMeetings();
@@ -106,7 +111,7 @@ export function ImportAudioDialog({
   }, [router, refetchMeetings, onComplete, onOpenChange]);
 
   const handleImportError = useCallback((error: string) => {
-    toast.error('Import failed', { description: error });
+    toast.error(t('importFailed'), { description: error });
   }, []);
 
   const {
@@ -125,6 +130,18 @@ export function ImportAudioDialog({
     onComplete: handleImportComplete,
     onError: handleImportError,
   });
+  const localizedProgress = progress
+    ? localizeAudioProgress(t, progress.stage, progress.message)
+    : null;
+  const languageNames = useMemo(
+    () => new Intl.DisplayNames([i18n.resolvedLanguage || i18n.language], { type: 'language' }),
+    [i18n.language, i18n.resolvedLanguage]
+  );
+  const languageLabel = (code: string, fallback: string) => code === 'auto'
+    ? t('common:autoDetect')
+    : code === 'auto-translate'
+      ? t('settings:services.transcription.autoTranslate')
+      : languageNames.of(code) || fallback;
 
   // Reset state only when dialog transitions from closed to open
   // This prevents re-initialization when config changes while dialog is already open (Bug #4 & #5)
@@ -141,6 +158,11 @@ export function ImportAudioDialog({
       setSelectedLang(selectedLanguage || 'auto');
       setShowAdvanced(false);
       setSpeakerCount('auto');
+
+      void capabilityConfigService.getSpeakerDiarization().then((config) => {
+        setSpeakerDiarizationEnabled(config.enabled);
+        if (!config.enabled) setSpeakerCount('auto');
+      });
 
       // Validate preselected file if provided
       if (preselectedFile) {
@@ -195,14 +217,16 @@ export function ImportAudioDialog({
       isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang,
       selectedModel?.name || null,
       selectedModel?.provider || null,
-      speakerCount === 'auto' ? null : Number.parseInt(speakerCount, 10)
+      !speakerDiarizationEnabled || speakerCount === 'auto'
+        ? null
+        : Number.parseInt(speakerCount, 10)
     );
   };
 
   const handleCancel = async () => {
     if (isProcessing) {
       await cancelImport();
-      toast.info('Import cancelled');
+      toast.info(t('importCancelled'));
     }
     onOpenChange(false);
   };
@@ -239,31 +263,31 @@ export function ImportAudioDialog({
             {isProcessing ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                Importing Audio...
+                {t('importing')}
               </>
             ) : error ? (
               <>
                 <AlertCircle className="h-5 w-5 text-red-600" />
-                Import Failed
+                {t('importFailed')}
               </>
             ) : status === 'complete' ? (
               <>
                 <CheckCircle2 className="h-5 w-5 text-green-600" />
-                Import Complete
+                {t('importComplete')}
               </>
             ) : (
               <>
                 <Upload className="h-5 w-5 text-blue-600" />
-                Import Audio File
+                {t('importAudio')}
               </>
             )}
           </DialogTitle>
           <DialogDescription>
             {isProcessing
-              ? progress?.message || 'Processing audio...'
+              ? localizedProgress?.message || t('processingAudio')
               : error
-              ? 'An error occurred during import'
-              : 'Import an audio file to create a new meeting with transcripts'}
+              ? t('importFailed')
+              : t('importDescription')}
           </DialogDescription>
         </DialogHeader>
 
@@ -293,19 +317,19 @@ export function ImportAudioDialog({
 
                   {/* Editable title */}
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-700">Meeting Title</label>
+                    <label className="text-sm font-medium text-gray-700">{t('meetingTitle')}</label>
                     <Input
                       value={title}
                       onChange={(e) => {
                         setTitle(e.target.value);
                         setTitleModifiedByUser(true);
                       }}
-                      placeholder="Enter meeting title"
+                      placeholder={t('enterTitle')}
                     />
                   </div>
 
                   <Button variant="outline" size="sm" onClick={handleSelectFile} className="w-full">
-                    Choose Different File
+                    {t('chooseDifferent')}
                   </Button>
                 </div>
               ) : (
@@ -315,12 +339,12 @@ export function ImportAudioDialog({
                     {status === 'validating' ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Validating...
+                        {t('common:checking')}
                       </>
                     ) : (
                       <>
                         <Upload className="h-4 w-4 mr-2" />
-                        Select Audio File
+                        {t('selectAudio')}
                       </>
                     )}
                   </Button>
@@ -335,7 +359,7 @@ export function ImportAudioDialog({
                     onClick={() => setShowAdvanced(!showAdvanced)}
                     className="w-full flex items-center justify-between p-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
                   >
-                    <span>Advanced Options</span>
+                    <span>{t('advanced')}</span>
                     {showAdvanced ? (
                       <ChevronUp className="h-4 w-4" />
                     ) : (
@@ -350,16 +374,16 @@ export function ImportAudioDialog({
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Globe className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Language</span>
+                            <span className="text-sm font-medium">{t('common:language')}</span>
                           </div>
                           <Select value={selectedLang} onValueChange={setSelectedLang}>
                             <SelectTrigger className="w-full">
-                              <SelectValue placeholder="Select language" />
+                              <SelectValue placeholder={t('common:selectLanguage')} />
                             </SelectTrigger>
                             <SelectContent className="max-h-60">
                               {LANGUAGES.map((lang) => (
                                 <SelectItem key={lang.code} value={lang.code}>
-                                  {lang.name}
+                                  {languageLabel(lang.code, lang.name)}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -369,10 +393,10 @@ export function ImportAudioDialog({
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Globe className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Language</span>
+                            <span className="text-sm font-medium">{t('common:language')}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            Language selection isn't supported for Parakeet. It always uses automatic detection.
+                            {t('parakeetLanguage')}
                           </p>
                         </div>
                       )}
@@ -382,7 +406,7 @@ export function ImportAudioDialog({
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Cpu className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Model</span>
+                            <span className="text-sm font-medium">{t('common:model')}</span>
                           </div>
                           <Select
                             value={selectedModelKey}
@@ -390,7 +414,7 @@ export function ImportAudioDialog({
                             disabled={loadingModels}
                           >
                             <SelectTrigger className="w-full">
-                              <SelectValue placeholder={loadingModels ? 'Loading models...' : 'Select model'} />
+                              <SelectValue placeholder={loadingModels ? t('loadingModels') : t('selectModel')} />
                             </SelectTrigger>
                             <SelectContent>
                               {availableModels.map((model) => (
@@ -407,20 +431,26 @@ export function ImportAudioDialog({
                       )}
 
                       <div className="space-y-2">
-                        <span className="text-sm font-medium">Speaker count</span>
-                        <Select value={speakerCount} onValueChange={setSpeakerCount}>
+                        <span className="text-sm font-medium">{t('common:speakerCount')}</span>
+                        <Select
+                          value={speakerCount}
+                          onValueChange={setSpeakerCount}
+                          disabled={!speakerDiarizationEnabled}
+                        >
                           <SelectTrigger className="w-full">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="auto">Auto detect</SelectItem>
+                            <SelectItem value="auto">{t('common:autoDetect')}</SelectItem>
                             {Array.from({ length: 10 }, (_, index) => index + 1).map(count => (
                               <SelectItem key={count} value={count.toString()}>{count}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
                         <p className="text-xs text-muted-foreground">
-                          Leave on Auto unless you know the exact number of speakers.
+                          {speakerDiarizationEnabled
+                            ? t('speakerHint')
+                            : t('speakerDisabledHint')}
                         </p>
                       </div>
                     </div>
@@ -441,11 +471,11 @@ export function ImportAudioDialog({
                   />
                 </div>
                 <div className="flex justify-between text-xs text-gray-600 mt-1">
-                  <span>{progress.stage}</span>
+                  <span>{localizedProgress?.stage}</span>
                   <span>{Math.round(progress.progress_percentage)}%</span>
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground text-center">{progress.message}</p>
+              <p className="text-sm text-muted-foreground text-center">{localizedProgress?.message}</p>
             </div>
           )}
 
@@ -461,7 +491,7 @@ export function ImportAudioDialog({
           {!isProcessing && !error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t('common:cancel')}
               </Button>
               <Button
                 onClick={handleStartImport}
@@ -469,23 +499,23 @@ export function ImportAudioDialog({
                 disabled={!fileInfo}
               >
                 <Upload className="h-4 w-4 mr-2" />
-                Import
+                {t('import')}
               </Button>
             </>
           )}
           {isProcessing && (
             <Button variant="outline" onClick={handleCancel}>
               <X className="h-4 w-4 mr-2" />
-              Cancel
+              {t('common:cancel')}
             </Button>
           )}
           {error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Close
+                {t('common:close')}
               </Button>
               <Button onClick={reset} variant="outline">
-                Try Again
+                {t('common:retry')}
               </Button>
             </>
           )}

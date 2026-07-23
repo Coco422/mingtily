@@ -6,7 +6,8 @@ use crate::audio::vad::get_speech_chunks_with_progress;
 use crate::config::{DEFAULT_PARAKEET_MODEL, DEFAULT_WHISPER_MODEL};
 use crate::parakeet_engine::ParakeetEngine;
 use crate::speaker_diarization::{
-    align_vad_with_turns, installed_model_paths, DiarizationEngine, SpeakerAudioSegment,
+    align_vad_with_turns, installed_model_paths, is_enabled as speaker_diarization_is_enabled,
+    DiarizationEngine, SpeakerAudioSegment,
 };
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
@@ -519,10 +520,19 @@ async fn run_import<R: Runtime>(
         return Err(anyhow!("Import cancelled"));
     }
 
-    emit_progress(&app, "diarization", 30, "Detecting speakers...");
+    let speaker_diarization_enabled = speaker_diarization_is_enabled(&app);
+    if speaker_diarization_enabled {
+        emit_progress(&app, "diarization", 30, "Detecting speakers...");
+    }
 
-    let speaker_segments =
-        build_speaker_segments(&app, audio_samples, speech_segments, speaker_count).await;
+    let speaker_segments = build_speaker_segments(
+        &app,
+        audio_samples,
+        speech_segments,
+        speaker_count,
+        speaker_diarization_enabled,
+    )
+    .await;
 
     emit_progress(&app, "transcribing", 35, "Loading transcription engine...");
 
@@ -732,6 +742,7 @@ async fn build_speaker_segments<R: Runtime>(
     audio_samples: Vec<f32>,
     speech_segments: Vec<crate::audio::vad::SpeechSegment>,
     speaker_count: Option<usize>,
+    speaker_diarization_enabled: bool,
 ) -> Vec<SpeakerAudioSegment> {
     let fallback = |segments: Vec<crate::audio::vad::SpeechSegment>| {
         segments
@@ -744,6 +755,10 @@ async fn build_speaker_segments<R: Runtime>(
             })
             .collect::<Vec<_>>()
     };
+
+    if !speaker_diarization_enabled {
+        return fallback(speech_segments);
+    }
 
     let paths = match installed_model_paths(app) {
         Ok(Some(paths)) => paths,

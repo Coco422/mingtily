@@ -42,6 +42,7 @@ pub mod config;
 pub mod console_utils;
 pub mod database;
 pub mod groq;
+pub mod localization;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -293,6 +294,11 @@ async fn start_recording_with_devices<R: Runtime>(
     system_device_name: Option<String>,
 ) -> Result<(), String> {
     start_recording_with_devices_and_meeting(app, mic_device_name, system_device_name, None).await
+}
+
+#[tauri::command]
+async fn validate_transcription_model_ready<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    audio::transcription::validate_transcription_model_ready(&app).await
 }
 
 #[tauri::command]
@@ -558,9 +564,14 @@ pub fn run() {
             parakeet_engine::commands::parakeet_delete_corrupted_model,
             parakeet_engine::commands::open_parakeet_models_folder,
             // Speaker diarization model commands
+            speaker_diarization::commands::speaker_diarization_get_config,
+            speaker_diarization::commands::speaker_diarization_save_config,
             speaker_diarization::commands::speaker_diarization_get_status,
             speaker_diarization::commands::speaker_diarization_download_model,
             speaker_diarization::commands::speaker_diarization_delete_model,
+            // UI localization commands
+            localization::get_ui_locale,
+            localization::set_ui_locale,
             // Parallel processing commands
             whisper_engine::parallel_commands::initialize_parallel_processor,
             whisper_engine::parallel_commands::start_parallel_processing,
@@ -577,6 +588,7 @@ pub fn run() {
             trigger_microphone_permission,
             start_recording_with_devices,
             start_recording_with_devices_and_meeting,
+            validate_transcription_model_ready,
             start_audio_level_monitoring,
             stop_audio_level_monitoring,
             is_audio_level_monitoring,

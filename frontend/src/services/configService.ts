@@ -6,7 +6,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { TranscriptModelProps } from '@/components/TranscriptSettings';
+import { TranscriptModelConfig } from '@/types/capabilities';
 
 export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'builtin-ai' | 'custom-openai';
@@ -50,8 +50,8 @@ export class ConfigService {
    * Get saved transcript model configuration
    * @returns Promise with { provider, model, apiKey }
    */
-  async getTranscriptConfig(): Promise<TranscriptModelProps> {
-    return invoke<TranscriptModelProps>('api_get_transcript_config');
+  async getTranscriptConfig(): Promise<TranscriptModelConfig> {
+    return invoke<TranscriptModelConfig>('api_get_transcript_config');
   }
 
   /**

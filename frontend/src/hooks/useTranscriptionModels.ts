@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import type { TranscriptModelConfig } from '@/types/capabilities';
 
 export interface RawModelInfo {
   name: string;
@@ -14,11 +15,6 @@ export interface ModelOption {
   size_mb: number;
 }
 
-interface TranscriptModelConfig {
-  provider?: string;
-  model?: string;
-}
-
 /**
  * Custom hook for fetching and managing transcription models (Whisper and Parakeet).
  *
@@ -28,7 +24,7 @@ interface TranscriptModelConfig {
  * @param transcriptModelConfig - User's saved model configuration from context
  * @returns Object containing available models, selected model key, loading state, and fetch function
  */
-export function useTranscriptionModels(transcriptModelConfig: TranscriptModelConfig | undefined) {
+export function useTranscriptionModels(transcriptModelConfig: Partial<TranscriptModelConfig> | undefined) {
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState<string>('');
   const [loadingModels, setLoadingModels] = useState(false);

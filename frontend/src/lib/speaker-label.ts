@@ -11,11 +11,15 @@ const SPEAKER_COLORS = [
   '#ea580c',
 ];
 
-export function formatSpeakerLabel(speaker?: string | null): string | null {
+export function formatSpeakerLabel(
+  speaker?: string | null,
+  translate?: (key: string, options: Record<string, number>) => string,
+): string | null {
   if (!speaker) return null;
   const match = /^speaker_(\d+)$/.exec(speaker);
   if (!match) return speaker;
-  return `Speaker ${Number.parseInt(match[1], 10) + 1}`;
+  const number = Number.parseInt(match[1], 10) + 1;
+  return translate ? translate('speaker', { number }) : `Speaker ${number}`;
 }
 
 export function speakerColor(speaker?: string | null): string {
@@ -27,7 +31,11 @@ export function speakerColor(speaker?: string | null): string {
   return SPEAKER_COLORS[index % SPEAKER_COLORS.length];
 }
 
-export function prefixSpeaker(text: string, speaker?: string | null): string {
-  const label = formatSpeakerLabel(speaker);
+export function prefixSpeaker(
+  text: string,
+  speaker?: string | null,
+  translate?: (key: string, options: Record<string, number>) => string,
+): string {
+  const label = formatSpeakerLabel(speaker, translate);
   return label ? `${label}: ${text}` : text;
 }

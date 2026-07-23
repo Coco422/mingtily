@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Download, Loader2, Trash2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/button';
+import { useTranslation } from 'react-i18next';
 
 interface SpeakerModelStatus {
   id: string;
@@ -21,7 +22,16 @@ interface DownloadProgress {
   status: string;
 }
 
-export function SpeakerDiarizationModelManager() {
+interface SpeakerDiarizationModelManagerProps {
+  serviceEnabled?: boolean;
+  onOpenServices?: () => void;
+}
+
+export function SpeakerDiarizationModelManager({
+  serviceEnabled = false,
+  onOpenServices,
+}: SpeakerDiarizationModelManagerProps) {
+  const { t } = useTranslation('models');
   const [status, setStatus] = useState<SpeakerModelStatus | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -46,20 +56,20 @@ export function SpeakerDiarizationModelManager() {
         setBusy(false);
         setProgress(null);
         await refresh();
-        toast.success('Speaker diarization is ready');
+        toast.success(t('speaker.ready'));
       }));
       unlisteners.push(await listen<{ error: string }>(
         'speaker-diarization-model-download-error',
         ({ payload }) => {
           setBusy(false);
           setProgress(null);
-          toast.error('Speaker model download failed', { description: payload.error });
+          toast.error(t('speaker.downloadFailed'), { description: payload.error });
         }
       ));
     };
     setup().catch(error => console.warn('Failed to listen for speaker model events:', error));
     return () => unlisteners.forEach(unlisten => unlisten());
-  }, [refresh]);
+  }, [refresh, t]);
 
   const download = async () => {
     setBusy(true);
@@ -69,7 +79,7 @@ export function SpeakerDiarizationModelManager() {
     } catch (error) {
       setBusy(false);
       setProgress(null);
-      toast.error('Speaker model download failed', { description: String(error) });
+      toast.error(t('speaker.downloadFailed'), { description: String(error) });
     }
   };
 
@@ -78,9 +88,9 @@ export function SpeakerDiarizationModelManager() {
     try {
       await invoke('speaker_diarization_delete_model');
       await refresh();
-      toast.success('Speaker diarization model removed');
+      toast.success(t('speaker.removed'));
     } catch (error) {
-      toast.error('Failed to remove speaker model', { description: String(error) });
+      toast.error(t('speaker.removeFailed'), { description: String(error) });
     } finally {
       setBusy(false);
     }
@@ -93,14 +103,14 @@ export function SpeakerDiarizationModelManager() {
         <div className="flex gap-2">
           <Users className="h-4 w-4 mt-0.5 text-muted-foreground" />
           <div>
-            <div className="text-sm font-medium">Speaker Diarization</div>
+            <div className="text-sm font-medium">{t('speaker.title')}</div>
             <p className="text-xs text-muted-foreground">
-              Pyannote segmentation + 3D-Speaker ERes2Net · about {Math.round(status?.size_mb ?? 44)} MB
+              {t('speaker.description', { size: Math.round(status?.size_mb ?? 44) })}
             </p>
           </div>
         </div>
         <span className={`text-xs font-medium ${available ? 'text-emerald-600' : 'text-muted-foreground'}`}>
-          {available ? 'Installed' : status?.status === 'corrupt' ? 'Needs repair' : 'Not installed'}
+          {available ? t('status.installed') : status?.status === 'corrupt' ? t('status.needsRepair') : t('status.notInstalled')}
         </span>
       </div>
 
@@ -109,20 +119,26 @@ export function SpeakerDiarizationModelManager() {
           <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
             <div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} />
           </div>
-          <div className="text-xs text-muted-foreground">Downloading… {progress}%</div>
+          <div className="text-xs text-muted-foreground">{t('download.progress', { progress })}</div>
         </div>
       )}
 
       <div className="flex justify-end gap-2">
         {available ? (
-          <Button variant="outline" size="sm" onClick={remove} disabled={busy}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={serviceEnabled ? onOpenServices : remove}
+            disabled={busy}
+            title={serviceEnabled ? t('delete.disableSpeakerFirst') : undefined}
+          >
             {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
-            Delete
+            {serviceEnabled ? t('status.inUse') : t('actions.delete')}
           </Button>
         ) : (
           <Button size="sm" onClick={download} disabled={busy}>
             {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
-            {status?.status === 'corrupt' ? 'Repair' : 'Download'}
+            {status?.status === 'corrupt' ? t('actions.repair') : t('actions.download')}
           </Button>
         )}
       </div>

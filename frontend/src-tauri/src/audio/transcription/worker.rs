@@ -5,7 +5,9 @@
 use super::engine::TranscriptionEngine;
 use super::provider::TranscriptionError;
 use crate::audio::AudioChunk;
-use crate::speaker_diarization::{installed_model_paths, RealtimeSpeakerSession};
+use crate::speaker_diarization::{
+    installed_model_paths, is_enabled as speaker_diarization_is_enabled, RealtimeSpeakerSession,
+};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -81,13 +83,19 @@ pub fn start_transcription_task<R: Runtime>(
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
-        let speaker_model_paths = installed_model_paths(&app).ok().flatten();
-        if speaker_model_paths.is_none() {
-            let _ = app.emit(
-                "speaker-diarization-warning",
-                serde_json::json!({ "reason": "model-missing" }),
-            );
-        }
+        let speaker_model_paths = if speaker_diarization_is_enabled(&app) {
+            let paths = installed_model_paths(&app).ok().flatten();
+            if paths.is_none() {
+                let _ = app.emit(
+                    "speaker-diarization-warning",
+                    serde_json::json!({ "reason": "model-missing" }),
+                );
+            }
+            paths
+        } else {
+            info!("Speaker diarization disabled for this recording session");
+            None
+        };
 
         // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed
         let chunks_queued = Arc::new(AtomicU64::new(0));

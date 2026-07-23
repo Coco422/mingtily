@@ -22,6 +22,9 @@ import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
+import { useTranslation } from 'react-i18next';
+import { capabilityConfigService } from '@/services/capabilityConfigService';
+import { localizeAudioProgress } from '@/lib/audio-progress';
 
 interface RetranscribeDialogProps {
   open: boolean;
@@ -57,12 +60,26 @@ export function RetranscribeDialog({
   meetingFolderPath,
   onComplete,
 }: RetranscribeDialogProps) {
+  const { t, i18n } = useTranslation('meeting');
   const { selectedLanguage, transcriptModelConfig } = useConfig();
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<RetranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
   const [speakerCount, setSpeakerCount] = useState('auto');
+  const [speakerDiarizationEnabled, setSpeakerDiarizationEnabled] = useState(true);
+  const localizedProgress = progress
+    ? localizeAudioProgress(t, progress.stage, progress.message)
+    : null;
+  const languageNames = useMemo(
+    () => new Intl.DisplayNames([i18n.resolvedLanguage || i18n.language], { type: 'language' }),
+    [i18n.language, i18n.resolvedLanguage]
+  );
+  const languageLabel = (code: string, fallback: string) => code === 'auto'
+    ? t('common:autoDetect')
+    : code === 'auto-translate'
+      ? t('settings:services.transcription.autoTranslate')
+      : languageNames.of(code) || fallback;
 
   // Use centralized model fetching hook
   const {
@@ -114,6 +131,11 @@ export function RetranscribeDialog({
       setSelectedLang(selectedLanguage || 'auto');
       setSpeakerCount('auto');
 
+      void capabilityConfigService.getSpeakerDiarization().then((config) => {
+        setSpeakerDiarizationEnabled(config.enabled);
+        if (!config.enabled) setSpeakerCount('auto');
+      });
+
       // Fetch available models using centralized hook
       fetchModels();
     }
@@ -149,7 +171,7 @@ export function RetranscribeDialog({
           if (event.payload.meeting_id === meetingId) {
             setIsProcessing(false);
             toast.success(
-              `Retranscription complete! ${event.payload.segments_count} segments created.`
+              t('retranscriptionSuccess', { count: event.payload.segments_count })
             );
             onCompleteRef.current?.();
             onOpenChangeRef.current(false);
@@ -187,11 +209,11 @@ export function RetranscribeDialog({
       cleanedUpRef.current = true;
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [open, meetingId]);
+  }, [open, meetingId, t]);
 
   const handleStartRetranscription = async () => {
     if (!meetingFolderPath) {
-      setError('Meeting folder path not available');
+      setError(t('meetingFolderUnavailable'));
       return;
     }
 
@@ -207,7 +229,10 @@ export function RetranscribeDialog({
         language: languageToSend,
         model: selectedModelDetails?.name || null,
         provider: selectedModelDetails?.provider || null,
-        speakerCount: speakerCount === 'auto' ? null : Number.parseInt(speakerCount, 10),
+        speakerCount:
+          !speakerDiarizationEnabled || speakerCount === 'auto'
+            ? null
+            : Number.parseInt(speakerCount, 10),
       });
     } catch (err: any) {
       setIsProcessing(false);
@@ -223,7 +248,7 @@ export function RetranscribeDialog({
         await invoke('cancel_retranscription_command');
         setIsProcessing(false);
         setProgress(null);
-        toast.info('Retranscription cancelled');
+        toast.info(t('retranscriptionCancelled'));
       } catch (err) {
         console.error('Failed to cancel retranscription:', err);
       }
@@ -263,26 +288,26 @@ export function RetranscribeDialog({
             {isProcessing ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                Retranscribing...
+                {t('retranscribe')}
               </>
             ) : error ? (
               <>
                 <AlertCircle className="h-5 w-5 text-red-600" />
-                Retranscription Failed
+                {t('retranscriptionFailed')}
               </>
             ) : (
               <>
                 <RefreshCw className="h-5 w-5 text-blue-600" />
-                Retranscribe Meeting
+                {t('retranscribeMeeting')}
               </>
             )}
           </DialogTitle>
           <DialogDescription>
             {isProcessing
-              ? progress?.message || 'Processing audio...'
+              ? localizedProgress?.message || t('processingAudio')
               : error
-                ? 'An error occurred during retranscription'
-                : 'Re-process the audio with different language settings'}
+                ? t('retranscriptionFailed')
+                : t('retranscribe')}
           </DialogDescription>
         </DialogHeader>
 
@@ -292,32 +317,32 @@ export function RetranscribeDialog({
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Globe className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">Language</span>
+                  <span className="text-sm font-medium">{t('common:language')}</span>
                 </div>
                 <Select value={selectedLang} onValueChange={setSelectedLang}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select language" />
+                    <SelectValue placeholder={t('common:selectLanguage')} />
                   </SelectTrigger>
                   <SelectContent className="max-h-60">
                     {LANGUAGES.map((lang) => (
                       <SelectItem key={lang.code} value={lang.code}>
-                        {lang.name}
+                        {languageLabel(lang.code, lang.name)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Select a specific language to improve accuracy, or use auto-detect
+                  {t('languageHint')}
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Globe className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">Language</span>
+                  <span className="text-sm font-medium">{t('common:language')}</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Language selection isn't supported for Parakeet. It always uses automatic detection.
+                  {t('parakeetLanguage')}
                 </p>
               </div>
             )
@@ -327,11 +352,11 @@ export function RetranscribeDialog({
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Cpu className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Model</span>
+                <span className="text-sm font-medium">{t('common:model')}</span>
               </div>
               <Select value={selectedModelKey} onValueChange={setSelectedModelKey} disabled={loadingModels}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder={loadingModels ? "Loading models..." : "Select model"} />
+                  <SelectValue placeholder={loadingModels ? t('loadingModels') : t('selectModel')} />
                 </SelectTrigger>
                 <SelectContent>
                   {availableModels.map((model) => (
@@ -342,27 +367,33 @@ export function RetranscribeDialog({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Choose a transcription model
+                {t('modelHint')}
               </p>
             </div>
           )}
 
           {!isProcessing && !error && (
             <div className="space-y-3">
-              <span className="text-sm font-medium">Speaker count</span>
-              <Select value={speakerCount} onValueChange={setSpeakerCount}>
+              <span className="text-sm font-medium">{t('common:speakerCount')}</span>
+              <Select
+                value={speakerCount}
+                onValueChange={setSpeakerCount}
+                disabled={!speakerDiarizationEnabled}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="auto">Auto detect</SelectItem>
+                  <SelectItem value="auto">{t('common:autoDetect')}</SelectItem>
                   {Array.from({ length: 10 }, (_, index) => index + 1).map(count => (
                     <SelectItem key={count} value={count.toString()}>{count}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Leave on Auto unless you know the exact number of speakers.
+                {speakerDiarizationEnabled
+                  ? t('speakerHint')
+                  : t('speakerDisabledHint')}
               </p>
             </div>
           )}
@@ -377,12 +408,12 @@ export function RetranscribeDialog({
                   />
                 </div>
                 <div className="flex justify-between text-xs text-gray-600 mt-1">
-                  <span>{progress.stage}</span>
+                  <span>{localizedProgress?.stage}</span>
                   <span>{Math.round(progress.progress_percentage)}%</span>
                 </div>
               </div>
               <p className="text-sm text-muted-foreground text-center">
-                {progress.message}
+                {localizedProgress?.message}
               </p>
             </div>
           )}
@@ -398,7 +429,7 @@ export function RetranscribeDialog({
           {!isProcessing && !error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t('common:cancel')}
               </Button>
               <Button
                 onClick={handleStartRetranscription}
@@ -406,20 +437,20 @@ export function RetranscribeDialog({
                 disabled={!meetingFolderPath}
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
-                Start Retranscription
+                {t('retranscribe')}
               </Button>
             </>
           )}
           {isProcessing && (
             <Button variant="outline" onClick={handleCancel}>
               <X className="h-4 w-4 mr-2" />
-              Cancel
+              {t('common:cancel')}
             </Button>
           )}
           {error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Close
+                {t('common:close')}
               </Button>
               <Button
                 onClick={() => {
@@ -428,7 +459,7 @@ export function RetranscribeDialog({
                 }}
                 variant="outline"
               >
-                Try Again
+                {t('common:retry')}
               </Button>
             </>
           )}

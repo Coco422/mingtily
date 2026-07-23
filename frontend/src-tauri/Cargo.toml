@@ -1,6 +1,6 @@
 [package]
 name = "mingtily"
-version = "0.4.0"
+version = "0.5.0"
 description = "A local-first AI meeting recorder and transcription app"
 authors = ["Mingtily contributors"]
 license = "MIT"

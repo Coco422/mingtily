@@ -54,7 +54,11 @@ pub enum NotificationActionType {
 }
 
 impl Notification {
-    pub fn new(title: impl Into<String>, body: impl Into<String>, notification_type: NotificationType) -> Self {
+    pub fn new(
+        title: impl Into<String>,
+        body: impl Into<String>,
+        notification_type: NotificationType,
+    ) -> Self {
         Self {
             id: None,
             title: title.into(),
@@ -114,9 +118,18 @@ impl Default for NotificationTimeout {
 // Helper functions for creating common notifications
 impl Notification {
     pub fn recording_started(meeting_name: Option<String>) -> Self {
-        let body = match meeting_name {
-            Some(name) => format!("Recording started for meeting: {}", name),
-            None => "Recording has started. Please inform others in the meeting that you are recording.".to_string(),
+        Self::recording_started_localized(meeting_name, false)
+    }
+
+    pub fn recording_started_localized(meeting_name: Option<String>, zh_cn: bool) -> Self {
+        let body = match (meeting_name, zh_cn) {
+            (Some(name), true) => format!("已开始录制会议：{name}"),
+            (Some(name), false) => format!("Recording started for meeting: {name}"),
+            (None, true) => "录音已开始，请告知其他参会者。".to_string(),
+            (None, false) => {
+                "Recording has started. Please inform others in the meeting that you are recording."
+                    .to_string()
+            }
         };
 
         Notification::new("Mingtily", body, NotificationType::RecordingStarted)
@@ -125,39 +138,69 @@ impl Notification {
     }
 
     pub fn recording_stopped() -> Self {
+        Self::recording_stopped_localized(false)
+    }
+
+    pub fn recording_stopped_localized(zh_cn: bool) -> Self {
         Notification::new(
             "Mingtily",
-            "Recording has been stopped and saved",
-            NotificationType::RecordingStopped
+            if zh_cn {
+                "录音已停止并保存"
+            } else {
+                "Recording has been stopped and saved"
+            },
+            NotificationType::RecordingStopped,
         )
         .with_priority(NotificationPriority::Normal)
         .with_timeout(NotificationTimeout::Seconds(3))
     }
 
     pub fn recording_paused() -> Self {
+        Self::recording_paused_localized(false)
+    }
+
+    pub fn recording_paused_localized(zh_cn: bool) -> Self {
         Notification::new(
             "Mingtily",
-            "Recording has been paused",
-            NotificationType::RecordingPaused
+            if zh_cn {
+                "录音已暂停"
+            } else {
+                "Recording has been paused"
+            },
+            NotificationType::RecordingPaused,
         )
         .with_priority(NotificationPriority::Normal)
         .with_timeout(NotificationTimeout::Seconds(3))
     }
 
     pub fn recording_resumed() -> Self {
+        Self::recording_resumed_localized(false)
+    }
+
+    pub fn recording_resumed_localized(zh_cn: bool) -> Self {
         Notification::new(
             "Mingtily",
-            "Recording has been resumed",
-            NotificationType::RecordingResumed
+            if zh_cn {
+                "录音已继续"
+            } else {
+                "Recording has been resumed"
+            },
+            NotificationType::RecordingResumed,
         )
         .with_priority(NotificationPriority::Normal)
         .with_timeout(NotificationTimeout::Seconds(3))
     }
 
     pub fn transcription_complete(file_path: Option<String>) -> Self {
-        let body = match file_path {
-            Some(path) => format!("Transcription completed and saved to: {}", path),
-            None => "Transcription has been completed".to_string(),
+        Self::transcription_complete_localized(file_path, false)
+    }
+
+    pub fn transcription_complete_localized(file_path: Option<String>, zh_cn: bool) -> Self {
+        let body = match (file_path, zh_cn) {
+            (Some(path), true) => format!("转写已完成并保存至：{path}"),
+            (Some(path), false) => format!("Transcription completed and saved to: {path}"),
+            (None, true) => "转写已完成".to_string(),
+            (None, false) => "Transcription has been completed".to_string(),
         };
 
         Notification::new("Mingtily", body, NotificationType::TranscriptionComplete)
@@ -166,14 +209,28 @@ impl Notification {
     }
 
     pub fn meeting_reminder(minutes_until: u64, meeting_title: Option<String>) -> Self {
-        let body = match meeting_title {
-            Some(title) => format!("Meeting '{}' starts in {} minutes", title, minutes_until),
-            None => format!("Meeting starts in {} minutes", minutes_until),
+        Self::meeting_reminder_localized(minutes_until, meeting_title, false)
+    }
+
+    pub fn meeting_reminder_localized(
+        minutes_until: u64,
+        meeting_title: Option<String>,
+        zh_cn: bool,
+    ) -> Self {
+        let body = match (meeting_title, zh_cn) {
+            (Some(title), true) => format!("会议“{title}”将在 {minutes_until} 分钟后开始"),
+            (Some(title), false) => format!("Meeting '{title}' starts in {minutes_until} minutes"),
+            (None, true) => format!("会议将在 {minutes_until} 分钟后开始"),
+            (None, false) => format!("Meeting starts in {minutes_until} minutes"),
         };
 
-        Notification::new("Mingtily", body, NotificationType::MeetingReminder(minutes_until))
-            .with_priority(NotificationPriority::High)
-            .with_timeout(NotificationTimeout::Seconds(10))
+        Notification::new(
+            "Mingtily",
+            body,
+            NotificationType::MeetingReminder(minutes_until),
+        )
+        .with_priority(NotificationPriority::High)
+        .with_timeout(NotificationTimeout::Seconds(10))
     }
 
     pub fn system_error(error: impl Into<String>) -> Self {
@@ -181,17 +238,25 @@ impl Notification {
         Notification::new(
             "Mingtily Error",
             error_string.clone(),
-            NotificationType::SystemError(error_string)
+            NotificationType::SystemError(error_string),
         )
         .with_priority(NotificationPriority::Critical)
         .with_timeout(NotificationTimeout::Never)
     }
 
     pub fn test_notification() -> Self {
+        Self::test_notification_localized(false)
+    }
+
+    pub fn test_notification_localized(zh_cn: bool) -> Self {
         Notification::new(
             "Mingtily",
-            "This is a test notification to verify the system is working correctly",
-            NotificationType::Test
+            if zh_cn {
+                "这是一条测试通知，用于确认通知功能正常。"
+            } else {
+                "This is a test notification to verify the system is working correctly"
+            },
+            NotificationType::Test,
         )
         .with_priority(NotificationPriority::Normal)
         .with_timeout(NotificationTimeout::Seconds(5))

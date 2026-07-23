@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode, useRef } from 'react';
-import { TranscriptModelProps } from '@/components/TranscriptSettings';
+import { TranscriptModelConfig } from '@/types/capabilities';
 import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
@@ -47,8 +47,8 @@ interface ConfigContextType {
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
 
   // Transcript model configuration
-  transcriptModelConfig: TranscriptModelProps;
-  setTranscriptModelConfig: (config: TranscriptModelProps | ((prev: TranscriptModelProps) => TranscriptModelProps)) => void;
+  transcriptModelConfig: TranscriptModelConfig;
+  setTranscriptModelConfig: (config: TranscriptModelConfig | ((prev: TranscriptModelConfig) => TranscriptModelConfig)) => void;
 
   // Device configuration
   selectedDevices: SelectedDevices;
@@ -105,7 +105,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   });
 
   // Transcript model configuration state
-  const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
+  const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelConfig>({
     provider: 'parakeet',
     model: 'parakeet-tdt-0.6b-v3-int8',
     apiKey: null

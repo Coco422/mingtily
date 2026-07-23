@@ -28,6 +28,10 @@ Mingtily keeps recordings, transcripts, recovery data, and local models on your 
 
 See [PRIVACY_POLICY.md](PRIVACY_POLICY.md) for the detailed boundary.
 
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the planned stabilization work, Chinese ASR roadmap, Provider ecosystem, and offline AI meeting capabilities.
+
 ## Development
 
 Prerequisites: Node.js, pnpm, Rust, Tauri system dependencies, and platform audio/build tools.
@@ -45,7 +49,7 @@ cd frontend
 pnpm tauri:build
 ```
 
-Platform-specific build notes remain under [`docs/`](docs/).
+The previous upstream documentation and screenshots have been removed because they no longer matched Mingtily. Verified platform guides and new product screenshots are tracked in the [roadmap](ROADMAP.md).
 
 ## Model downloads
 

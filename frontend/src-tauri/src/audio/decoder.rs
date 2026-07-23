@@ -50,7 +50,10 @@ impl DecodedAudio {
     }
 
     /// Convert decoded audio to Whisper format with optional progress callback
-    pub fn to_whisper_format_with_progress(&self, progress_callback: Option<ProgressCallback>) -> Vec<f32> {
+    pub fn to_whisper_format_with_progress(
+        &self,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Vec<f32> {
         // Step 1: Convert to mono if needed
         let mono_samples = if self.channels > 1 {
             info!(
@@ -84,7 +87,12 @@ impl DecodedAudio {
                     self.sample_rate,
                     WHISPER_SAMPLE_RATE
                 );
-                chunked_resample_with_progress(&mono_samples, self.sample_rate, WHISPER_SAMPLE_RATE, progress_callback)
+                chunked_resample_with_progress(
+                    &mono_samples,
+                    self.sample_rate,
+                    WHISPER_SAMPLE_RATE,
+                    progress_callback,
+                )
             } else {
                 info!(
                     "Resampling {} samples from {}Hz to {}Hz",
@@ -327,10 +335,12 @@ fn convert_to_wav_with_ffmpeg(
     let mut command = Command::new(&ffmpeg_path);
     command
         .args([
-            "-i", input_str,
-            "-vn",                  // Strip video tracks
-            "-acodec", "pcm_s16le", // Output PCM WAV (Symphonia handles natively)
-            "-y",                   // Overwrite without prompt
+            "-i",
+            input_str,
+            "-vn", // Strip video tracks
+            "-acodec",
+            "pcm_s16le", // Output PCM WAV (Symphonia handles natively)
+            "-y",        // Overwrite without prompt
             output_str,
         ])
         .stdin(Stdio::null())
@@ -494,10 +504,12 @@ pub fn decode_audio_file_with_progress(
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
 
     // Calculate expected samples for progress tracking
-    let expected_duration = track.codec_params.n_frames
+    let expected_duration = track
+        .codec_params
+        .n_frames
         .map(|frames| frames as f64 / sample_rate as f64);
-    let expected_samples = expected_duration
-        .map(|dur| (dur * sample_rate as f64 * channels as f64) as usize);
+    let expected_samples =
+        expected_duration.map(|dur| (dur * sample_rate as f64 * channels as f64) as usize);
 
     let mut last_progress = 0u32;
 
@@ -549,10 +561,14 @@ pub fn decode_audio_file_with_progress(
 
                 // Emit progress updates (every 10%)
                 if let (Some(callback), Some(expected)) = (&progress_callback, expected_samples) {
-                    let current_progress = ((all_samples.len() as f64 / expected as f64) * 100.0) as u32;
+                    let current_progress =
+                        ((all_samples.len() as f64 / expected as f64) * 100.0) as u32;
                     if current_progress >= last_progress + 10 && current_progress <= 100 {
                         last_progress = current_progress;
-                        callback(current_progress, &format!("Decoding audio: {}%", current_progress));
+                        callback(
+                            current_progress,
+                            &format!("Decoding audio: {}%", current_progress),
+                        );
                     }
                 }
             }
@@ -621,7 +637,7 @@ mod tests {
 
         let result = audio.to_whisper_format();
         assert_eq!(result.len(), 2); // Should be mono now
-        // Average of (0.2, 0.4) = 0.3 and (0.6, 0.8) = 0.7
+                                     // Average of (0.2, 0.4) = 0.3 and (0.6, 0.8) = 0.7
         assert!((result[0] - 0.3).abs() < 0.001);
         assert!((result[1] - 0.7).abs() < 0.001);
     }
@@ -642,8 +658,11 @@ mod tests {
         // Output length should be approximately input_len / 3 (16000/48000 ratio)
         // 4800 / 3 = 1600
         assert!(!result.is_empty(), "Result should not be empty");
-        assert!(result.len() > 1000 && result.len() < 2000,
-            "Expected ~1600 samples, got {}", result.len());
+        assert!(
+            result.len() > 1000 && result.len() < 2000,
+            "Expected ~1600 samples, got {}",
+            result.len()
+        );
     }
 
     #[test]

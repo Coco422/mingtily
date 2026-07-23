@@ -4,7 +4,8 @@
 // Delegates to transcription and recording modules for actual implementation.
 
 use crate::speaker_diarization::{
-    installed_model_paths, refine_speaker_labels, DiarizationEngine, SpeakerLabelUpdate,
+    installed_model_paths, is_enabled as speaker_diarization_is_enabled, refine_speaker_labels,
+    DiarizationEngine, SpeakerLabelUpdate,
 };
 use anyhow::Result;
 use log::{error, info, warn};
@@ -866,6 +867,11 @@ async fn refine_recording_speakers<R: Runtime>(
             })
             .collect::<Vec<_>>()
     };
+
+    if !speaker_diarization_is_enabled(app) {
+        info!("Speaker diarization disabled; skipping global label refinement");
+        return fallback();
+    }
 
     let Some(audio_path) = audio_path else {
         return fallback();

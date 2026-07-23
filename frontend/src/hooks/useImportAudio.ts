@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 
 export interface AudioFileInfo {
   path: string;
@@ -61,6 +62,7 @@ export function useImportAudio({
   onComplete,
   onError,
 }: UseImportAudioOptions = {}): UseImportAudioReturn {
+  const { t } = useTranslation('summary');
   const [status, setStatus] = useState<ImportStatus>('idle');
   const [fileInfo, setFileInfo] = useState<AudioFileInfo | null>(null);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
@@ -108,8 +110,8 @@ export function useImportAudio({
             await applyPinnedSummaryLanguageToMeeting(event.payload.meeting_id);
           } catch (error) {
             console.warn('Failed to apply pinned summary language to imported meeting:', error);
-            toast.warning('Could not apply default summary language', {
-              description: 'The imported meeting was saved, but the default summary language was not applied.',
+            toast.warning(t('defaultLanguageNotApplied'), {
+              description: t('importLanguageNotAppliedHint'),
             });
           }
           onCompleteRef.current?.(event.payload);
@@ -147,7 +149,7 @@ export function useImportAudio({
       cleanedUpRef.current = true;
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, []);
+  }, [t]);
 
   // Select file using native file dialog
   const selectFile = useCallback(async (): Promise<AudioFileInfo | null> => {

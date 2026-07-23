@@ -8,23 +8,42 @@ import {
   ModelStatus,
   ParakeetAPI,
   getModelDisplayInfo,
-  getModelDisplayName,
   formatFileSize
 } from '../lib/parakeet';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
+
+const PARAKEET_UI_KEYS: Record<string, string> = {
+  'parakeet-tdt-0.6b-v3-int8': 'lightning',
+  'parakeet-tdt-0.6b-v2-int8': 'compact',
+  'parakeet-tdt-0.6b-v3-fp32': 'precise',
+};
+
+function localizedParakeetModel(t: TFunction, modelName: string) {
+  const key = PARAKEET_UI_KEYS[modelName];
+  const fallback = getModelDisplayInfo(modelName);
+  return {
+    name: key ? t(`parakeet.${key}.name`) : fallback?.friendlyName || modelName,
+    tagline: key ? t(`parakeet.${key}.tagline`) : fallback?.tagline || '',
+  };
+}
 
 interface ParakeetModelManagerProps {
   selectedModel?: string;
   onModelSelect?: (modelName: string) => void;
   className?: string;
   autoSave?: boolean;
+  mode?: 'select' | 'manage';
 }
 
 export function ParakeetModelManager({
   selectedModel,
   onModelSelect,
   className = '',
-  autoSave = false
+  autoSave = false,
+  mode = 'select'
 }: ParakeetModelManagerProps) {
+  const { t } = useTranslation('models');
   const [models, setModels] = useState<ParakeetModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,8 +78,8 @@ export function ParakeetModelManager({
       } catch (err) {
         console.error('Failed to initialize Parakeet:', err);
         setError(err instanceof Error ? err.message : 'Failed to load models');
-        toast.error('Failed to load transcription models', {
-          description: err instanceof Error ? err.message : 'Unknown error',
+        toast.error(t('errors.loadTranscriptionModels'), {
+          description: err instanceof Error ? err.message : t('errors.unknown'),
           duration: 5000
         });
       } finally {
@@ -114,7 +133,7 @@ export function ParakeetModelManager({
         (event) => {
           const { modelName } = event.payload;
           const displayInfo = getModelDisplayInfo(modelName);
-          const displayName = displayInfo?.friendlyName || modelName;
+          const displayName = localizedParakeetModel(t, modelName).name;
 
           setModels(prevModels =>
             prevModels.map(model =>
@@ -133,13 +152,13 @@ export function ParakeetModelManager({
           // Clean up throttle data
           progressThrottleRef.current.delete(modelName);
 
-          toast.success(`${displayInfo?.icon || '✓'} ${displayName} ready!`, {
-            description: 'Model downloaded and ready to use',
+          toast.success(t('download.readyTitle', { icon: displayInfo?.icon || '✓', model: displayName }), {
+            description: t('download.readyDescription'),
             duration: 4000
           });
 
           // Auto-select after download using stable refs
-          if (onModelSelectRef.current) {
+          if (mode === 'select' && onModelSelectRef.current) {
             onModelSelectRef.current(modelName);
             if (autoSaveRef.current) {
               saveModelSelection(modelName);
@@ -153,8 +172,7 @@ export function ParakeetModelManager({
         'parakeet-model-download-error',
         (event) => {
           const { modelName, error } = event.payload;
-          const displayInfo = getModelDisplayInfo(modelName);
-          const displayName = displayInfo?.friendlyName || modelName;
+          const displayName = localizedParakeetModel(t, modelName).name;
 
           setModels(prevModels =>
             prevModels.map(model =>
@@ -173,11 +191,11 @@ export function ParakeetModelManager({
           // Clean up throttle data
           progressThrottleRef.current.delete(modelName);
 
-          toast.error(`Failed to download ${displayName}`, {
+          toast.error(t('download.failed', { model: displayName }), {
             description: error,
             duration: 6000,
             action: {
-              label: 'Retry',
+              label: t('actions.retry'),
               onClick: () => downloadModel(modelName)
             }
           });
@@ -193,7 +211,7 @@ export function ParakeetModelManager({
       if (unlistenComplete) unlistenComplete();
       if (unlistenError) unlistenError();
     };
-  }, []); // Empty dependency array - listeners use refs for stable callbacks
+  }, [mode, t]);
 
   const saveModelSelection = async (modelName: string) => {
     try {
@@ -208,8 +226,7 @@ export function ParakeetModelManager({
   };
 
   const cancelDownload = async (modelName: string) => {
-    const displayInfo = getModelDisplayInfo(modelName);
-    const displayName = displayInfo?.friendlyName || modelName;
+    const displayName = localizedParakeetModel(t, modelName).name;
 
     try {
       await ParakeetAPI.cancelDownload(modelName);
@@ -231,13 +248,13 @@ export function ParakeetModelManager({
       // Clean up throttle data
       progressThrottleRef.current.delete(modelName);
 
-      toast.info(`${displayName} download cancelled`, {
+      toast.info(t('download.cancelled', { model: displayName }), {
         duration: 3000
       });
     } catch (err) {
       console.error('Failed to cancel download:', err);
-      toast.error('Failed to cancel download', {
-        description: err instanceof Error ? err.message : 'Unknown error',
+      toast.error(t('download.cancelFailed'), {
+        description: err instanceof Error ? err.message : t('errors.unknown'),
         duration: 4000
       });
     }
@@ -246,8 +263,7 @@ export function ParakeetModelManager({
   const downloadModel = async (modelName: string) => {
     if (downloadingModels.has(modelName)) return;
 
-    const displayInfo = getModelDisplayInfo(modelName);
-    const displayName = displayInfo?.friendlyName || modelName;
+    const displayName = localizedParakeetModel(t, modelName).name;
 
     try {
       setDownloadingModels(prev => new Set([...prev, modelName]));
@@ -260,8 +276,8 @@ export function ParakeetModelManager({
         )
       );
 
-      toast.info(`Downloading ${displayName}...`, {
-        description: 'This may take a few minutes',
+      toast.info(t('download.starting', { model: displayName }), {
+        description: t('download.mayTakeMinutes'),
         duration: 5000  // Auto-dismiss after 5 seconds
       });
 
@@ -274,7 +290,7 @@ export function ParakeetModelManager({
         return newSet;
       });
 
-      const errorMessage = err instanceof Error ? err.message : 'Download failed';
+      const errorMessage = err instanceof Error ? err.message : t('download.genericFailed');
       setModels(prev =>
         prev.map(model =>
           model.name === modelName ? { ...model, status: { Error: errorMessage } } : model
@@ -292,16 +308,14 @@ export function ParakeetModelManager({
       await saveModelSelection(modelName);
     }
 
-    const displayInfo = getModelDisplayInfo(modelName);
-    const displayName = displayInfo?.friendlyName || modelName;
-    toast.success(`Switched to ${displayName}`, {
+    const displayName = localizedParakeetModel(t, modelName).name;
+    toast.success(t('selection.switched', { model: displayName }), {
       duration: 3000
     });
   };
 
   const deleteModel = async (modelName: string) => {
-    const displayInfo = getModelDisplayInfo(modelName);
-    const displayName = displayInfo?.friendlyName || modelName;
+    const displayName = localizedParakeetModel(t, modelName).name;
 
     try {
       await ParakeetAPI.deleteCorruptedModel(modelName);
@@ -310,8 +324,8 @@ export function ParakeetModelManager({
       const modelList = await ParakeetAPI.getAvailableModels();
       setModels(modelList);
 
-      toast.success(`${displayName} deleted`, {
-        description: 'Model removed to free up space',
+      toast.success(t('delete.deleted', { model: displayName }), {
+        description: t('delete.freedSpace'),
         duration: 3000
       });
 
@@ -321,8 +335,8 @@ export function ParakeetModelManager({
       }
     } catch (err) {
       console.error('Failed to delete model:', err);
-      toast.error(`Failed to delete ${displayName}`, {
-        description: err instanceof Error ? err.message : 'Delete failed',
+      toast.error(t('delete.failed', { model: displayName }), {
+        description: err instanceof Error ? err.message : t('delete.genericFailed'),
         duration: 4000
       });
     }
@@ -342,7 +356,7 @@ export function ParakeetModelManager({
   if (error) {
     return (
       <div className={`bg-red-50 border border-red-200 rounded-lg p-4 ${className}`}>
-        <p className="text-sm text-red-800">Failed to load models</p>
+        <p className="text-sm text-red-800">{t('errors.loadModels')}</p>
         <p className="text-xs text-red-600 mt-1">{error}</p>
       </div>
     );
@@ -364,7 +378,7 @@ export function ParakeetModelManager({
           isSelected={selectedModel === recommendedModel.name}
           isRecommended={true}
           onSelect={() => {
-            if (recommendedModel.status === 'Available') {
+            if (mode === 'select' && recommendedModel.status === 'Available') {
               selectModel(recommendedModel.name);
             }
           }}
@@ -372,6 +386,7 @@ export function ParakeetModelManager({
           onCancel={() => cancelDownload(recommendedModel.name)}
           onDelete={() => deleteModel(recommendedModel.name)}
           isDownloading={downloadingModels.has(recommendedModel.name)}
+          canSelect={mode === 'select'}
         />
       )}
 
@@ -385,7 +400,7 @@ export function ParakeetModelManager({
               isSelected={selectedModel === model.name}
               isRecommended={false}
               onSelect={() => {
-                if (model.status === 'Available') {
+                if (mode === 'select' && model.status === 'Available') {
                   selectModel(model.name);
                 }
               }}
@@ -393,19 +408,20 @@ export function ParakeetModelManager({
               onCancel={() => cancelDownload(model.name)}
               onDelete={() => deleteModel(model.name)}
               isDownloading={downloadingModels.has(model.name)}
+              canSelect={mode === 'select'}
             />
           ))}
         </div>
       )}
 
       {/* Helper text */}
-      {selectedModel && (
+      {mode === 'select' && selectedModel && (
         <motion.div
           initial={{ opacity: 0, y: -5 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-xs text-gray-500 text-center pt-2"
         >
-          Using {getModelDisplayName(selectedModel)} for transcription
+          {t('selection.usingForTranscription', { model: localizedParakeetModel(t, selectedModel).name })}
         </motion.div>
       )}
     </div>
@@ -422,6 +438,7 @@ interface ModelCardProps {
   onCancel: () => void;
   onDelete: () => void;
   isDownloading: boolean;
+  canSelect: boolean;
 }
 
 function ModelCard({
@@ -432,13 +449,16 @@ function ModelCard({
   onDownload,
   onCancel,
   onDelete,
-  isDownloading
+  isDownloading,
+  canSelect
 }: ModelCardProps) {
+  const { t } = useTranslation('models');
   const [isHovered, setIsHovered] = useState(false);
   const displayInfo = getModelDisplayInfo(model.name);
-  const displayName = displayInfo?.friendlyName || model.name;
+  const localizedModel = localizedParakeetModel(t, model.name);
+  const displayName = localizedModel.name;
   const icon = displayInfo?.icon || '📦';
-  const tagline = displayInfo?.tagline || model.description || '';
+  const tagline = localizedModel.tagline || model.description || '';
 
   const isAvailable = model.status === 'Available';
   const isMissing = model.status === 'Missing';
@@ -457,23 +477,23 @@ function ModelCard({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={`
-        relative rounded-lg border-2 transition-all cursor-pointer
+        relative rounded-lg border-2 transition-all
         ${isSelected && isAvailable
           ? 'border-blue-500 bg-blue-50'
           : isAvailable
             ? 'border-gray-200 hover:border-gray-300 bg-white'
             : 'border-gray-200 bg-gray-50'
         }
-        ${isAvailable ? '' : 'cursor-default'}
+        ${isAvailable && canSelect ? 'cursor-pointer' : 'cursor-default'}
       `}
       onClick={() => {
-        if (isAvailable) onSelect();
+        if (isAvailable && canSelect) onSelect();
       }}
     >
       {/* Recommended Badge */}
       {isRecommended && (
         <div className="absolute -top-2 -right-2 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full font-medium">
-          Recommended
+          {t('status.recommended')}
         </div>
       )}
 
@@ -505,10 +525,10 @@ function ModelCard({
               <>
                 <div className="flex items-center gap-1.5 text-green-600">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-xs font-medium">Ready</span>
+                  <span className="text-xs font-medium">{t('status.ready')}</span>
                 </div>
                 <AnimatePresence>
-                  {isHovered && (
+                  {isHovered && !isSelected && (
                     <motion.button
                       initial={{ opacity: 0, scale: 0.8 }}
                       animate={{ opacity: 1, scale: 1 }}
@@ -519,7 +539,7 @@ function ModelCard({
                         onDelete();
                       }}
                       className="text-gray-400 hover:text-red-600 transition-colors p-1"
-                      title="Delete model to free up space"
+                      title={t('delete.freeSpace')}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -538,7 +558,7 @@ function ModelCard({
                 }}
                 className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
               >
-                Download
+                {t('actions.download')}
               </button>
             )}
 
@@ -550,7 +570,7 @@ function ModelCard({
                 }}
                 className="bg-red-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
               >
-                Retry
+                {t('actions.retry')}
               </button>
             )}
 
@@ -563,7 +583,7 @@ function ModelCard({
                   }}
                   className="bg-orange-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-orange-700 transition-colors"
                 >
-                  Delete
+                  {t('actions.delete')}
                 </button>
                 <button
                   onClick={(e) => {
@@ -572,7 +592,7 @@ function ModelCard({
                   }}
                   className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
                 >
-                  Re-download
+                  {t('actions.redownload')}
                 </button>
               </div>
             )}
@@ -589,7 +609,7 @@ function ModelCard({
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-blue-600">Downloading...</span>
+                <span className="text-sm font-medium text-blue-600">{t('status.downloading')}</span>
                 <span className="text-sm font-semibold text-blue-600">{Math.round(downloadProgress)}%</span>
               </div>
               <button
@@ -598,9 +618,9 @@ function ModelCard({
                   onCancel();
                 }}
                 className="text-xs text-gray-600 hover:text-red-600 font-medium transition-colors px-2 py-1 rounded hover:bg-red-50"
-                title="Cancel download"
+                title={t('actions.cancelDownload')}
               >
-                Cancel
+                {t('actions.cancel')}
               </button>
             </div>
             <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -617,7 +637,7 @@ function ModelCard({
                   {formatFileSize(model.size_mb * downloadProgress / 100)} / {formatFileSize(model.size_mb)}
                 </>
               ) : (
-                'Downloading...'
+                t('status.downloading')
               )}
             </p>
           </motion.div>
