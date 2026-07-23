@@ -193,7 +193,9 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         with:
           projectPath: frontend
-          args: --target aarch64-apple-darwin ${{ steps.build-profile.outputs.args }}
+          # Fork builds do not have the upstream updater private key; the local
+          # installer only needs the unsigned app/DMG artifacts.
+          args: --target aarch64-apple-darwin --config '{"bundle":{"createUpdaterArtifacts":false}}' ${{ steps.build-profile.outputs.args }}
 
       - name: Verify build artifacts
         run: |
