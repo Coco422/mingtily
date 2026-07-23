@@ -5,7 +5,7 @@ The supported Mingtily application is a Tauri 2 desktop app with a Next.js/React
 ## Prerequisites
 
 - Node.js 20
-- pnpm 8
+- pnpm 10
 - Rust stable, compatible with the workspace `rust-version`
 - Platform-specific Tauri dependencies
 - macOS: a complete Xcode installation for native audio dependencies and release builds
