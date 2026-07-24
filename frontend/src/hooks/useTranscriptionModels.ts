@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { TranscriptModelConfig } from '@/types/capabilities';
+import { SherpaAsrAPI } from '@/lib/sherpa-asr';
 
 export interface RawModelInfo {
   name: string;
@@ -9,14 +10,14 @@ export interface RawModelInfo {
 }
 
 export interface ModelOption {
-  provider: 'whisper' | 'parakeet';
+  provider: 'whisper' | 'parakeet' | 'sherpa-onnx';
   name: string;
   displayName: string;
   size_mb: number;
 }
 
 /**
- * Custom hook for fetching and managing transcription models (Whisper and Parakeet).
+ * Fetch installed transcription models from every local provider.
  *
  * This hook centralizes the model fetching logic that was previously duplicated
  * in ImportAudioDialog and RetranscribeDialog components.
@@ -73,6 +74,21 @@ export function useTranscriptionModels(transcriptModelConfig: Partial<Transcript
       console.error('Failed to fetch Parakeet models:', err);
     }
 
+    try {
+      const sherpaModels = await SherpaAsrAPI.listModels();
+      const availableSherpa = sherpaModels
+        .filter((model) => model.status === 'available')
+        .map((model) => ({
+          provider: 'sherpa-onnx' as const,
+          name: model.id,
+          displayName: `🀄 Sherpa ONNX: ${model.name}`,
+          size_mb: model.installed_size / 1024 / 1024,
+        }));
+      allModels.push(...availableSherpa);
+    } catch (err) {
+      console.error('Failed to fetch Sherpa ONNX models:', err);
+    }
+
     setAvailableModels(allModels);
 
     // Set default model based on user's saved configuration
@@ -84,7 +100,8 @@ export function useTranscriptionModels(transcriptModelConfig: Partial<Transcript
     const configuredMatch = allModels.find(
       (m) =>
         (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
+        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel) ||
+        (configuredProvider === 'sherpa-onnx' && m.provider === 'sherpa-onnx' && m.name === configuredModel)
     );
 
     // Only set default model if user hasn't manually selected one

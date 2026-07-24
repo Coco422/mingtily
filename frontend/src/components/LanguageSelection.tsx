@@ -3,6 +3,12 @@ import { Globe } from 'lucide-react';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTranslation } from 'react-i18next';
+import type { TranscriptProviderId } from '@/types/capabilities';
+import {
+  isAutomaticLanguageOnly,
+  normalizeLanguageForModel,
+  supportedLanguageCodes,
+} from '@/lib/sherpa-asr';
 
 export interface Language {
   code: string;
@@ -15,6 +21,7 @@ const LANGUAGES: Language[] = [
   { code: 'auto-translate', name: 'Auto Detect (Translate to English)' },
   { code: 'en', name: 'English' },
   { code: 'zh', name: 'Chinese' },
+  { code: 'yue', name: 'Cantonese' },
   { code: 'de', name: 'German' },
   { code: 'es', name: 'Spanish' },
   { code: 'ru', name: 'Russian' },
@@ -118,24 +125,34 @@ interface LanguageSelectionProps {
   selectedLanguage: string;
   onLanguageChange: (language: string) => void;
   disabled?: boolean;
-  provider?: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+  provider?: TranscriptProviderId;
+  model?: string;
 }
 
 export function LanguageSelection({
   selectedLanguage,
   onLanguageChange,
   disabled = false,
-  provider = 'localWhisper'
+  provider = 'localWhisper',
+  model,
 }: LanguageSelectionProps) {
   const { t, i18n } = useTranslation('settings');
   const [saving, setSaving] = useState(false);
   const { setSelectedLanguage } = useConfig();
 
-  // Parakeet only supports auto-detection (doesn't support manual language selection)
-  const isParakeet = provider === 'parakeet';
-  const availableLanguages = isParakeet
-    ? LANGUAGES.filter(lang => lang.code === 'auto' || lang.code === 'auto-translate')
+  const supportedCodes = supportedLanguageCodes(provider, model);
+  const automaticOnly = isAutomaticLanguageOnly(provider, model);
+  const availableLanguages = supportedCodes
+    ? LANGUAGES.filter((language) => supportedCodes.includes(language.code))
     : LANGUAGES;
+
+  useEffect(() => {
+    const normalized = normalizeLanguageForModel(provider, model, selectedLanguage);
+    if (normalized !== selectedLanguage) {
+      setSelectedLanguage(normalized);
+      onLanguageChange(normalized);
+    }
+  }, [model, onLanguageChange, provider, selectedLanguage, setSelectedLanguage]);
 
   const handleLanguageChange = async (languageCode: string) => {
     setSaving(true);
@@ -200,11 +217,14 @@ export function LanguageSelection({
           ))}
         </select>
 
-        {/* Parakeet language limitation warning */}
-        {isParakeet && (
+        {automaticOnly && (
           <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800">
-            <p className="font-medium">ℹ️ {t('services.transcription.parakeetLanguageTitle')}</p>
-            <p className="mt-1 text-xs">{t('services.transcription.parakeetLanguageDescription')}</p>
+            <p className="font-medium">ℹ️ {t('services.transcription.automaticLanguageTitle')}</p>
+            <p className="mt-1 text-xs">
+              {t('services.transcription.automaticLanguageDescription', {
+                model: model || provider,
+              })}
+            </p>
           </div>
         )}
 

@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Bot, MessageSquareText, Users } from 'lucide-react';
+import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react';
+import { AlertTriangle, AudioLines, Bot, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ModelManager } from '@/components/WhisperModelManager';
 import { ParakeetModelManager } from '@/components/ParakeetModelManager';
+import { SherpaAsrModelManager } from '@/components/SherpaAsrModelManager';
 import { SpeakerDiarizationModelManager } from '@/components/SpeakerDiarizationModelManager';
 import { BuiltInModelManager } from '@/components/BuiltInModelManager';
 import { OllamaModelManager } from '@/components/OllamaModelManager';
@@ -14,9 +15,63 @@ import {
   SPEAKER_DIARIZATION_CONFIG_CHANGED_EVENT,
 } from '@/services/capabilityConfigService';
 import { DEFAULT_SPEAKER_DIARIZATION_CONFIG } from '@/types/capabilities';
+import { Button } from '@/components/ui/button';
 
 interface ModelsSettingsProps {
   onOpenServices: () => void;
+}
+
+interface ModelsSettingsErrorBoundaryProps {
+  children: ReactNode;
+  title: string;
+  description: string;
+  retryLabel: string;
+}
+
+interface ModelsSettingsErrorBoundaryState {
+  error: Error | null;
+}
+
+class ModelsSettingsErrorBoundary extends Component<
+  ModelsSettingsErrorBoundaryProps,
+  ModelsSettingsErrorBoundaryState
+> {
+  state: ModelsSettingsErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): ModelsSettingsErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[ModelsSettings] Rendering failed', error, info);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+
+    return (
+      <section className="rounded-lg border border-red-200 bg-red-50/60 p-5">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold text-red-900">{this.props.title}</h2>
+            <p className="mt-1 text-xs leading-5 text-red-800">{this.props.description}</p>
+            <pre className="mt-3 overflow-x-auto rounded-md border border-red-200 bg-white/80 p-3 text-xs text-red-900">
+              {this.state.error.message}
+            </pre>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3 border-red-200 bg-white text-red-800 hover:bg-red-100"
+              onClick={() => this.setState({ error: null })}
+            >
+              {this.props.retryLabel}
+            </Button>
+          </div>
+        </div>
+      </section>
+    );
+  }
 }
 
 function ModelSection({
@@ -31,20 +86,22 @@ function ModelSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-      <div className="mb-5 flex items-start gap-3">
-        <div className="rounded-md bg-purple-50 p-2 text-purple-700"><Icon className="h-5 w-5" /></div>
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
-          <p className="mt-1 text-sm text-gray-600">{description}</p>
+    <section className="overflow-hidden rounded-lg border border-black/[0.08] bg-white">
+      <div className="flex items-start gap-3 border-b border-black/[0.08] bg-gray-50/60 px-5 py-4">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-purple-100 bg-purple-50 text-purple-700">
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold leading-6 text-gray-900">{title}</h2>
+          <p className="mt-0.5 text-xs leading-5 text-gray-600">{description}</p>
         </div>
       </div>
-      {children}
+      <div className="p-4">{children}</div>
     </section>
   );
 }
 
-export function ModelsSettings({ onOpenServices }: ModelsSettingsProps) {
+function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
   const { t } = useTranslation('models');
   const { transcriptModelConfig, modelConfig } = useConfig();
   const [speakerEnabled, setSpeakerEnabled] = useState(
@@ -77,27 +134,29 @@ export function ModelsSettings({ onOpenServices }: ModelsSettingsProps) {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <ModelSection
-        icon={MessageSquareText}
+        icon={AudioLines}
         title={t('sections.transcription')}
         description={t('sections.transcriptionDescription')}
       >
-        <div className="space-y-7">
-          <div>
-            <h3 className="mb-3 text-sm font-semibold">Whisper</h3>
-            <ModelManager
-              mode="manage"
-              selectedModel={transcriptModelConfig.provider === 'localWhisper' ? transcriptModelConfig.model : undefined}
-            />
-          </div>
-          <div className="border-t pt-6">
-            <h3 className="mb-3 text-sm font-semibold">Parakeet</h3>
-            <ParakeetModelManager
-              mode="manage"
-              selectedModel={transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : undefined}
-            />
-          </div>
+        <div className="space-y-2">
+          <SherpaAsrModelManager
+            selectedModel={
+              transcriptModelConfig.provider === 'sherpa-onnx'
+                ? transcriptModelConfig.model
+                : undefined
+            }
+            onOpenServices={onOpenServices}
+          />
+          <ModelManager
+            mode="manage"
+            selectedModel={transcriptModelConfig.provider === 'localWhisper' ? transcriptModelConfig.model : undefined}
+          />
+          <ParakeetModelManager
+            mode="manage"
+            selectedModel={transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : undefined}
+          />
         </div>
       </ModelSection>
 
@@ -134,5 +193,19 @@ export function ModelsSettings({ onOpenServices }: ModelsSettingsProps) {
         />
       </ModelSection>
     </div>
+  );
+}
+
+export function ModelsSettings(props: ModelsSettingsProps) {
+  const { t } = useTranslation('models');
+
+  return (
+    <ModelsSettingsErrorBoundary
+      title={t('errors.pageFailed')}
+      description={t('errors.pageFailedDescription')}
+      retryLabel={t('actions.retry')}
+    >
+      <ModelsSettingsContent {...props} />
+    </ModelsSettingsErrorBoundary>
   );
 }

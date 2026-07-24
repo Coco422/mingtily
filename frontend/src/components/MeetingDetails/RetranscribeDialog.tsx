@@ -25,6 +25,11 @@ import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionMod
 import { useTranslation } from 'react-i18next';
 import { capabilityConfigService } from '@/services/capabilityConfigService';
 import { localizeAudioProgress } from '@/lib/audio-progress';
+import {
+  isAutomaticLanguageOnly,
+  normalizeLanguageForModel,
+  supportedLanguageCodes,
+} from '@/lib/sherpa-asr';
 
 interface RetranscribeDialogProps {
   open: boolean;
@@ -109,13 +114,28 @@ export function RetranscribeDialog({
     const name = selectedModelKey.slice(colonIndex + 1);
     return availableModels.find(m => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
-  const isParakeetModel = selectedModelDetails?.provider === 'parakeet';
+  const supportedLanguages = supportedLanguageCodes(
+    selectedModelDetails?.provider,
+    selectedModelDetails?.name
+  );
+  const automaticLanguageOnly = isAutomaticLanguageOnly(
+    selectedModelDetails?.provider,
+    selectedModelDetails?.name
+  );
+  const availableLanguagesForModel = supportedLanguages
+    ? LANGUAGES.filter((language) => supportedLanguages.includes(language.code))
+    : LANGUAGES;
 
   useEffect(() => {
-    if (isParakeetModel && selectedLang !== 'auto') {
-      setSelectedLang('auto');
+    const normalized = normalizeLanguageForModel(
+      selectedModelDetails?.provider,
+      selectedModelDetails?.name,
+      selectedLang
+    );
+    if (normalized !== selectedLang) {
+      setSelectedLang(normalized);
     }
-  }, [isParakeetModel, selectedLang]);
+  }, [selectedLang, selectedModelDetails?.name, selectedModelDetails?.provider]);
 
   // Reset state only when dialog transitions from closed to open
   // This prevents re-initialization when config changes while dialog is already open
@@ -222,7 +242,8 @@ export function RetranscribeDialog({
     setProgress(null);
 
     try {
-      const languageToSend = isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang;
+      const languageToSend =
+        automaticLanguageOnly || selectedLang === 'auto' ? null : selectedLang;
       await invoke('start_retranscription_command', {
         meetingId,
         meetingFolderPath,
@@ -313,7 +334,7 @@ export function RetranscribeDialog({
 
         <div className="space-y-4 py-4">
           {!isProcessing && !error && (
-            !isParakeetModel ? (
+            !automaticLanguageOnly ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Globe className="h-4 w-4 text-muted-foreground" />
@@ -324,7 +345,7 @@ export function RetranscribeDialog({
                     <SelectValue placeholder={t('common:selectLanguage')} />
                   </SelectTrigger>
                   <SelectContent className="max-h-60">
-                    {LANGUAGES.map((lang) => (
+                    {availableLanguagesForModel.map((lang) => (
                       <SelectItem key={lang.code} value={lang.code}>
                         {languageLabel(lang.code, lang.name)}
                       </SelectItem>
@@ -342,7 +363,9 @@ export function RetranscribeDialog({
                   <span className="text-sm font-medium">{t('common:language')}</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {t('parakeetLanguage')}
+                  {t('settings:services.transcription.automaticLanguageDescription', {
+                    model: selectedModelDetails?.displayName || selectedModelDetails?.name,
+                  })}
                 </p>
               </div>
             )

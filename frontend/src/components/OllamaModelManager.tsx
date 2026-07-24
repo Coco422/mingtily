@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Download, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { Box, Download, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ModelAssetRow } from '@/components/ModelAssetRow';
 
 interface OllamaModel {
   name: string;
@@ -119,32 +120,36 @@ export function OllamaModelManager({ endpoint, selectedModel }: OllamaModelManag
         </p>
       )}
 
-      <div className="grid gap-3">
+      <div className="grid gap-2">
         {models.map((model) => {
           const inUse = model.name === selectedModel;
           return (
-            <div key={model.id || model.name} className="flex items-center justify-between gap-4 rounded-lg border p-4">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="break-all font-medium">{model.name}</span>
-                  {inUse && (
-                    <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                      {t('status.inUse')}
-                    </span>
+            <ModelAssetRow
+              key={model.id || model.name}
+              icon={Box}
+              name={model.name}
+              provider="Ollama"
+              metadata={[model.size]}
+              state="installed"
+              statusLabel={inUse ? t('status.inUse') : t('status.installed')}
+              inUse={inUse}
+              actions={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={inUse || removing === model.name}
+                  onClick={() => void remove(model.name)}
+                  title={inUse ? t('delete.activeBlocked') : t('actions.delete')}
+                >
+                  {removing === model.name ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
                   )}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">{model.size}</p>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={inUse || removing === model.name}
-                onClick={() => void remove(model.name)}
-                title={inUse ? t('delete.activeBlocked') : t('actions.delete')}
-              >
-                {removing === model.name ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              </Button>
-            </div>
+                  {inUse ? t('status.inUse') : t('actions.delete')}
+                </Button>
+              }
+            />
           );
         })}
       </div>

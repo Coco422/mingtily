@@ -2,16 +2,20 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Download, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   ParakeetModelInfo,
   ModelStatus,
   ParakeetAPI,
+  PARAKEET_MODEL_CONFIGS,
   getModelDisplayInfo,
   formatFileSize
 } from '../lib/parakeet';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import { Button } from '@/components/ui/button';
+import { ModelAssetRow, type ModelAssetState } from '@/components/ModelAssetRow';
 
 const PARAKEET_UI_KEYS: Record<string, string> = {
   'parakeet-tdt-0.6b-v3-int8': 'lightning',
@@ -26,6 +30,19 @@ function localizedParakeetModel(t: TFunction, modelName: string) {
     name: key ? t(`parakeet.${key}.name`) : fallback?.friendlyName || modelName,
     tagline: key ? t(`parakeet.${key}.tagline`) : fallback?.tagline || '',
   };
+}
+
+function normalizeParakeetSpeed(
+  speed: ParakeetModelInfo['speed'] | string | undefined,
+  fallback: ParakeetModelInfo['speed']
+): ParakeetModelInfo['speed'] {
+  const normalized = speed?.trim().toLowerCase();
+  if (normalized?.startsWith('ultra fast')) return 'Ultra Fast';
+  if (normalized?.startsWith('very fast')) return 'Very Fast';
+  if (normalized?.startsWith('fast')) return 'Fast';
+  if (normalized?.startsWith('medium')) return 'Medium';
+  if (normalized?.startsWith('slow')) return 'Slow';
+  return fallback;
 }
 
 interface ParakeetModelManagerProps {
@@ -362,6 +379,126 @@ export function ParakeetModelManager({
     );
   }
 
+  const renderManagedModel = (model: ParakeetModelInfo) => {
+    const isAvailable = model.status === 'Available';
+    const isError = typeof model.status === 'object' && 'Error' in model.status;
+    const isCorrupted = typeof model.status === 'object' && 'Corrupted' in model.status;
+    const downloadProgress =
+      typeof model.status === 'object' && 'Downloading' in model.status
+        ? model.status.Downloading
+        : null;
+    const isDownloading = downloadingModels.has(model.name) || downloadProgress !== null;
+    const isSelected = selectedModel === model.name && isAvailable;
+    const state: ModelAssetState = isDownloading
+      ? 'downloading'
+      : isAvailable
+        ? 'installed'
+        : isCorrupted
+          ? 'corrupt'
+          : isError
+            ? 'error'
+            : 'missing';
+    const statusLabel = isSelected
+      ? t('status.inUse')
+      : state === 'downloading'
+        ? t('status.downloading')
+        : state === 'installed'
+          ? t('status.installed')
+          : state === 'corrupt'
+            ? t('status.needsRepair')
+            : state === 'error'
+              ? t('status.error')
+              : t('status.notInstalled');
+
+    const actions = isDownloading ? (
+      <Button variant="outline" size="sm" onClick={() => void cancelDownload(model.name)}>
+        {t('actions.cancel')}
+      </Button>
+    ) : isAvailable ? (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={isSelected}
+        onClick={() => void deleteModel(model.name)}
+        title={isSelected ? t('delete.activeBlocked') : t('delete.freeSpace')}
+      >
+        <Trash2 className="h-4 w-4" />
+        {isSelected ? t('status.inUse') : t('actions.delete')}
+      </Button>
+    ) : isCorrupted ? (
+      <>
+        <Button variant="outline" size="sm" onClick={() => void deleteModel(model.name)}>
+          <Trash2 className="h-4 w-4" />
+          {t('actions.delete')}
+        </Button>
+        <Button size="sm" onClick={() => void downloadModel(model.name)}>
+          <RefreshCw className="h-4 w-4" />
+          {t('actions.repair')}
+        </Button>
+      </>
+    ) : (
+      <Button size="sm" onClick={() => void downloadModel(model.name)}>
+        {isError ? <RefreshCw className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+        {isError ? t('actions.retry') : t('actions.download')}
+      </Button>
+    );
+
+    const localizedModel = localizedParakeetModel(t, model.name);
+    const modelConfig = PARAKEET_MODEL_CONFIGS[model.name];
+    const accuracy = model.accuracy ?? modelConfig?.accuracy ?? 'Good';
+    const speed = normalizeParakeetSpeed(model.speed, modelConfig?.speed ?? 'Fast');
+    const quantization = model.quantization ?? modelConfig?.quantization ?? 'Int8';
+    const sizeMb = model.size_mb ?? modelConfig?.size_mb ?? 0;
+    const speedKey =
+      speed === 'Very Fast'
+        ? 'veryFast'
+        : speed === 'Ultra Fast'
+          ? 'ultraFast'
+          : speed.toLowerCase();
+
+    return (
+      <ModelAssetRow
+        key={model.name}
+        name={localizedModel.name}
+        provider="NVIDIA Parakeet"
+        description={localizedModel.tagline || model.description}
+        metadata={[
+          formatFileSize(sizeMb),
+          quantization,
+          t('specs.accuracy', { accuracy: t(`metrics.accuracy.${accuracy.toLowerCase()}`) }),
+          t('specs.processing', {
+            speed: t(`metrics.speed.${speedKey}`),
+          }),
+        ]}
+        state={state}
+        statusLabel={statusLabel}
+        inUse={isSelected}
+        progress={downloadProgress}
+        progressLabel={
+          downloadProgress !== null
+            ? t('download.progress', { progress: Math.round(downloadProgress) })
+            : undefined
+        }
+        actions={actions}
+      />
+    );
+  };
+
+  if (mode === 'manage') {
+    const modelOrder = [
+      'parakeet-tdt-0.6b-v3-int8',
+      'parakeet-tdt-0.6b-v2-int8',
+      'parakeet-tdt-0.6b-v3-fp32',
+    ];
+    return (
+      <div className={`space-y-2 ${className}`}>
+        {[...models]
+          .sort((left, right) => modelOrder.indexOf(left.name) - modelOrder.indexOf(right.name))
+          .map(renderManagedModel)}
+      </div>
+    );
+  }
+
   const recommendedModel = models.find(m =>
     m.name === 'parakeet-tdt-0.6b-v3-int8'
   );
@@ -376,7 +513,7 @@ export function ParakeetModelManager({
         <ModelCard
           model={recommendedModel}
           isSelected={selectedModel === recommendedModel.name}
-          isRecommended={true}
+          isRecommended={false}
           onSelect={() => {
             if (mode === 'select' && recommendedModel.status === 'Available') {
               selectModel(recommendedModel.name);

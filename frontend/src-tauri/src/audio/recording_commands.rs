@@ -4,8 +4,8 @@
 // Delegates to transcription and recording modules for actual implementation.
 
 use crate::speaker_diarization::{
-    installed_model_paths, is_enabled as speaker_diarization_is_enabled, refine_speaker_labels,
-    DiarizationEngine, SpeakerLabelUpdate,
+    diarize_audio_file_in_windows, installed_model_paths,
+    is_enabled as speaker_diarization_is_enabled, refine_speaker_labels, SpeakerLabelUpdate,
 };
 use anyhow::Result;
 use log::{error, info, warn};
@@ -708,8 +708,10 @@ pub async fn stop_recording<R: Runtime>(
                 warn!("⚠️ No Parakeet engine found to unload model");
             }
         }
-        _ => {
-            // Default to Whisper
+        Some(crate::sherpa_asr::PROVIDER_ID) => {
+            info!("Sherpa ONNX recognizer released with the transcription Provider");
+        }
+        Some("localWhisper") | Some("whisper") | None => {
             info!("🎤 Unloading Whisper model...");
             let engine_clone = {
                 let engine_guard = crate::whisper_engine::commands::WHISPER_ENGINE
@@ -733,6 +735,9 @@ pub async fn stop_recording<R: Runtime>(
             } else {
                 warn!("⚠️ No Whisper engine found to unload model");
             }
+        }
+        Some(provider) => {
+            warn!("No model unload handler is registered for provider '{provider}'");
         }
     }
 
@@ -904,12 +909,17 @@ async fn refine_recording_speakers<R: Runtime>(
             )
         })
         .collect::<Vec<_>>();
+    let diarization_ranges = transcript_ranges
+        .iter()
+        .map(|(_, start, end, _)| (*start, *end))
+        .collect::<Vec<_>>();
     let audio_path = audio_path.to_string();
     let result = tokio::task::spawn_blocking(move || {
-        let decoded = crate::audio::decoder::decode_audio_file(std::path::Path::new(&audio_path))?;
-        let samples = decoded.to_whisper_format();
-        let engine = DiarizationEngine::new(&paths, None)?;
-        let turns = engine.diarize(&samples)?;
+        let turns = diarize_audio_file_in_windows(
+            std::path::Path::new(&audio_path),
+            &paths,
+            &diarization_ranges,
+        )?;
         Ok::<_, anyhow::Error>(refine_speaker_labels(&transcript_ranges, &turns))
     })
     .await;

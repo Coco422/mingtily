@@ -8,13 +8,13 @@
 
 Mingtily is a desktop meeting assistant for people who want recordings, transcripts, speaker labels, and local models to stay on their own device. External LLM Providers remain available as an explicit choice when cloud models provide better summary quality or performance.
 
-Current version: **0.5.2**. The project is usable for development and personal testing. GitHub Actions can produce unsigned development installers; signed public releases are not yet provided.
+Current version: **0.6.0**. The project is usable for development and personal testing. GitHub Actions can produce unsigned development installers; signed public releases are not yet provided.
 
 ## Highlights
 
 - Record microphone and system audio in one meeting timeline.
 - Import common audio formats, including Opus audio inside M4A/MP4 containers.
-- Transcribe locally with NVIDIA Parakeet or Whisper.
+- Transcribe locally with Whisper, NVIDIA Parakeet, SenseVoice, Paraformer, or Qwen3-ASR.
 - Add speaker labels with Sherpa ONNX, Pyannote segmentation, and 3D-Speaker ERes2Net embeddings.
 - Refine provisional live speaker labels after recording stops without running ASR again.
 - Generate summaries with an optional built-in model, Ollama, or a user-configured external Provider.
@@ -40,7 +40,7 @@ Large model weights are not bundled with the application. Models are downloaded 
 
 | Capability | Current choices | Notes |
 |---|---|---|
-| Speech recognition | Parakeet TDT 0.6B v2/v3, Whisper | Parakeet is fast but currently auto-detects language; use Whisper when a language such as Chinese must be forced. |
+| Speech recognition | Whisper, Parakeet TDT 0.6B v2/v3, SenseVoice Small int8, Paraformer Small int8, Qwen3-ASR 0.6B int8 | SenseVoice is the recommended Chinese choice and supports forced Mandarin or Cantonese. Paraformer is the lightweight Chinese/English choice. Qwen3-ASR is a larger multilingual Beta option. |
 | Speaker diarization | Sherpa ONNX `sherpa-v1` | Pyannote segmentation 3.0 int8 plus 3D-Speaker ERes2Net; approximately 47 MB to download. |
 | Built-in summaries | Qwen 3.5 2B/4B, Gemma 3 1B/4B | Optional GGUF downloads; local inference uses the bundled `llama-helper` sidecar. |
 | Local service summaries | Ollama | Defaults to a loopback endpoint and can use models already managed by Ollama. |
@@ -63,7 +63,7 @@ Code signing, Apple notarization, and production installer signing are deferred 
 1. Open **Settings → Models** and download a local ASR model.
 2. Open **Settings → Services** and select the installed transcription model.
 3. Optionally download and enable the speaker-diarization model.
-4. Choose the transcription language. For predictable Chinese output in 0.5.2, select a Whisper model and choose Chinese instead of relying on Parakeet auto-detection.
+4. Choose the transcription language. For predictable Chinese output, use SenseVoice and choose Mandarin or Cantonese; Whisper remains available for broader language coverage and translation to English.
 5. Start a recording or enable the Beta import/retranscription feature.
 6. Configure Built-in AI, Ollama, or an external summary Provider only if summaries are needed.
 
@@ -143,7 +143,8 @@ See [AGENTS.md](AGENTS.md) for durable engineering boundaries and [CONTRIBUTING.
 
 ## Known limitations
 
-- Parakeet does not currently expose a forced language selection, so Chinese audio may be misdetected or translated unexpectedly. The roadmap adds SenseVoice and a unified ASR Provider lifecycle.
+- Parakeet and the current offline Paraformer model use automatic language detection. SenseVoice, Qwen3-ASR, and Whisper accept supported fixed-language hints.
+- Current recording text still appears after each VAD speech segment completes. Online Paraformer partial hypotheses require a separate streaming session and revision protocol planned for 0.7.
 - Live speaker labels appear after a VAD segment finishes; they are not token-level labels.
 - Overlapping speech is assigned to the dominant speaker and is not transcribed twice.
 - Speaker names cannot yet be renamed and are not remembered across meetings.

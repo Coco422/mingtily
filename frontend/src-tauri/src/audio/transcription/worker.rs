@@ -2,8 +2,7 @@
 //
 // Parallel transcription worker pool and chunk processing logic.
 
-use super::engine::TranscriptionEngine;
-use super::provider::TranscriptionError;
+use super::provider::{TranscriptionError, TranscriptionProvider};
 use crate::audio::AudioChunk;
 use crate::speaker_diarization::{
     installed_model_paths, is_enabled as speaker_diarization_is_enabled, RealtimeSpeakerSession,
@@ -13,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Runtime};
+
+const MIN_TRANSCRIPTION_SAMPLES: usize = 1_600;
 
 struct LabeledAudioChunk {
     chunk: AudioChunk,
@@ -65,9 +66,10 @@ pub fn start_transcription_task<R: Runtime>(
         info!("🚀 Starting optimized parallel transcription task - guaranteeing zero chunk loss");
 
         // Initialize transcription engine (Whisper or Parakeet based on config)
-        let transcription_engine = match super::engine::get_or_init_transcription_engine(&app).await
+        let transcription_provider = match super::engine::get_or_init_transcription_engine(&app)
+            .await
         {
-            Ok(engine) => engine,
+            Ok(provider) => provider,
             Err(e) => {
                 error!("Failed to initialize transcription engine: {}", e);
                 let _ = app.emit("transcription-error", serde_json::json!({
@@ -111,11 +113,7 @@ pub fn start_transcription_task<R: Runtime>(
         // Spawn worker tasks
         let mut worker_handles = Vec::new();
         for worker_id in 0..NUM_WORKERS {
-            let engine_clone = match &transcription_engine {
-                TranscriptionEngine::Whisper(e) => TranscriptionEngine::Whisper(e.clone()),
-                TranscriptionEngine::Parakeet(e) => TranscriptionEngine::Parakeet(e.clone()),
-                TranscriptionEngine::Provider(p) => TranscriptionEngine::Provider(p.clone()),
-            };
+            let provider_clone = transcription_provider.clone();
             let app_clone = app.clone();
             let work_receiver_clone = work_receiver.clone();
             let chunks_completed_clone = chunks_completed.clone();
@@ -127,13 +125,13 @@ pub fn start_transcription_task<R: Runtime>(
                 info!("👷 Worker {} started", worker_id);
 
                 // PRE-VALIDATE model state to avoid repeated async calls per chunk
-                let initial_model_loaded = engine_clone.is_model_loaded().await;
-                let current_model = engine_clone
+                let initial_model_loaded = provider_clone.is_model_loaded().await;
+                let current_model = provider_clone
                     .get_current_model()
                     .await
                     .unwrap_or_else(|| "unknown".to_string());
 
-                let engine_name = engine_clone.provider_name();
+                let engine_name = provider_clone.provider_name();
 
                 if initial_model_loaded {
                     info!(
@@ -189,7 +187,7 @@ pub fn start_transcription_task<R: Runtime>(
                             }
 
                             // Check if model is still loaded before processing
-                            if !engine_clone.is_model_loaded().await {
+                            if !provider_clone.is_model_loaded().await {
                                 warn!("⚠️ Worker {}: Model unloaded, but continuing to preserve chunk {}", worker_id, chunk.chunk_id);
                                 // Still count as completed even if we can't process
                                 chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
@@ -206,20 +204,13 @@ pub fn start_transcription_task<R: Runtime>(
                                     chunk.data.len() as f64 / chunk.sample_rate as f64;
 
                                 // Transcribe with provider-agnostic approach
-                                match transcribe_chunk_with_provider(
-                                    &engine_clone,
-                                    chunk,
-                                    &app_clone,
-                                )
-                                .await
+                                match transcribe_chunk_with_provider(provider_clone.as_ref(), chunk)
+                                    .await
                                 {
                                     Ok((transcript, confidence_opt, is_partial)) => {
                                         // Provider-aware confidence threshold
-                                        let confidence_threshold = match &engine_clone {
-                                            TranscriptionEngine::Whisper(_)
-                                            | TranscriptionEngine::Provider(_) => 0.3,
-                                            TranscriptionEngine::Parakeet(_) => 0.0, // Parakeet has no confidence, accept all
-                                        };
+                                        let confidence_threshold =
+                                            if confidence_opt.is_some() { 0.3 } else { 0.0 };
 
                                         let confidence_str = match confidence_opt {
                                             Some(c) => format!("{:.2}", c),
@@ -323,8 +314,14 @@ pub fn start_transcription_task<R: Runtime>(
                                                     "Worker {}: Transcription failed: {}",
                                                     worker_id, e
                                                 );
-                                                let _ = app_clone
-                                                    .emit("transcription-warning", e.to_string());
+                                                let _ = app_clone.emit(
+                                                    "transcription-error",
+                                                    serde_json::json!({
+                                                        "error": e.to_string(),
+                                                        "userMessage": format!("Transcription failed: {}", e),
+                                                        "actionable": false
+                                                    }),
+                                                );
                                             }
                                         }
                                     }
@@ -552,10 +549,9 @@ async fn prepare_speaker_chunks(
 
 /// Transcribe audio chunk using the appropriate provider (Whisper, Parakeet, or trait-based)
 /// Returns: (text, confidence Option, is_partial)
-async fn transcribe_chunk_with_provider<R: Runtime>(
-    engine: &TranscriptionEngine,
+async fn transcribe_chunk_with_provider(
+    provider: &dyn TranscriptionProvider,
     chunk: AudioChunk,
-    app: &AppHandle<R>,
 ) -> std::result::Result<(String, Option<f32>, bool), TranscriptionError> {
     // Convert to 16kHz mono for transcription
     let transcription_data = if chunk.sample_rate != 16000 {
@@ -567,15 +563,17 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
     // Skip VAD processing here since the pipeline already extracted speech using VAD
     let speech_samples = transcription_data;
 
-    // Check for empty samples - improved error handling
-    if speech_samples.is_empty() {
-        warn!(
-            "Audio chunk {} is empty, skipping transcription",
-            chunk.chunk_id
+    // Speaker boundaries and VAD flushes can produce tiny fragments. They are
+    // expected control-flow noise, not actionable transcription failures.
+    if speech_samples.len() < MIN_TRANSCRIPTION_SAMPLES {
+        info!(
+            "Audio chunk {} has only {} samples; skipping transcription",
+            chunk.chunk_id,
+            speech_samples.len()
         );
         return Err(TranscriptionError::AudioTooShort {
-            samples: 0,
-            minimum: 1600, // 100ms at 16kHz
+            samples: speech_samples.len(),
+            minimum: MIN_TRANSCRIPTION_SAMPLES,
         });
     }
 
@@ -589,136 +587,48 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
         energy
     );
 
-    // Transcribe using the appropriate engine (with improved error handling)
-    match engine {
-        TranscriptionEngine::Whisper(whisper_engine) => {
-            // Get language preference from global state
-            let language = crate::get_language_preference_internal();
+    let language = crate::get_language_preference_internal();
 
-            match whisper_engine
-                .transcribe_audio_with_confidence(speech_samples, language)
-                .await
-            {
-                Ok((text, confidence, is_partial)) => {
-                    let cleaned_text = text.trim().to_string();
-                    if cleaned_text.is_empty() {
-                        return Ok((String::new(), Some(confidence), is_partial));
-                    }
-
-                    info!(
-                        "Whisper transcription complete for chunk {}: {} chars (confidence: {:.2}, partial: {})",
-                        chunk.chunk_id,
-                        cleaned_text.chars().count(),
-                        confidence,
-                        is_partial
-                    );
-
-                    Ok((cleaned_text, Some(confidence), is_partial))
-                }
-                Err(e) => {
-                    error!(
-                        "Whisper transcription failed for chunk {}: {}",
-                        chunk.chunk_id, e
-                    );
-
-                    let transcription_error = TranscriptionError::EngineFailed(e.to_string());
-                    let _ = app.emit(
-                        "transcription-error",
-                        &serde_json::json!({
-                            "error": transcription_error.to_string(),
-                            "userMessage": format!("Transcription failed: {}", transcription_error),
-                            "actionable": false
-                        }),
-                    );
-
-                    Err(transcription_error)
-                }
+    match provider.transcribe(speech_samples, language).await {
+        Ok(result) => {
+            let cleaned_text = result.text.trim().to_string();
+            if cleaned_text.is_empty() {
+                return Ok((String::new(), result.confidence, result.is_partial));
             }
+
+            let confidence_str = match result.confidence {
+                Some(confidence) => format!("confidence: {confidence:.2}"),
+                None => "no confidence".to_string(),
+            };
+
+            info!(
+                "{} transcription complete for chunk {}: {} chars ({}, partial: {})",
+                provider.provider_name(),
+                chunk.chunk_id,
+                cleaned_text.chars().count(),
+                confidence_str,
+                result.is_partial
+            );
+
+            Ok((cleaned_text, result.confidence, result.is_partial))
         }
-        TranscriptionEngine::Parakeet(parakeet_engine) => {
-            match parakeet_engine.transcribe_audio(speech_samples).await {
-                Ok(text) => {
-                    let cleaned_text = text.trim().to_string();
-                    if cleaned_text.is_empty() {
-                        return Ok((String::new(), None, false));
-                    }
-
-                    info!(
-                        "Parakeet transcription complete for chunk {}: {} chars",
-                        chunk.chunk_id,
-                        cleaned_text.chars().count()
-                    );
-
-                    // Parakeet doesn't provide confidence or partial results
-                    Ok((cleaned_text, None, false))
-                }
-                Err(e) => {
-                    error!(
-                        "Parakeet transcription failed for chunk {}: {}",
-                        chunk.chunk_id, e
-                    );
-
-                    let transcription_error = TranscriptionError::EngineFailed(e.to_string());
-                    let _ = app.emit(
-                        "transcription-error",
-                        &serde_json::json!({
-                            "error": transcription_error.to_string(),
-                            "userMessage": format!("Transcription failed: {}", transcription_error),
-                            "actionable": false
-                        }),
-                    );
-
-                    Err(transcription_error)
-                }
+        Err(error) => {
+            match &error {
+                TranscriptionError::AudioTooShort { .. } => info!(
+                    "{} skipped short audio chunk {}: {}",
+                    provider.provider_name(),
+                    chunk.chunk_id,
+                    error
+                ),
+                _ => error!(
+                    "{} transcription failed for chunk {}: {}",
+                    provider.provider_name(),
+                    chunk.chunk_id,
+                    error
+                ),
             }
-        }
-        TranscriptionEngine::Provider(provider) => {
-            // NEW: Trait-based provider (clean, unified interface)
-            let language = crate::get_language_preference_internal();
 
-            match provider.transcribe(speech_samples, language).await {
-                Ok(result) => {
-                    let cleaned_text = result.text.trim().to_string();
-                    if cleaned_text.is_empty() {
-                        return Ok((String::new(), result.confidence, result.is_partial));
-                    }
-
-                    let confidence_str = match result.confidence {
-                        Some(c) => format!("confidence: {:.2}", c),
-                        None => "no confidence".to_string(),
-                    };
-
-                    info!(
-                        "{} transcription complete for chunk {}: {} chars ({}, partial: {})",
-                        provider.provider_name(),
-                        chunk.chunk_id,
-                        cleaned_text.chars().count(),
-                        confidence_str,
-                        result.is_partial
-                    );
-
-                    Ok((cleaned_text, result.confidence, result.is_partial))
-                }
-                Err(e) => {
-                    error!(
-                        "{} transcription failed for chunk {}: {}",
-                        provider.provider_name(),
-                        chunk.chunk_id,
-                        e
-                    );
-
-                    let _ = app.emit(
-                        "transcription-error",
-                        &serde_json::json!({
-                            "error": e.to_string(),
-                            "userMessage": format!("Transcription failed: {}", e),
-                            "actionable": false
-                        }),
-                    );
-
-                    Err(e)
-                }
-            }
+            Err(error)
         }
     }
 }
@@ -744,4 +654,70 @@ fn format_recording_time(seconds: f64) -> String {
     let secs = total_seconds % 60;
 
     format!("[{:02}:{:02}]", minutes, secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct RecordingProvider {
+        called: AtomicBool,
+    }
+
+    #[async_trait]
+    impl TranscriptionProvider for RecordingProvider {
+        async fn transcribe(
+            &self,
+            _audio: Vec<f32>,
+            _language: Option<String>,
+        ) -> Result<super::super::TranscriptResult, TranscriptionError> {
+            self.called.store(true, Ordering::SeqCst);
+            Ok(super::super::TranscriptResult {
+                text: "unexpected".to_string(),
+                confidence: None,
+                is_partial: false,
+            })
+        }
+
+        async fn is_model_loaded(&self) -> bool {
+            true
+        }
+
+        async fn get_current_model(&self) -> Option<String> {
+            Some("test".to_string())
+        }
+
+        fn provider_name(&self) -> &'static str {
+            "Test"
+        }
+    }
+
+    #[tokio::test]
+    async fn short_audio_is_skipped_before_provider_inference() {
+        let provider = RecordingProvider {
+            called: AtomicBool::new(false),
+        };
+        let chunk = AudioChunk {
+            data: vec![0.0; 495],
+            sample_rate: 16_000,
+            timestamp: 0.0,
+            chunk_id: 1,
+            device_type: crate::audio::recording_state::DeviceType::Microphone,
+        };
+
+        let error = transcribe_chunk_with_provider(&provider, chunk)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            TranscriptionError::AudioTooShort {
+                samples: 495,
+                minimum: MIN_TRANSCRIPTION_SAMPLES
+            }
+        ));
+        assert!(!provider.called.load(Ordering::SeqCst));
+    }
 }

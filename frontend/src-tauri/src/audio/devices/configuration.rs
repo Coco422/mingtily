@@ -124,6 +124,20 @@ pub async fn get_device_and_config(
 
         match audio_device.device_type {
             DeviceType::Input => {
+                // On macOS, enumerating every input device asks CoreAudio for each
+                // device's supported configurations. That call can block indefinitely
+                // even when the requested device is already the system default. Prefer
+                // the default-device handle first, which is also the common recording
+                // path when no explicit microphone preference is configured.
+                if let Some(device) = host.default_input_device() {
+                    if device.name().ok().as_deref() == Some(audio_device.name.as_str()) {
+                        let default_config = device
+                            .default_input_config()
+                            .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;
+                        return Ok((device, default_config));
+                    }
+                }
+
                 for device in host.input_devices()? {
                     if let Ok(name) = device.name() {
                         if name == audio_device.name {

@@ -64,6 +64,7 @@ export function useRecordingStart(
   const checkIfModelDownloading = useCallback(async (): Promise<boolean> => {
     try {
       const config = await invoke<{ provider: string } | null>('api_get_transcript_config');
+      if (config?.provider === 'sherpa-onnx') return false;
       const command = config?.provider === 'localWhisper'
         ? 'whisper_get_available_models'
         : 'parakeet_get_available_models';

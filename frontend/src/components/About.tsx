@@ -9,7 +9,7 @@ const FORK_NOTICE = 'Mingtily is an independent community fork of Meetily. It is
 
 export function About() {
   const { t } = useTranslation(['common', 'meeting']);
-  const [currentVersion, setCurrentVersion] = useState('0.5.2');
+  const [currentVersion, setCurrentVersion] = useState('0.6.0');
 
   useEffect(() => {
     getVersion().then(setCurrentVersion).catch(console.error);

@@ -5,6 +5,7 @@ import { Download, Loader2, Trash2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { useTranslation } from 'react-i18next';
+import { ModelAssetRow, type ModelAssetState } from './ModelAssetRow';
 
 interface SpeakerModelStatus {
   id: string;
@@ -97,51 +98,65 @@ export function SpeakerDiarizationModelManager({
   };
 
   const available = status?.status === 'available';
-  return (
-    <div className="rounded-lg border p-3 space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex gap-2">
-          <Users className="h-4 w-4 mt-0.5 text-muted-foreground" />
-          <div>
-            <div className="text-sm font-medium">{t('speaker.title')}</div>
-            <p className="text-xs text-muted-foreground">
-              {t('speaker.description', { size: Math.round(status?.size_mb ?? 44) })}
-            </p>
-          </div>
-        </div>
-        <span className={`text-xs font-medium ${available ? 'text-emerald-600' : 'text-muted-foreground'}`}>
-          {available ? t('status.installed') : status?.status === 'corrupt' ? t('status.needsRepair') : t('status.notInstalled')}
-        </span>
-      </div>
-
-      {progress !== null && (
-        <div className="space-y-1">
-          <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
-            <div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} />
-          </div>
-          <div className="text-xs text-muted-foreground">{t('download.progress', { progress })}</div>
-        </div>
+  const inUse = available && serviceEnabled;
+  const state: ModelAssetState = progress !== null
+    ? 'downloading'
+    : available
+      ? 'installed'
+      : status?.status === 'corrupt'
+        ? 'corrupt'
+        : 'missing';
+  const statusLabel = inUse
+    ? t('status.inUse')
+    : state === 'downloading'
+      ? t('status.downloading')
+      : state === 'installed'
+        ? t('status.installed')
+        : state === 'corrupt'
+          ? t('status.needsRepair')
+          : t('status.notInstalled');
+  const actions = available ? (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={serviceEnabled ? onOpenServices : remove}
+      disabled={busy}
+      title={serviceEnabled ? t('delete.disableSpeakerFirst') : undefined}
+    >
+      {busy ? (
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      ) : (
+        <Trash2 className="mr-2 h-4 w-4" />
       )}
+      {serviceEnabled ? t('status.inUse') : t('actions.delete')}
+    </Button>
+  ) : (
+    <Button size="sm" onClick={download} disabled={busy}>
+      {busy ? (
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      ) : (
+        <Download className="mr-2 h-4 w-4" />
+      )}
+      {status?.status === 'corrupt' ? t('actions.repair') : t('actions.download')}
+    </Button>
+  );
 
-      <div className="flex justify-end gap-2">
-        {available ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={serviceEnabled ? onOpenServices : remove}
-            disabled={busy}
-            title={serviceEnabled ? t('delete.disableSpeakerFirst') : undefined}
-          >
-            {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
-            {serviceEnabled ? t('status.inUse') : t('actions.delete')}
-          </Button>
-        ) : (
-          <Button size="sm" onClick={download} disabled={busy}>
-            {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
-            {status?.status === 'corrupt' ? t('actions.repair') : t('actions.download')}
-          </Button>
-        )}
-      </div>
-    </div>
+  return (
+    <ModelAssetRow
+      icon={Users}
+      name={t('speaker.title')}
+      provider="Sherpa ONNX"
+      description={t('speaker.description', { size: Math.round(status?.size_mb ?? 44) })}
+      state={state}
+      statusLabel={statusLabel}
+      inUse={inUse}
+      progress={progress}
+      progressLabel={
+        progress !== null
+          ? t('download.progress', { progress: Math.round(progress) })
+          : undefined
+      }
+      actions={actions}
+    />
   );
 }

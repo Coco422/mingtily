@@ -14,7 +14,33 @@ Mingtily is an independent community fork. The original MIT notice is preserved 
 
 - Source: [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)
 - License: Apache License 2.0
-- Use in Mingtily: offline speaker diarization runtime
+- Use in Mingtily: offline speech recognition and speaker diarization runtime
+
+## SenseVoice Small int8
+
+- Base model: [FunAudioLLM/SenseVoiceSmall](https://huggingface.co/FunAudioLLM/SenseVoiceSmall)
+- ONNX distribution: `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2` from the sherpa-onnx `asr-models` release
+- License: FunASR Model Open Source License Agreement 1.1
+
+Mingtily downloads the model only after user action, verifies the archive and installed files with built-in SHA256 values, and stores the model license with the installed asset.
+
+## Paraformer Small int8
+
+- ONNX repository: [csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09](https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09)
+- Pinned revision: `63ddc3cd0f2810b68289a7b3876e62ef5d53d6df`
+- Upstream model identified by the conversion repository: `crazyant/speech_paraformer_asr_nat-zh-cn-16k-common-vocab8358-onnx`
+- License included by Mingtily for the model family: FunASR Model Open Source License Agreement 1.1
+
+Mingtily downloads only the pinned model and token files after user action and verifies both files with built-in SHA256 values.
+
+## Qwen3-ASR 0.6B int8
+
+- Base model: [Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B)
+- ONNX distribution: `sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2` from the sherpa-onnx `asr-models` release
+- Base-model revision inspected for attribution: `5eb144179a02acc5e5ba31e748d22b0cf3e303b0`
+- License: Apache License 2.0, according to the base model card
+
+Mingtily treats this as a Beta model because its download and installed sizes are substantially larger than the other local ASR choices. The archive and all installed inference files are verified with built-in SHA256 values.
 
 ## Pyannote segmentation 3.0 model
 

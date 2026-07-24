@@ -9,11 +9,25 @@ use sherpa_onnx::{
 };
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 const SAMPLE_RATE: i32 = 16_000;
 const SHORT_TURN_SECONDS: f64 = 0.5;
-const SPEAKER_MATCH_THRESHOLD: f32 = 0.6;
+const SPEAKER_MATCH_THRESHOLD: f32 = 0.5;
+const MIN_NEW_SPEAKER_SECONDS: f32 = 1.25;
+const REALTIME_LOCAL_DIARIZATION_MIN_SECONDS: f64 = 3.0;
+const MIN_REALTIME_SEGMENT_SAMPLES: usize = 1_600;
 const MAX_REALTIME_SPEAKERS: usize = 10;
+const FINAL_DIARIZATION_WINDOW_SECONDS: f64 = 300.0;
+const FINAL_DIARIZATION_OVERLAP_SECONDS: f64 = 5.0;
+
+#[derive(Debug, Clone, Copy)]
+struct DiarizationWindow {
+    decode_start: f64,
+    decode_end: f64,
+    keep_start: f64,
+    keep_end: f64,
+}
 
 pub struct DiarizationEngine {
     diarizer: OfflineSpeakerDiarization,
@@ -139,11 +153,13 @@ impl SpeakerTracker {
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
 
         let index = match best {
-            Some((index, score))
-                if score >= SPEAKER_MATCH_THRESHOLD
-                    || self.centroids.len() >= MAX_REALTIME_SPEAKERS =>
-            {
-                index
+            Some((index, score)) if score >= SPEAKER_MATCH_THRESHOLD => index,
+            Some((index, _)) if self.centroids.len() >= MAX_REALTIME_SPEAKERS => index,
+            Some((index, _)) if weight < MIN_NEW_SPEAKER_SECONDS => {
+                // Short utterances do not carry enough speaker information to
+                // justify creating a new identity. Reuse the closest existing
+                // speaker without contaminating its centroid.
+                return self.centroids[index].name.clone();
             }
             _ => {
                 let name = format!("speaker_{:02}", self.centroids.len());
@@ -193,6 +209,19 @@ impl RealtimeSpeakerSession {
         }
 
         let duration = samples.len() as f64 / SAMPLE_RATE as f64;
+        if duration < REALTIME_LOCAL_DIARIZATION_MIN_SECONDS {
+            let speaker = self
+                .engine
+                .embedding(samples)
+                .map(|embedding| self.tracker.assign(&embedding, duration as f32));
+            return Ok(vec![SpeakerAudioSegment {
+                samples: samples.to_vec(),
+                start_seconds: chunk_start_seconds,
+                end_seconds: chunk_start_seconds + duration,
+                speaker,
+            }]);
+        }
+
         let turns = self.engine.diarize(samples).unwrap_or_default();
         let mut local_segments = audio_segments_for_range(samples, 0.0, duration, &turns);
         if local_segments.is_empty() {
@@ -262,8 +291,117 @@ impl RealtimeSpeakerSession {
             segment.end_seconds += chunk_start_seconds;
         }
 
-        Ok(merge_audio_segments(local_segments))
+        fill_unlabeled_speakers(&mut local_segments);
+        Ok(absorb_short_audio_segments(merge_audio_segments(
+            local_segments,
+        )))
     }
+}
+
+/// Run final speaker correction with bounded memory.
+///
+/// Each five-minute window is decoded directly to 16 kHz mono PCM, processed,
+/// and dropped before the next window. Overlap keeps boundary turns intact,
+/// while the session-level embedding tracker preserves speaker identities
+/// across windows.
+pub fn diarize_audio_file_in_windows(
+    audio_path: &Path,
+    paths: &SpeakerModelPaths,
+    transcript_ranges: &[(f64, f64)],
+) -> Result<Vec<DiarizationTurn>> {
+    let total_duration = transcript_ranges
+        .iter()
+        .map(|(_, end)| *end)
+        .filter(|end| end.is_finite())
+        .fold(0.0f64, f64::max);
+    if total_duration <= 0.0 {
+        return Ok(Vec::new());
+    }
+
+    let windows = plan_diarization_windows(total_duration)
+        .into_iter()
+        .filter(|window| {
+            transcript_ranges
+                .iter()
+                .any(|(start, end)| *start < window.keep_end && *end > window.keep_start)
+        })
+        .collect::<Vec<_>>();
+    let total_windows = windows.len();
+    let mut session = RealtimeSpeakerSession::new(paths)?;
+    let mut turns = Vec::new();
+
+    for (index, window) in windows.into_iter().enumerate() {
+        log::info!(
+            "Final speaker correction window {}/{}: {:.1}s-{:.1}s",
+            index + 1,
+            total_windows,
+            window.decode_start,
+            window.decode_end
+        );
+        let samples = crate::audio::decoder::decode_audio_range_to_whisper_format(
+            audio_path,
+            window.decode_start,
+            window.decode_end - window.decode_start,
+        )?;
+        if samples.is_empty() {
+            continue;
+        }
+
+        for segment in session.process_chunk(&samples, window.decode_start)? {
+            let start = segment.start_seconds.max(window.keep_start);
+            let end = segment.end_seconds.min(window.keep_end);
+            if end <= start {
+                continue;
+            }
+            if let Some(speaker) = segment.speaker {
+                turns.push(DiarizationTurn {
+                    start,
+                    end,
+                    speaker,
+                });
+            }
+        }
+    }
+
+    turns.sort_by(|left, right| {
+        left.start
+            .partial_cmp(&right.start)
+            .unwrap_or(Ordering::Equal)
+    });
+    Ok(stabilize_turns(&turns))
+}
+
+fn plan_diarization_windows(total_duration: f64) -> Vec<DiarizationWindow> {
+    if total_duration <= 0.0 {
+        return Vec::new();
+    }
+
+    let step = FINAL_DIARIZATION_WINDOW_SECONDS - FINAL_DIARIZATION_OVERLAP_SECONDS;
+    let half_overlap = FINAL_DIARIZATION_OVERLAP_SECONDS / 2.0;
+    let mut windows = Vec::new();
+    let mut decode_start = 0.0;
+    while decode_start < total_duration {
+        let decode_end = (decode_start + FINAL_DIARIZATION_WINDOW_SECONDS).min(total_duration);
+        windows.push(DiarizationWindow {
+            decode_start,
+            decode_end,
+            keep_start: if decode_start == 0.0 {
+                0.0
+            } else {
+                decode_start + half_overlap
+            },
+            keep_end: if decode_end >= total_duration {
+                total_duration
+            } else {
+                decode_end - half_overlap
+            },
+        });
+        if decode_end >= total_duration {
+            break;
+        }
+        decode_start += step;
+    }
+    windows
 }
 
 pub fn align_vad_with_turns(
@@ -460,6 +598,49 @@ fn merge_audio_segments(segments: Vec<SpeakerAudioSegment>) -> Vec<SpeakerAudioS
     merged
 }
 
+fn fill_unlabeled_speakers(segments: &mut [SpeakerAudioSegment]) {
+    for index in 0..segments.len() {
+        if segments[index].speaker.is_some() {
+            continue;
+        }
+        let previous = segments[..index]
+            .iter()
+            .rev()
+            .find_map(|segment| segment.speaker.clone());
+        let next = segments[index + 1..]
+            .iter()
+            .find_map(|segment| segment.speaker.clone());
+        segments[index].speaker = previous.or(next);
+    }
+}
+
+fn absorb_short_audio_segments(mut segments: Vec<SpeakerAudioSegment>) -> Vec<SpeakerAudioSegment> {
+    let mut index = 0usize;
+    while segments.len() > 1 && index < segments.len() {
+        if segments[index].samples.len() >= MIN_REALTIME_SEGMENT_SAMPLES {
+            index += 1;
+            continue;
+        }
+
+        if index == 0 {
+            let mut short = segments.remove(0);
+            let next = &mut segments[0];
+            short.samples.append(&mut next.samples);
+            next.samples = short.samples;
+            next.start_seconds = short.start_seconds;
+            if next.speaker.is_none() {
+                next.speaker = short.speaker;
+            }
+        } else {
+            let mut short = segments.remove(index);
+            let previous = &mut segments[index - 1];
+            previous.samples.append(&mut short.samples);
+            previous.end_seconds = short.end_seconds;
+        }
+    }
+    merge_audio_segments(segments)
+}
+
 fn seconds_to_index(seconds: f64, max: usize) -> usize {
     ((seconds * SAMPLE_RATE as f64).round() as usize).min(max)
 }
@@ -609,12 +790,21 @@ mod tests {
     }
 
     #[test]
+    fn tracker_does_not_create_new_identity_from_short_utterance() {
+        let mut tracker = SpeakerTracker::default();
+        let first = tracker.assign(&[1.0, 0.0], 2.0);
+        let second = tracker.assign(&[0.4, 0.916_515], 0.5);
+        assert_eq!(first, second);
+        assert_eq!(tracker.centroids.len(), 1);
+    }
+
+    #[test]
     fn tracker_caps_session_at_ten_speakers() {
         let mut tracker = SpeakerTracker::default();
         for index in 0..11 {
             let mut embedding = vec![0.0; 11];
             embedding[index] = 1.0;
-            tracker.assign(&embedding, 1.0);
+            tracker.assign(&embedding, 2.0);
         }
         assert_eq!(tracker.centroids.len(), MAX_REALTIME_SPEAKERS);
     }
@@ -678,6 +868,46 @@ mod tests {
         assert_eq!(aligned[0].speaker, None);
         assert_eq!(aligned[1].speaker.as_deref(), Some("speaker_00"));
         assert_eq!(aligned[2].speaker, None);
+    }
+
+    #[test]
+    fn realtime_segments_absorb_fragments_too_short_for_asr() {
+        let segments = vec![
+            SpeakerAudioSegment {
+                samples: vec![0.0; 495],
+                start_seconds: 0.0,
+                end_seconds: 0.031,
+                speaker: None,
+            },
+            SpeakerAudioSegment {
+                samples: vec![0.1; 16_000],
+                start_seconds: 0.031,
+                end_seconds: 1.031,
+                speaker: Some("speaker_00".into()),
+            },
+        ];
+
+        let merged = absorb_short_audio_segments(segments);
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].samples.len(), 16_495);
+        assert_eq!(merged[0].speaker.as_deref(), Some("speaker_00"));
+        assert_eq!(merged[0].start_seconds, 0.0);
+    }
+
+    #[test]
+    fn final_diarization_windows_bound_two_hour_recording_memory() {
+        let windows = plan_diarization_windows(7_200.0);
+
+        assert!(windows.len() > 1);
+        assert_eq!(windows.first().unwrap().keep_start, 0.0);
+        assert_eq!(windows.last().unwrap().keep_end, 7_200.0);
+        assert!(windows
+            .iter()
+            .all(|window| window.decode_end - window.decode_start <= 300.0));
+        for pair in windows.windows(2) {
+            assert!((pair[0].keep_end - pair[1].keep_start).abs() < 0.001);
+        }
     }
 
     #[test]

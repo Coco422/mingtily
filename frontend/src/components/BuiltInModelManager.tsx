@@ -6,11 +6,12 @@ import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
-import { Download, RefreshCw, BadgeAlert, Trash2 } from 'lucide-react';
+import { Download, RefreshCw, BadgeAlert, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatSummaryModelSizeLabelFromMb } from '@/lib/onboarding-summary-model';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import { ModelAssetRow, type ModelAssetState } from '@/components/ModelAssetRow';
 
 const BUILT_IN_MODEL_KEYS: Record<string, string> = {
   'qwen3.5:2b': 'qwen2b',
@@ -292,6 +293,104 @@ export function BuiltInModelManager({
           {t('builtin.empty')}
         </AlertDescription>
       </Alert>
+    );
+  }
+
+  if (mode === 'manage') {
+    return (
+      <div className="space-y-2">
+        {models.map((model) => {
+          const metadata = localizedModelMetadata(t, model);
+          const progress = downloadProgress[model.name];
+          const progressInfo = downloadProgressInfo[model.name];
+          const modelIsDownloading = downloadingModels.has(model.name);
+          const isAvailable = model.status.type === 'available';
+          const isCorrupted = model.status.type === 'corrupted';
+          const isError = model.status.type === 'error';
+          const isSelected = isAvailable && selectedModel === model.name;
+          const state: ModelAssetState = modelIsDownloading
+            ? 'downloading'
+            : isAvailable
+              ? 'installed'
+              : isCorrupted
+                ? 'corrupt'
+                : isError
+                  ? 'error'
+                  : 'missing';
+          const statusLabel = isSelected
+            ? t('status.inUse')
+            : state === 'downloading'
+              ? t('status.downloading')
+              : state === 'installed'
+                ? t('status.installed')
+                : state === 'corrupt'
+                  ? t('status.needsRepair')
+                  : state === 'error'
+                    ? t('status.error')
+                    : t('status.notInstalled');
+
+          const actions = modelIsDownloading ? (
+            <Button variant="outline" size="sm" onClick={() => void cancelDownload(model.name)}>
+              {t('actions.cancel')}
+            </Button>
+          ) : isAvailable ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isSelected}
+              onClick={() => void deleteModel(model.name)}
+              title={isSelected ? t('delete.activeBlocked') : t('actions.delete')}
+            >
+              <Trash2 className="h-4 w-4" />
+              {isSelected ? t('status.inUse') : t('actions.delete')}
+            </Button>
+          ) : isCorrupted ? (
+            <>
+              <Button variant="outline" size="sm" onClick={() => void deleteModel(model.name)}>
+                <Trash2 className="h-4 w-4" />
+                {t('actions.delete')}
+              </Button>
+              <Button size="sm" onClick={() => void downloadModel(model.name)}>
+                <RefreshCw className="h-4 w-4" />
+                {t('actions.repair')}
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" onClick={() => void downloadModel(model.name)}>
+              {isError ? <RefreshCw className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+              {isError ? t('actions.retry') : t('actions.download')}
+            </Button>
+          );
+
+          const progressDetail = progressInfo?.totalMb > 0
+            ? `${progressInfo.downloadedMb.toFixed(1)} MiB / ${progressInfo.totalMb.toFixed(1)} MiB`
+            : undefined;
+
+          return (
+            <ModelAssetRow
+              key={model.name}
+              icon={Sparkles}
+              name={metadata.name}
+              provider="Mingtily Local AI"
+              description={metadata.description}
+              metadata={[
+                formatSummaryModelSizeLabelFromMb(model.size_mb),
+                t('builtInMetadata.contextTokens', { count: model.context_size }),
+              ]}
+              state={state}
+              statusLabel={statusLabel}
+              inUse={isSelected}
+              progress={modelIsDownloading ? (progress ?? 0) : null}
+              progressLabel={
+                modelIsDownloading
+                  ? progressDetail ?? t('download.progress', { progress: Math.round(progress ?? 0) })
+                  : undefined
+              }
+              actions={actions}
+            />
+          );
+        })}
+      </div>
     );
   }
 

@@ -417,6 +417,96 @@ pub fn decode_audio_file(path: &Path) -> Result<DecodedAudio> {
     decode_audio_file_with_progress(path, None)
 }
 
+/// Decode a bounded time range directly to 16 kHz mono f32 PCM.
+///
+/// This is used by long-recording post-processing so a multi-hour recording
+/// never has to be materialized as one giant PCM buffer in memory.
+pub fn decode_audio_range_to_whisper_format(
+    path: &Path,
+    start_seconds: f64,
+    duration_seconds: f64,
+) -> Result<Vec<f32>> {
+    if !start_seconds.is_finite() || start_seconds < 0.0 {
+        return Err(anyhow!("Invalid audio range start: {}", start_seconds));
+    }
+    if !duration_seconds.is_finite() || duration_seconds <= 0.0 {
+        return Err(anyhow!(
+            "Invalid audio range duration: {}",
+            duration_seconds
+        ));
+    }
+
+    let ffmpeg_path = find_ffmpeg_path()
+        .ok_or_else(|| anyhow!("FFmpeg is required for bounded audio decoding"))?;
+    let input = path
+        .to_str()
+        .ok_or_else(|| anyhow!("Invalid input path (non-UTF8)"))?;
+    let start = format!("{start_seconds:.3}");
+    let duration = format!("{duration_seconds:.3}");
+
+    let mut command = Command::new(ffmpeg_path);
+    command
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-ss",
+            &start,
+            "-t",
+            &duration,
+            "-i",
+            input,
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-acodec",
+            "pcm_f32le",
+            "-f",
+            "f32le",
+            "pipe:1",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = command
+        .output()
+        .map_err(|error| anyhow!("Failed to decode bounded audio range: {}", error))?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "FFmpeg bounded decode failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let mut chunks = output.stdout.chunks_exact(4);
+    let mut samples = chunks
+        .by_ref()
+        .map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+        .collect::<Vec<_>>();
+    if !chunks.remainder().is_empty() {
+        warn!("Ignoring incomplete f32 sample from bounded FFmpeg decode");
+    }
+    for sample in &mut samples {
+        if !sample.is_finite() {
+            *sample = 0.0;
+        } else {
+            *sample = sample.clamp(-1.0, 1.0);
+        }
+    }
+    Ok(samples)
+}
+
 /// Decode an audio file with optional progress callback
 pub fn decode_audio_file_with_progress(
     path: &Path,

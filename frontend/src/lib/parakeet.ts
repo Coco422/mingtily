@@ -33,7 +33,6 @@ export interface ModelDisplayInfo {
   friendlyName: string;
   icon: string;
   tagline: string;
-  recommended?: boolean;
   tier: 'fastest' | 'balanced' | 'precise';
 }
 
@@ -42,7 +41,6 @@ export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
     friendlyName: 'Lightning',
     icon: '⚡',
     tagline: 'Real time • Best for speed, great accuracy',
-    recommended: true,
     tier: 'fastest'
   },
   'parakeet-tdt-0.6b-v2-int8': {

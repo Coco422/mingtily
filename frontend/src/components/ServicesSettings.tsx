@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { AlertTriangle, Bot, MessageSquareText, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -12,6 +13,7 @@ import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { WhisperAPI } from '@/lib/whisper';
 import { ParakeetAPI } from '@/lib/parakeet';
+import { SherpaAsrAPI, SherpaAsrModelStatus } from '@/lib/sherpa-asr';
 import { capabilityConfigService } from '@/services/capabilityConfigService';
 import {
   DEFAULT_SPEAKER_DIARIZATION_CONFIG,
@@ -69,6 +71,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
   const [transcriptModel, setTranscriptModel] = useState(transcriptModelConfig.model);
   const [whisperModels, setWhisperModels] = useState<string[]>([]);
   const [parakeetModels, setParakeetModels] = useState<string[]>([]);
+  const [sherpaModels, setSherpaModels] = useState<SherpaAsrModelStatus[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
   const [savingTranscript, setSavingTranscript] = useState(false);
   const [speakerConfig, setSpeakerConfig] = useState<SpeakerDiarizationConfig>(
@@ -80,9 +83,10 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
   const loadLocalModels = useCallback(async () => {
     setLoadingModels(true);
     try {
-      const [whisperResult, parakeetResult, speakerResult] = await Promise.allSettled([
+      const [whisperResult, parakeetResult, sherpaResult, speakerResult] = await Promise.allSettled([
         WhisperAPI.init().then(() => WhisperAPI.getAvailableModels()),
         ParakeetAPI.init().then(() => ParakeetAPI.getAvailableModels()),
+        SherpaAsrAPI.listModels(),
         capabilityConfigService.getSpeakerDiarization(),
       ]);
       if (whisperResult.status === 'fulfilled') {
@@ -95,12 +99,13 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
           parakeetResult.value.filter((model) => model.status === 'Available').map((model) => model.name)
         );
       }
+      if (sherpaResult.status === 'fulfilled') {
+        setSherpaModels(sherpaResult.value);
+      }
       if (speakerResult.status === 'fulfilled') setSpeakerConfig(speakerResult.value);
 
       try {
-        const status = await import('@tauri-apps/api/core').then(({ invoke }) =>
-          invoke<{ status: string }>('speaker_diarization_get_status')
-        );
+        const status = await invoke<{ status: string }>('speaker_diarization_get_status');
         setSpeakerInstalled(status.status === 'available');
       } catch {
         setSpeakerInstalled(false);
@@ -119,14 +124,28 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
     setTranscriptModel(transcriptModelConfig.model);
   }, [transcriptModelConfig]);
 
-  const installedTranscriptModels = useMemo(
-    () => transcriptProvider === 'parakeet' ? parakeetModels : whisperModels,
-    [parakeetModels, transcriptProvider, whisperModels]
-  );
+  const installedTranscriptModels = useMemo(() => {
+    if (transcriptProvider === 'parakeet') return parakeetModels;
+    if (transcriptProvider === 'sherpa-onnx') {
+      return sherpaModels
+        .filter((model) => model.status === 'available')
+        .map((model) => model.id);
+    }
+    return whisperModels;
+  }, [parakeetModels, sherpaModels, transcriptProvider, whisperModels]);
+
+  const transcriptModelLabel = (modelId: string) =>
+    sherpaModels.find((model) => model.id === modelId)?.name || modelId;
 
   const changeTranscriptProvider = (provider: TranscriptProviderId) => {
     setTranscriptProvider(provider);
-    const available = provider === 'parakeet' ? parakeetModels : whisperModels;
+    const available = provider === 'parakeet'
+      ? parakeetModels
+      : provider === 'sherpa-onnx'
+        ? sherpaModels
+            .filter((model) => model.status === 'available')
+            .map((model) => model.id)
+        : whisperModels;
     const remembered = readProviderModelMap()[provider];
     setTranscriptModel(available.includes(remembered) ? remembered : (available[0] || ''));
   };
@@ -180,6 +199,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
               <SelectContent>
                 <SelectItem value="parakeet">Parakeet</SelectItem>
                 <SelectItem value="localWhisper">Whisper</SelectItem>
+                <SelectItem value="sherpa-onnx">Sherpa ONNX</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -188,7 +208,11 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
             <Select value={transcriptModel} onValueChange={setTranscriptModel} disabled={loadingModels || installedTranscriptModels.length === 0}>
               <SelectTrigger><SelectValue placeholder={t('settings:services.selectInstalledModel')} /></SelectTrigger>
               <SelectContent>
-                {installedTranscriptModels.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}
+                {installedTranscriptModels.map((model) => (
+                  <SelectItem key={model} value={model}>
+                    {transcriptModelLabel(model)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -206,6 +230,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
             selectedLanguage={selectedLanguage}
             onLanguageChange={setSelectedLanguage}
             provider={transcriptProvider}
+            model={transcriptModel}
           />
         </div>
         <div className="mt-5 flex justify-end">

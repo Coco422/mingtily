@@ -40,6 +40,11 @@ import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionMod
 import { useTranslation } from 'react-i18next';
 import { capabilityConfigService } from '@/services/capabilityConfigService';
 import { localizeAudioProgress } from '@/lib/audio-progress';
+import {
+  isAutomaticLanguageOnly,
+  normalizeLanguageForModel,
+  supportedLanguageCodes,
+} from '@/lib/sherpa-asr';
 
 
 interface ImportAudioDialogProps {
@@ -193,13 +198,28 @@ export function ImportAudioDialog({
     const name = selectedModelKey.slice(colonIndex + 1);
     return availableModels.find((m) => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
-  const isParakeetModel = selectedModel?.provider === 'parakeet';
+  const supportedLanguages = supportedLanguageCodes(
+    selectedModel?.provider,
+    selectedModel?.name
+  );
+  const automaticLanguageOnly = isAutomaticLanguageOnly(
+    selectedModel?.provider,
+    selectedModel?.name
+  );
+  const availableLanguagesForModel = supportedLanguages
+    ? LANGUAGES.filter((language) => supportedLanguages.includes(language.code))
+    : LANGUAGES;
 
   useEffect(() => {
-    if (isParakeetModel && selectedLang !== 'auto') {
-      setSelectedLang('auto');
+    const normalized = normalizeLanguageForModel(
+      selectedModel?.provider,
+      selectedModel?.name,
+      selectedLang
+    );
+    if (normalized !== selectedLang) {
+      setSelectedLang(normalized);
     }
-  }, [isParakeetModel, selectedLang]);
+  }, [selectedLang, selectedModel?.name, selectedModel?.provider]);
 
   const handleSelectFile = async () => {
     const info = await selectFile();
@@ -214,7 +234,7 @@ export function ImportAudioDialog({
     await startImport(
       fileInfo.path,
       title || fileInfo.filename,
-      isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang,
+      automaticLanguageOnly || selectedLang === 'auto' ? null : selectedLang,
       selectedModel?.name || null,
       selectedModel?.provider || null,
       !speakerDiarizationEnabled || speakerCount === 'auto'
@@ -370,7 +390,7 @@ export function ImportAudioDialog({
                   {showAdvanced && (
                     <div className="p-3 pt-0 space-y-4 border-t">
                       {/* Language selector */}
-                      {!isParakeetModel ? (
+                      {!automaticLanguageOnly ? (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Globe className="h-4 w-4 text-muted-foreground" />
@@ -381,7 +401,7 @@ export function ImportAudioDialog({
                               <SelectValue placeholder={t('common:selectLanguage')} />
                             </SelectTrigger>
                             <SelectContent className="max-h-60">
-                              {LANGUAGES.map((lang) => (
+                              {availableLanguagesForModel.map((lang) => (
                                 <SelectItem key={lang.code} value={lang.code}>
                                   {languageLabel(lang.code, lang.name)}
                                 </SelectItem>
@@ -396,7 +416,9 @@ export function ImportAudioDialog({
                             <span className="text-sm font-medium">{t('common:language')}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            {t('parakeetLanguage')}
+                            {t('settings:services.transcription.automaticLanguageDescription', {
+                              model: selectedModel?.displayName || selectedModel?.name,
+                            })}
                           </p>
                         </div>
                       )}

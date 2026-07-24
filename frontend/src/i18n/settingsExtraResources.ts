@@ -14,7 +14,7 @@ export const settingsExtraResources = {
       },
       services: {
         transcription: {
-          modelLabel: 'Transcription model', parakeetOption: 'Parakeet — recommended for real-time speed and accuracy', whisperOption: 'Local Whisper — high accuracy',
+          modelLabel: 'Transcription model', parakeetOption: 'Parakeet — fast English transcription', whisperOption: 'Local Whisper — multilingual and accurate',
         },
         summary: {
           showApiKey: 'Show API key', hideApiKey: 'Hide API key', invalidOllamaEndpoint: 'Enter a valid Ollama URL starting with http:// or https://.', ollamaLoadFailed: 'Could not load Ollama models.', openRouterLoadFailed: 'Could not load OpenRouter models.', builtinLoadFailed: 'Could not load Built-in AI models.', customOpenAISaveFailed: 'Could not save the OpenAI-compatible service.', endpointAndModelRequired: 'Enter the endpoint URL and model name first.', connectionSuccessful: 'Connection successful', maxTokens: 'Max tokens', temperature: 'Temperature (0.0–2.0)', topP: 'Top P (0.0–1.0)', modelNameExample: 'For example: gpt-4 or llama-3-70b', exampleValue: 'For example: {{value}}',
@@ -48,7 +48,7 @@ export const settingsExtraResources = {
       },
       services: {
         transcription: {
-          modelLabel: '转写模型', parakeetOption: 'Parakeet — 推荐，实时且准确', whisperOption: '本地 Whisper — 高准确度',
+          modelLabel: '转写模型', parakeetOption: 'Parakeet — 英文实时转写', whisperOption: '本地 Whisper — 多语言高准确度',
         },
         summary: {
           showApiKey: '显示 API Key', hideApiKey: '隐藏 API Key', invalidOllamaEndpoint: '请输入以 http:// 或 https:// 开头的有效 Ollama 地址。', ollamaLoadFailed: 'Ollama 模型加载失败。', openRouterLoadFailed: 'OpenRouter 模型加载失败。', builtinLoadFailed: '内置 AI 模型加载失败。', customOpenAISaveFailed: 'OpenAI 兼容服务保存失败。', endpointAndModelRequired: '请先填写 Endpoint URL 和模型名称。', connectionSuccessful: '连接成功', maxTokens: '最大 Token 数', temperature: 'Temperature（0.0–2.0）', topP: 'Top P（0.0–1.0）', modelNameExample: '例如：gpt-4 或 llama-3-70b', exampleValue: '例如：{{value}}',

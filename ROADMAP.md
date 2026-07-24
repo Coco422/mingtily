@@ -15,9 +15,9 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - **失败可降级**：说话人分离、摘要或单个 Provider 失败时，不应丢失录音和原始转写。
 - **隐私边界可验证**：不加入使用分析、广告追踪或后台更新；远程调用前明确说明数据去向。
 
-## 当前基础：0.5.2
+## 当前基础：0.6.0
 
-0.5.2 完成了 Mingtily 独立 fork 的第一轮稳定化，重点是建立清晰的产品身份、离线边界、可扩展配置结构和可持续验证基础。
+0.6.0 在独立 fork 与离线边界稳定化的基础上，完成了中文 ASR 扩展、统一转写 Provider、模型资产管理和长会议可靠性优化。
 
 - Mingtily 品牌、独立 bundle identifier 和全新本地数据空间。
 - 移除遥测、后台更新、PRO/订阅及上游营销入口。
@@ -25,8 +25,11 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 设置页重构为“常规 / 录音 / 模型 / 服务 / Beta”。
 - Models 统一管理 Whisper、Parakeet、Speaker Diarization、本地摘要和 Ollama 模型资产。
 - Services 统一选择转写、说话人分离和 AI 摘要的 Provider 与模型。
-- 本地 Whisper、Parakeet 转写，Opus-in-M4A 导入，以及 Sherpa ONNX 说话人分离。
+- 本地 Whisper、Parakeet、SenseVoice、Offline Paraformer 和 Qwen3-ASR 转写，SenseVoice 作为推荐中文模型。
+- 实时录音、文件导入和重新转写统一使用 `TranscriptionProvider` 生命周期。
+- Opus-in-M4A 导入，以及 Sherpa ONNX 说话人分离。
 - 实时 provisional speaker label，停止录音后的全局 speaker 校正。
+- 最终 speaker 校正按五分钟窗口处理长会议，避免完整 PCM 常驻内存；短音频片段在进入 ASR 前静默过滤。
 - 保留 Built-in AI、Ollama 和用户主动配置的外部 LLM Provider。
 - 本地模型仅在用户点击后下载；Parakeet 使用固定 revision 和 SHA256 校验。
 - 隐私友好的本地滚动日志与用户主动诊断导出，不自动上传。
@@ -36,9 +39,9 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 当前工作流不包含 Apple Developer、DigiCert、notarization 或正式 Release 自动化。
 - 录音 transcript 保存、speaker 最终标签、导入格式、模型损坏和恢复状态具有直接回归测试。
 
-## 0.5.x：后续维护项
+## 0.6.x：后续维护项
 
-目标：在不扩大产品边界的前提下，继续提高 0.5.2 的真实设备可靠性和社区可用性。
+目标：在不扩大产品边界的前提下，继续提高 0.6.0 的真实设备可靠性和社区可用性。
 
 - 补齐录音、导入、重新转写、speaker label、摘要和数据恢复的回归测试。
 - 持续清理 i18n 遗漏、窄窗口布局和中英文文案长度问题。
@@ -51,9 +54,9 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 根据 CI 和真实设备结果修复 macOS、Windows、Linux 打包差异。
 - 补充无签名安装包的安装、系统拦截提示和卸载说明。
 
-验收标准：主要录音路径无数据丢失；三平台构建状态明确；无签名安装包的限制有清晰说明；仓库不依赖 Meetily 的私有服务或凭证。macOS Developer ID、notarization 和 Gatekeeper 发布验证不作为 0.5.x 门禁。
+验收标准：主要录音路径无数据丢失；三平台构建状态明确；无签名安装包的限制有清晰说明；仓库不依赖 Meetily 的私有服务或凭证。macOS Developer ID、notarization 和 Gatekeeper 发布验证不作为 0.6.x 门禁。
 
-## 0.6：中文 ASR 与统一转写架构
+## 0.6：中文 ASR 与统一转写架构（已完成）
 
 目标：让实时录音、文件导入和重新转写共享同一套 Provider 生命周期，并提供更适合中文的默认选择。
 
@@ -64,8 +67,11 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
   - 支持自动语言识别和强制 `zh`。
   - 默认启用中文 ITN 与标点。
 - SenseVoice 继续复用现有 Silero VAD、speaker diarization 和分段后 ASR 流程。
+- 增加 Offline Paraformer Small int8 作为轻量中英模型；沿用 VAD 分段后转写，语言自动判断。
+- 增加 Qwen3-ASR 0.6B int8 作为高质量多语言 Beta 档；由于下载、内存和算力需求明显更高，不设为默认模型。
 - Whisper 与 Parakeet 继续保留，不强制迁移用户模型。
 - 所有 ASR 模型复用统一 manifest、`.part`、SHA256、staging 和原子安装机制。
+- Models 只管理资产，下载完成不会自动切换当前 Provider；Services 负责选择实际使用的模型。
 
 验收标准：用户的中文 Opus-in-M4A 文件在强制 `zh` 时稳定输出中文；三条转写路径使用同一 Provider 接口；现有 speaker、时间轴和持久化行为不回归。
 
@@ -73,8 +79,9 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 
 目标：从“VAD 段完成后出现文本”推进到真正连续的中文流式转写。
 
-- Online Paraformer：连续流式转写和 partial hypothesis。
-- Offline Paraformer Small int8：轻量低资源档。
+- Online Paraformer bilingual zh/en：连续流式转写、partial hypothesis 和 final revision。首选模型为 `csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en`，固定 revision `8e40c43232a1c5c66c82111efc5820d3accca11b`；int8 encoder 与 decoder 合计约 226 MiB。
+- 为流式 Provider 增加独立 session 生命周期与 partial/final 事件契约，不把它伪装成现有离线 `transcribe(audio)` 调用。
+- 直接使用 sherpa-onnx `OnlineRecognizer` / `OnlineStream` 的 `is_ready`、`is_endpoint`、`reset` 与 `RecognizerResult.is_final`，并把推理放在录音采集热路径之外。
 - Offline Paraformer Large int8：本地质量优先档。
 - FunASR Nano：作为实验模型评估质量、内存、包体和许可证，不作为默认下载。
 - 为不同模型记录首段延迟、实时率、峰值内存和长会议稳定性。

@@ -24,6 +24,22 @@ pub struct SaveTranscriptConfigRequest {
 
 pub struct SettingsRepository;
 
+fn transcript_api_key_column(
+    provider: &str,
+) -> std::result::Result<Option<&'static str>, sqlx::Error> {
+    match provider {
+        "localWhisper" => Ok(Some("whisperApiKey")),
+        "parakeet" | "sherpa-onnx" => Ok(None),
+        "deepgram" => Ok(Some("deepgramApiKey")),
+        "elevenLabs" => Ok(Some("elevenLabsApiKey")),
+        "groq" => Ok(Some("groqApiKey")),
+        "openai" => Ok(Some("openaiApiKey")),
+        _ => Err(sqlx::Error::Protocol(
+            format!("Invalid provider: {}", provider).into(),
+        )),
+    }
+}
+
 // Transcript providers: localWhisper, deepgram, elevenLabs, groq, openai
 // Summary providers: openai, claude, ollama, groq, added openrouter
 // NOTE: Handle data exclusion in the higher layer as this is database abstraction layer(using SELECT *)
@@ -176,18 +192,8 @@ impl SettingsRepository {
         provider: &str,
         api_key: &str,
     ) -> std::result::Result<(), sqlx::Error> {
-        let api_key_column = match provider {
-            "localWhisper" => "whisperApiKey",
-            "parakeet" => return Ok(()), // Parakeet doesn't need an API key, return early
-            "deepgram" => "deepgramApiKey",
-            "elevenLabs" => "elevenLabsApiKey",
-            "groq" => "groqApiKey",
-            "openai" => "openaiApiKey",
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
+        let Some(api_key_column) = transcript_api_key_column(provider)? else {
+            return Ok(());
         };
 
         let query = format!(
@@ -210,18 +216,8 @@ impl SettingsRepository {
         pool: &SqlitePool,
         provider: &str,
     ) -> std::result::Result<Option<String>, sqlx::Error> {
-        let api_key_column = match provider {
-            "localWhisper" => "whisperApiKey",
-            "parakeet" => return Ok(None), // Parakeet doesn't need an API key
-            "deepgram" => "deepgramApiKey",
-            "elevenLabs" => "elevenLabsApiKey",
-            "groq" => "groqApiKey",
-            "openai" => "openaiApiKey",
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
+        let Some(api_key_column) = transcript_api_key_column(provider)? else {
+            return Ok(None);
         };
 
         let query = format!(
@@ -345,5 +341,28 @@ impl SettingsRepository {
         .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::transcript_api_key_column;
+
+    #[test]
+    fn local_transcription_providers_do_not_require_api_keys() {
+        assert_eq!(transcript_api_key_column("parakeet").unwrap(), None);
+        assert_eq!(transcript_api_key_column("sherpa-onnx").unwrap(), None);
+    }
+
+    #[test]
+    fn remote_transcription_providers_keep_their_key_columns() {
+        assert_eq!(
+            transcript_api_key_column("openai").unwrap(),
+            Some("openaiApiKey")
+        );
+        assert_eq!(
+            transcript_api_key_column("deepgram").unwrap(),
+            Some("deepgramApiKey")
+        );
     }
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Download, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   ModelInfo,
@@ -13,6 +14,8 @@ import {
   WhisperAPI
 } from '../lib/whisper';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Button } from '@/components/ui/button';
+import { ModelAssetRow, type ModelAssetState } from '@/components/ModelAssetRow';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 
@@ -452,18 +455,127 @@ export function ModelManager({
     .sort((a, b) => basicModelNames.indexOf(a.name) - basicModelNames.indexOf(b.name));
   const advancedModels = models.filter(m => !basicModelNames.includes(m.name));
 
+  const renderManagedModel = (model: ModelInfo) => {
+    const isAvailable = model.status === 'Available';
+    const isError = typeof model.status === 'object' && 'Error' in model.status;
+    const isCorrupted = typeof model.status === 'object' && 'Corrupted' in model.status;
+    const downloadProgress =
+      typeof model.status === 'object' && 'Downloading' in model.status
+        ? model.status.Downloading
+        : null;
+    const isDownloading = downloadingModels.has(model.name) || downloadProgress !== null;
+    const isSelected = selectedModel === model.name && isAvailable;
+    const state: ModelAssetState = isDownloading
+      ? 'downloading'
+      : isAvailable
+        ? 'installed'
+        : isCorrupted
+          ? 'corrupt'
+          : isError
+            ? 'error'
+            : 'missing';
+    const statusLabel = isSelected
+      ? t('status.inUse')
+      : state === 'downloading'
+        ? t('status.downloading')
+        : state === 'installed'
+          ? t('status.installed')
+          : state === 'corrupt'
+            ? t('status.needsRepair')
+            : state === 'error'
+              ? t('status.error')
+              : t('status.notInstalled');
+
+    const actions = isDownloading ? (
+      <Button variant="outline" size="sm" onClick={() => void cancelDownload(model.name)}>
+        {t('actions.cancel')}
+      </Button>
+    ) : isAvailable ? (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={isSelected}
+        onClick={() => void deleteModel(model.name)}
+        title={isSelected ? t('delete.activeBlocked') : t('delete.freeSpace')}
+      >
+        <Trash2 className="h-4 w-4" />
+        {isSelected ? t('status.inUse') : t('actions.delete')}
+      </Button>
+    ) : isCorrupted ? (
+      <>
+        <Button variant="outline" size="sm" onClick={() => void deleteModel(model.name)}>
+          <Trash2 className="h-4 w-4" />
+          {t('actions.delete')}
+        </Button>
+        <Button size="sm" onClick={() => void downloadModel(model.name)}>
+          <RefreshCw className="h-4 w-4" />
+          {t('actions.repair')}
+        </Button>
+      </>
+    ) : (
+      <Button size="sm" onClick={() => void downloadModel(model.name)}>
+        {isError ? <RefreshCw className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+        {isError ? t('actions.retry') : t('actions.download')}
+      </Button>
+    );
+
+    return (
+      <ModelAssetRow
+        key={model.name}
+        name={getDisplayName(model.name)}
+        provider="whisper.cpp"
+        description={localizedWhisperTagline(t, model.name)}
+        metadata={[
+          formatFileSize(model.size_mb),
+          t('specs.accuracy', { accuracy: localizedAccuracy(t, model.accuracy) }),
+          t('specs.processing', { speed: localizedSpeed(t, model.speed) }),
+          ...(isQuantizedModel(model.name) ? [localizedPrecision(t, model.name)] : []),
+        ]}
+        state={state}
+        statusLabel={statusLabel}
+        inUse={isSelected}
+        progress={downloadProgress}
+        progressLabel={
+          downloadProgress !== null
+            ? t('download.progress', { progress: Math.round(downloadProgress) })
+            : undefined
+        }
+        actions={actions}
+      />
+    );
+  };
+
+  if (mode === 'manage') {
+    return (
+      <div className={`space-y-2 ${className}`}>
+        {basicModels.map(renderManagedModel)}
+        {advancedModels.length > 0 && (
+          <Accordion type="single" collapsible className="w-full">
+            <AccordionItem value="advanced-whisper-models" className="border-0">
+              <AccordionTrigger className="rounded-md px-1 py-2 text-xs font-semibold text-gray-600 hover:no-underline">
+                {t('sections.advanced')}
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-2 pt-1">{advancedModels.map(renderManagedModel)}</div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className={`space-y-3 ${className}`}>
       {/* Basic Models */}
       <div className="space-y-3">
         {basicModels.map((model) => {
-          const isRecommended = model.name === 'base';
           return (
             <ModelCard
               key={model.name}
               model={model}
               isSelected={selectedModel === model.name}
-              isRecommended={isRecommended}
+              isRecommended={false}
               onSelect={() => {
                 if (mode === 'select' && model.status === 'Available') {
                   selectModel(model.name);

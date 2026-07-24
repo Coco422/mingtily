@@ -44,12 +44,14 @@ pub mod database;
 pub mod diagnostic_logs;
 pub mod groq;
 pub mod localization;
+pub mod model_assets;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod sherpa_asr;
 pub mod speaker_diarization;
 pub mod state;
 pub mod summary;
@@ -571,6 +573,10 @@ pub fn run() {
             parakeet_engine::commands::parakeet_cancel_download,
             parakeet_engine::commands::parakeet_delete_corrupted_model,
             parakeet_engine::commands::open_parakeet_models_folder,
+            // Sherpa ONNX ASR model commands
+            sherpa_asr::commands::sherpa_asr_list_models,
+            sherpa_asr::commands::sherpa_asr_download_model,
+            sherpa_asr::commands::sherpa_asr_delete_model,
             // Speaker diarization model commands
             speaker_diarization::commands::speaker_diarization_get_config,
             speaker_diarization::commands::speaker_diarization_save_config,

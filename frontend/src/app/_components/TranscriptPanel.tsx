@@ -11,6 +11,7 @@ import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { isAutomaticLanguageOnly } from '@/lib/sherpa-asr';
 
 /**
  * TranscriptPanel Component
@@ -74,7 +75,10 @@ export function TranscriptPanel({
                     </span>
                   </Button>
                 )}
-                {transcriptModelConfig.provider === "localWhisper" &&
+                {!isAutomaticLanguageOnly(
+                  transcriptModelConfig.provider,
+                  transcriptModelConfig.model
+                ) &&
                   <Button
                     variant="outline"
                     size="sm"
