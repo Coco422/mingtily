@@ -33,7 +33,7 @@
 //! Users can add custom templates to:
 //! - macOS: `~/Library/Application Support/Mingtily/templates/`
 //! - Windows: `%APPDATA%\Mingtily\templates\`
-//! - Linux: `~/.config/Mingtily/templates/`
+//! - Linux: `$XDG_DATA_HOME/Mingtily/templates/` (usually `~/.local/share/Mingtily/templates/`)
 //!
 //! Custom templates must follow the JSON schema defined in `types::Template`.
 

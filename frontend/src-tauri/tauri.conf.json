@@ -1,7 +1,7 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
     "productName": "Mingtily",
-    "version": "0.5.0",
+    "version": "0.5.2",
     "identifier": "com.mingcheng.mingtily",
     "build": {
         "frontendDist": "../out",
@@ -97,14 +97,6 @@
         "externalBin": [
             "binaries/llama-helper",
             "binaries/ffmpeg"
-        ],
-        "macOS": {
-            "entitlements": "entitlements.plist",
-            "signingIdentity": "-",
-            "hardenedRuntime": true
-        },
-        "windows": {
-            "signCommand": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -FilePath %1"
-        }
+        ]
     }
 }

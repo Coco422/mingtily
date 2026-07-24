@@ -1,351 +1,59 @@
-# GitHub Actions Workflows Overview
+# GitHub Actions workflows
 
-This document provides a quick overview of all available CI/CD workflows in this repository.
+Mingtily's active development workflows are secret-free and unsigned. Code signing, notarization, and production release automation are intentionally absent until the project has Mingtily-owned credentials and a concrete distribution need.
 
-The lightweight `ci.yml` workflow runs automatically for pull requests and pushes to `main` or `codex/**`. Platform bundles and releases remain manually triggered.
+## Automatic validation
 
-## Workflow Files
+### `ci.yml`
 
-### 0. **ci.yml** - Automatic Validation
-**Purpose:** Fast, secret-free validation for normal development
+Runs on pull requests, pushes to `main` or `codex/**`, and manual dispatch.
 
-**Key Features:**
-- Validates `en-US` and `zh-CN` resource parity
-- Runs the Next.js production build and TypeScript checks
-- Uses no signing credentials
+- Installs frontend dependencies with the lockfile.
+- Checks `en-US` and `zh-CN` resource parity.
+- Audits cold-start source entry points for implicit remote-network calls.
+- Builds the Next.js frontend.
+- Runs `cargo fmt --check`, Rust tests, and `cargo check --all-targets` on Ubuntu 22.04.
+- Requires no repository secrets.
 
-**Triggers:**
-- Pull requests
-- Pushes to `main` and `codex/**`
-- Manual dispatch
+### `build-linux.yml`
 
----
+Runs automatically on relevant pull requests and can also be started manually.
 
-### 1. **build-devtest.yml** - DevTest Builds
-**Purpose:** Fast builds for development and testing
+- Pull requests build an unsigned debug DEB on Ubuntu 22.04.
+- The built application is launched under Xvfb and `strace`; any non-loopback cold-start connection fails the job.
+- Manual runs can build release DEB, AppImage, RPM, or all applicable formats on Ubuntu 22.04/24.04.
+- Manual artifacts are retained for 30 days.
+- Requires no signing secrets.
 
-**Key Features:**
-- Signing OFF by default (faster builds)
-- Optional signing via workflow dispatch input
-- All platforms in parallel
-- 14-day artifact retention
+## Manual development builds
 
-**Triggers:**
-- Manual dispatch only
+### `build-devtest.yml`
 
-**Use When:**
-- Regular development work
-- Testing features
-- Need fast feedback
+Builds macOS Apple Silicon, Windows x64, and Linux x64 artifacts in parallel through the reusable unsigned workflow.
 
----
+### `build-macos.yml`
 
-### 2. **build-macos.yml** - macOS Standalone Builds
-**Purpose:** Build and test specifically for Apple Silicon (M1/M2/M3)
+Builds an unsigned Apple Silicon `.app` and `.dmg`. It has no certificate or notarization inputs.
 
-**Key Features:**
-- Apple Developer Certificate signing (optional)
-- Notarization with Apple ID
-- Signature verification
-- macOS-focused optimizations
+### `build-windows.yml`
 
-**Triggers:**
-- Manual dispatch only
+Builds unsigned Windows x64 MSI/NSIS artifacts. It has no DigiCert or certificate inputs.
 
-**Use When:**
-- macOS-specific development
-- Testing Metal GPU acceleration
-- Verifying macOS-specific features
+### `build.yml`
 
-**Outputs:**
-- `.dmg` installer
-- `.app` bundle
+Reusable unsigned build implementation shared by DevTest and the standalone macOS and Windows workflows. It builds the `llama-helper` sidecar for the same target as the Tauri application and uploads artifacts when requested.
 
----
+### `pr-main-check.yml`
 
-### 3. **build-windows.yml** - Windows Standalone Builds
-**Purpose:** Build and test specifically for Windows x64
+Manual semantic-version and branch summary. It does not build the application.
 
-**Key Features:**
-- DigiCert KeyLocker signing (cloud HSM)
-- Signs both MSI and NSIS installers
-- Signature verification with PowerShell
-- MSI installer validation
+## Deferred release automation
 
-**Triggers:**
-- Manual dispatch only
+There is currently no production release workflow. A future implementation must start from Mingtily-owned credentials, keep pull-request builds secret-free, create a draft release first, and be verified on clean machines before publication.
 
-**Use When:**
-- Windows-specific development
-- Testing CUDA/Vulkan GPU acceleration
-- Verifying Windows-specific features
+## Recommended workflow
 
-**Outputs:**
-- `.msi` installer
-- `.exe` NSIS installer
-
----
-
-### 4. **build-linux.yml** - Linux Standalone Builds
-**Purpose:** Build and test for Linux distributions
-
-**Key Features:**
-- Support for Ubuntu 22.04 and 24.04
-- Multiple bundle formats (DEB, AppImage, RPM)
-- Package verification without an application updater
-- AppImage compatibility fixes
-- Package verification
-
-**Triggers:**
-- Manual dispatch only
-
-**Use When:**
-- Linux-specific development
-- Testing Vulkan GPU acceleration
-- Verifying package formats
-
-**Outputs:**
-- `.deb` package (Ubuntu/Debian)
-- `.AppImage` portable
-- `.rpm` package (Fedora/RHEL)
-
----
-
-### 5. **build-test.yml** - Multi-Platform Test Builds
-**Purpose:** Test builds across all platforms with signing
-
-**Key Features:**
-- Signing ON by default
-- All platforms in parallel
-- Uses reusable `build.yml` workflow
-- 30-day artifact retention
-- Artifacts prefixed with `mingtily-test-`
-
-**Triggers:**
-- Manual dispatch only
-
-**Use When:**
-- Pre-release testing
-- Verifying signing infrastructure
-- Testing across all platforms simultaneously
-
----
-
-### 6. **build.yml** - Reusable Build Workflow
-**Purpose:** Shared workflow used by other workflows
-
-**Key Features:**
-- Reusable workflow (called by others)
-- Highly configurable inputs
-- Used by `build-test.yml` and `release.yml`
-
-**Not directly triggered** - used as a building block
-
----
-
-### 7. **release.yml** - Production Release
-**Purpose:** Create official releases with signed binaries
-
-**Key Features:**
-- Signing REQUIRED
-- Creates GitHub Release (draft)
-- Version tags from `tauri.conf.json`
-- Uploads release assets
-- **macOS and Windows only** (Linux excluded from production releases)
-- **Auto-increment versioning**: If tag exists, auto-increments (e.g., `0.1.1` -> `0.1.1.1` -> `0.1.1.2`, up to `.100`)
-
-**Triggers:**
-- Manual dispatch only
-
-**Use When:**
-- Ready to publish a new version
-- Creating official release artifacts
-
-**Outputs:**
-- GitHub Release (draft)
-- macOS: DMG installer
-- Windows: MSI installer (signed), NSIS installer (signed)
-- Release notes auto-generated
-
-**Version Behavior:**
-- If `v0.1.1` tag doesn't exist: creates `v0.1.1`
-- If `v0.1.1` exists: creates `v0.1.1.1`
-- If `v0.1.1.1` exists: creates `v0.1.1.2`
-- Maximum: `v0.1.1.100` (then update `tauri.conf.json`)
-
-**Note:** Linux builds are not included in releases. Use `build-linux.yml` for Linux testing.
-
----
-
-### 8. **pr-main-check.yml** - Validation Check
-**Purpose:** Quick validation of version and configuration
-
-**Key Features:**
-- No builds triggered
-- Validates version format
-- Shows current branch info
-- Provides next steps guidance
-
-**Triggers:**
-- Manual dispatch only
-
-**Use When:**
-- Quick configuration check
-- Before running full builds
-
----
-
-## How to Run Workflows
-
-1. **Go to Actions tab** in GitHub repository
-2. **Select workflow** from left sidebar
-3. **Click "Run workflow"** button
-4. **Select branch** to run against
-5. **Configure options** (build type, signing, etc.)
-6. **Click "Run workflow"** to start
-7. **Monitor progress** in the Actions tab
-
----
-
-## Quick Decision Guide
-
-### "I'm developing a new feature..."
-- **Use `build-devtest.yml`** (manual dispatch)
-- Fast builds, no signing by default
-- Enable signing checkbox if needed
-
-### "I need to test macOS-specific code..."
-- **Use `build-macos.yml`** (manual dispatch)
-- Focus on macOS
-- Optional signing
-
-### "I need to test Windows-specific code..."
-- **Use `build-windows.yml`** (manual dispatch)
-- Focus on Windows
-- Optional signing
-
-### "I need to test Linux packages..."
-- **Use `build-linux.yml`** (manual dispatch)
-- Choose Ubuntu version
-- Choose bundle types
-
-### "I need signed builds for all platforms..."
-- **Use `build-test.yml`** (manual dispatch)
-- All platforms
-- Signing enabled
-- Full verification
-
-### "I'm ready to release..."
-- **Use `release.yml`** (manual dispatch)
-- Creates GitHub Release
-- All platforms, fully signed
-- Production-ready artifacts
-
----
-
-## Workflow Dependencies
-
-```
-build.yml (reusable)
-    |-- build-test.yml (calls build.yml)
-    |-- release.yml (calls build.yml)
-
-Standalone (don't use build.yml):
-    |-- ci.yml (automatic frontend and i18n validation)
-    |-- build-macos.yml
-    |-- build-windows.yml
-    |-- build-linux.yml
-    |-- build-devtest.yml
-    |-- pr-main-check.yml (validation only)
-```
-
----
-
-## Comparison Matrix
-
-| Workflow | Platforms | Default Signing | Speed | Retention | Use Case |
-|----------|-----------|----------------|-------|-----------|----------|
-| `ci.yml` | Ubuntu | OFF | Fast | N/A | PR and push validation |
-| `build-devtest.yml` | All | OFF | Fast | 14 days | Development |
-| `build-macos.yml` | macOS | Optional | Medium | 30 days | macOS dev |
-| `build-windows.yml` | Windows | Optional | Medium | 30 days | Windows dev |
-| `build-linux.yml` | Linux | Optional | Medium | 30 days | Linux dev |
-| `build-test.yml` | All | ON | Slow | 30 days | Pre-release |
-| `release.yml` | macOS + Windows | REQUIRED | Slow | Permanent | Release |
-
----
-
-## Artifact Naming Convention
-
-```
-mingtily-{workflow}-{platform}-{target}-{version}
-```
-
-**Examples:**
-- `mingtily-devtest-macOS-aarch64-apple-darwin-0.5.0`
-- `mingtily-test-windows-x86_64-pc-windows-msvc-0.5.0`
-- `mingtily-macos-aarch64-release-0.5.0`
-
----
-
-## Required Secrets
-
-`ci.yml` and unsigned DevTest builds do not require signing secrets. The following secrets are needed only for the corresponding signed workflows:
-
-### macOS Signing
-- `APPLE_CERTIFICATE` - Developer ID certificate (base64)
-- `APPLE_CERTIFICATE_PASSWORD` - Certificate password
-- `APPLE_ID` - Apple ID email
-- `APPLE_PASSWORD` - App-specific password
-- `APPLE_TEAM_ID` - Team ID
-- `KEYCHAIN_PASSWORD` - Temporary keychain password
-
-### Windows Signing (DigiCert)
-- `SM_HOST` - DigiCert host URL
-- `SM_API_KEY` - API key
-- `SM_CLIENT_CERT_FILE_B64` - Client cert (base64)
-- `SM_CLIENT_CERT_PASSWORD` - Client cert password
-- `SM_CODE_SIGNING_CERT_SHA1_HASH` - Certificate hash
-
----
-
-## Performance Tips
-
-1. **Use devtest workflow** for routine development (fastest)
-2. **Enable signing** only when necessary (adds 10-15 minutes)
-3. **Test specific platforms** when working on platform-specific code
-4. **Run full builds** (`build-test.yml`) before releases
-5. **Cache is enabled** - subsequent builds are faster
-
----
-
-## Troubleshooting
-
-### Build fails with version error (Windows MSI)
-- Ensure version in `tauri.conf.json` doesn't contain non-numeric pre-release identifiers
-- Use `0.1.3` not `0.1.2-pro-trial`
-
-### Signing fails
-- Verify all required secrets are configured
-- Check secret expiration dates
-- Review workflow logs for specific errors
-
-### Artifacts not available
-- Check build succeeded completely
-- Artifacts expire based on retention period
-- Ensure `upload-artifacts` is enabled
-
-### Workflow not appearing in Actions
-- Verify YAML syntax is valid
-- Check file is in `.github/workflows/` directory
-- Ensure file extension is `.yml` or `.yaml`
-
----
-
-## Support
-
-For issues with workflows:
-1. Check workflow logs in Actions tab
-2. Review this documentation
-3. Check `README_DEVTEST.md` for devtest-specific help
-4. Check `ACCELERATION_GUIDE.md` for GPU/performance info
+1. Let `ci.yml` validate every pull request.
+2. Let `build-linux.yml` validate the unsigned Linux bundle and cold-start network boundary.
+3. Use `build-devtest.yml` or a standalone platform workflow when a downloadable development artifact is needed.
+4. Record platform and hardware limitations in the pull request; unsigned CI artifacts are development builds, not production releases.

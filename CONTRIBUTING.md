@@ -32,6 +32,7 @@ Run the checks relevant to your change. Frontend and translation changes should 
 ```bash
 cd frontend
 pnpm check:i18n
+pnpm check:network-boundary
 pnpm build
 ```
 
@@ -40,6 +41,7 @@ Rust changes should include targeted tests and, when the host platform supports 
 ```bash
 cargo check --workspace
 cargo test --workspace
+cargo fmt --all -- --check
 ```
 
 Audio, model, Provider, packaging, and persistence changes should also be verified through the affected application flow. Explain any check you could not run.

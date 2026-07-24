@@ -21,7 +21,7 @@ pub fn set_bundled_templates_dir(path: PathBuf) {
 /// Returns the platform-specific application data directory for custom templates:
 /// - macOS: ~/Library/Application Support/Mingtily/templates/
 /// - Windows: %APPDATA%\Mingtily\templates\
-/// - Linux: ~/.config/Mingtily/templates/
+/// - Linux: $XDG_DATA_HOME/Mingtily/templates/ (usually ~/.local/share/Mingtily/templates/)
 fn get_custom_templates_dir() -> Option<PathBuf> {
     let mut path = dirs::data_dir()?;
     path.push("Mingtily");

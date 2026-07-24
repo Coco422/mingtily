@@ -380,4 +380,23 @@ mod tests {
             .embedding
             .ends_with("embedding/3dspeaker_eres2net.onnx"));
     }
+
+    #[test]
+    fn checksum_validation_rejects_corrupted_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("model.onnx");
+        std::fs::write(&model, b"corrupted").unwrap();
+
+        let error = verify_sha256(&model, SEGMENTATION_MODEL_SHA256).unwrap_err();
+        assert!(error.to_string().contains("Checksum mismatch"));
+    }
+
+    #[test]
+    fn installation_validation_fails_open_on_missing_assets() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_for_root(dir.path().join("sherpa-v1"));
+
+        let error = validate_installation(&paths).unwrap_err();
+        assert!(error.to_string().contains("Segmentation model is missing"));
+    }
 }

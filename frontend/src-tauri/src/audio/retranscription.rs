@@ -476,20 +476,12 @@ async fn run_retranscription<R: Runtime>(
         let trimmed = text.trim();
         if !trimmed.is_empty() {
             debug!(
-                "Segment {}/{}: {:.1}s, conf={:.2}, text='{}'",
+                "Segment {}/{}: {:.1}s, conf={:.2}, chars={}",
                 i + 1,
                 processable_count,
                 segment_duration_sec,
                 conf,
-                if trimmed.len() > 80 {
-                    let mut end = 80;
-                    while !trimmed.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    &trimmed[..end]
-                } else {
-                    trimmed
-                }
+                trimmed.chars().count()
             );
             all_transcripts.push((
                 text,

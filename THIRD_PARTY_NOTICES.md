@@ -47,6 +47,14 @@ Mingtily downloads this model only after user action and verifies the expected f
 - Upstream model: [openai/whisper](https://github.com/openai/whisper)
 - License: MIT; consult the selected model artifact and upstream repository for the complete notice
 
+## FFmpeg sidecar
+
+- Upstream project: [FFmpeg](https://ffmpeg.org/)
+- Build-time binary mirror currently used by Mingtily: [Zackriya-Solutions/ffmpeg-binaries](https://github.com/Zackriya-Solutions/ffmpeg-binaries)
+- Use in Mingtily: decoding, conversion, mixing, and packaged desktop sidecar
+
+FFmpeg licensing depends on how a binary was configured and which optional libraries it includes. Redistributors must inspect the exact bundled binary and comply with its accompanying license and source-code obligations. Mingtily's roadmap tracks replacing the current mirror with a pinned, integrity-verified, reproducible source.
+
 ## Built-in summary models
 
 Mingtily can optionally download one of the following model families after user action:

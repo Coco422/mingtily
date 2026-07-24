@@ -14,7 +14,7 @@
 
 ## Environment
 - OS: [e.g., macOS, Windows, Linux]
-- Mingtily version: [e.g., 0.5.0]
+- Mingtily version: [e.g., 0.5.2]
 - Installation type: [local build, GitHub Actions artifact, release package]
 - Transcription Provider/model: [if relevant]
 - Speaker diarization: [enabled/disabled, if relevant]

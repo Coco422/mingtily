@@ -269,17 +269,14 @@ pub async fn recover_audio_from_checkpoints(
     meeting_folder: String,
     _sample_rate: u32,
 ) -> Result<AudioRecoveryStatus, String> {
-    info!("Starting audio recovery for folder: {}", meeting_folder);
+    info!("Starting audio recovery for a local meeting folder");
 
     let folder_path = PathBuf::from(&meeting_folder);
     let checkpoints_dir = folder_path.join(".checkpoints");
 
     // Check if checkpoints directory exists
     if !checkpoints_dir.exists() {
-        info!(
-            "No checkpoints directory found at: {}",
-            checkpoints_dir.display()
-        );
+        info!("No checkpoint directory was found for audio recovery");
         return Ok(AudioRecoveryStatus {
             status: "none".to_string(),
             chunk_count: 0,
@@ -415,7 +412,7 @@ pub async fn recover_audio_from_checkpoints(
 /// This command is called by the frontend after successful save to clean up checkpoint files
 #[tauri::command]
 pub async fn cleanup_checkpoints(meeting_folder: String) -> Result<(), String> {
-    info!("Cleaning up checkpoints for folder: {}", meeting_folder);
+    info!("Cleaning up checkpoints for a local meeting folder");
 
     let folder_path = PathBuf::from(&meeting_folder);
     let checkpoints_dir = folder_path.join(".checkpoints");
@@ -508,5 +505,45 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("No audio checkpoints"));
+    }
+
+    #[tokio::test]
+    async fn checkpoint_detection_and_cleanup_ignore_unrelated_files() {
+        let temp_dir = tempdir().unwrap();
+        let meeting_folder = temp_dir.path().join("Recovery_Test");
+        let checkpoints = meeting_folder.join(".checkpoints");
+        std::fs::create_dir_all(&checkpoints).unwrap();
+        std::fs::write(checkpoints.join("notes.txt"), b"not audio").unwrap();
+
+        assert!(
+            !has_audio_checkpoints(meeting_folder.to_string_lossy().to_string())
+                .await
+                .unwrap()
+        );
+
+        std::fs::write(checkpoints.join("audio_chunk_000.mp4"), b"checkpoint").unwrap();
+        assert!(
+            has_audio_checkpoints(meeting_folder.to_string_lossy().to_string())
+                .await
+                .unwrap()
+        );
+
+        cleanup_checkpoints(meeting_folder.to_string_lossy().to_string())
+            .await
+            .unwrap();
+        assert!(!checkpoints.exists());
+    }
+
+    #[tokio::test]
+    async fn recovery_without_checkpoints_is_a_non_error() {
+        let temp_dir = tempdir().unwrap();
+        let result =
+            recover_audio_from_checkpoints(temp_dir.path().to_string_lossy().to_string(), 48_000)
+                .await
+                .unwrap();
+
+        assert_eq!(result.status, "none");
+        assert_eq!(result.chunk_count, 0);
+        assert_eq!(result.audio_file_path, None);
     }
 }

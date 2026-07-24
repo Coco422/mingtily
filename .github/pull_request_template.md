@@ -16,6 +16,7 @@
 - [ ] Unit tests added/updated
 - [ ] Manual testing performed
 - [ ] `pnpm check:i18n` completed when UI copy changed
+- [ ] `pnpm check:network-boundary` completed when startup or network behavior changed
 - [ ] Relevant frontend/Rust checks pass, or missing coverage is explained
 
 ## Documentation

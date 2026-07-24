@@ -2,27 +2,14 @@
 
 This directory contains template definitions for meeting summary generation.
 
-## Available Templates
+## Bundled templates
 
-### 1. `daily_standup.json`
-Time-boxed daily updates template designed for engineering/product teams.
-
-**Sections:**
-- Date
-- Attendees
-- Yesterday (completed work)
-- Today (planned work)
-- Blockers
-- Notes
-
-### 2. `standard_meeting.json`
-General-purpose meeting notes template focusing on key outcomes and actions.
-
-**Sections:**
-- Summary
-- Key Decisions
-- Action Items
-- Discussion Highlights
+- `daily_standup.json`: daily engineering or product updates.
+- `project_sync.json`: project milestones, risks, decisions, and actions.
+- `retrospective.json`: start/stop/continue retrospective.
+- `sales_marketing_client_call.json`: client goals, commercial topics, and next steps.
+- `standard_meeting.json`: general summary, decisions, actions, and discussion highlights.
+- `psychatric_session.json`: upstream clinical-note template retained for compatibility; review privacy and regulatory requirements before use.
 
 ## Template Structure
 
@@ -49,7 +36,7 @@ Users can add custom templates to the application data directory:
 
 - **macOS**: `~/Library/Application Support/Mingtily/templates/`
 - **Windows**: `%APPDATA%\Mingtily\templates\`
-- **Linux**: `~/.config/Mingtily/templates/`
+- **Linux**: `$XDG_DATA_HOME/Mingtily/templates/` (normally `~/.local/share/Mingtily/templates/`)
 
 Custom templates override built-in templates with the same filename.
 

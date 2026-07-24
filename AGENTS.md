@@ -27,6 +27,7 @@ The Python/FastAPI code under `backend/` is a legacy upstream archive. Do not ad
 - Summary providers and built-in inference: `frontend/src-tauri/src/summary/` and `llama-helper/`.
 - Frontend capability configuration: `frontend/src/services/capabilityConfigService.ts`.
 - UI localization: `frontend/src/i18n/`.
+- Local rotating logs and user-initiated diagnostic export: `frontend/src-tauri/src/diagnostic_logs.rs`.
 
 Keep model assets and runtime selection separate:
 
@@ -60,6 +61,7 @@ Run frontend commands from `frontend/`:
 ```bash
 pnpm install
 pnpm check:i18n
+pnpm check:network-boundary
 pnpm build
 pnpm tauri:dev
 pnpm tauri:build
@@ -89,7 +91,7 @@ On macOS, native dependencies such as `cidre` may require a complete Xcode insta
 - Pull-request validation must never require signing credentials.
 - macOS sidecars and the Tauri bundle must be built for the same target architecture.
 - Never print credentials or credential fragments in workflow logs.
-- Signed releases must use Mingtily-owned Apple/Windows credentials and should create a draft release for review before publication.
+- Current workflows are unsigned and must not reference signing secrets. Signing and notarization should be designed later using Mingtily-owned credentials and a reviewed draft-release process.
 
 ## Documentation
 

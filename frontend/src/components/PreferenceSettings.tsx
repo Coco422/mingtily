@@ -2,13 +2,19 @@
 
 import { useEffect, useState } from "react"
 import { Switch } from "./ui/switch"
-import { FolderOpen } from "lucide-react"
+import { Download, FolderOpen, Loader2 } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
 import { useTranslation } from "react-i18next"
 import { setUiLocale } from "@/i18n"
 import type { AppLocale } from "@/i18n/resources"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
+import { toast } from "sonner"
+
+interface DiagnosticExportResult {
+  path: string;
+  files_included: number;
+}
 
 export function PreferenceSettings() {
   const { t, i18n } = useTranslation('settings');
@@ -23,6 +29,7 @@ export function PreferenceSettings() {
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
+  const [isExportingDiagnostics, setIsExportingDiagnostics] = useState(false);
 
   // Lazy load preferences on mount (only loads if not already cached)
   useEffect(() => {
@@ -98,6 +105,23 @@ export function PreferenceSettings() {
       }
     } catch (error) {
       console.error(`Failed to open ${folderType} folder:`, error);
+    }
+  };
+
+  const handleExportDiagnostics = async () => {
+    setIsExportingDiagnostics(true);
+    try {
+      const result = await invoke<DiagnosticExportResult | null>('export_diagnostic_logs');
+      if (result) {
+        toast.success(t('general.diagnosticsExported'), {
+          description: t('general.diagnosticsExportedDescription', { count: result.files_included }),
+        });
+      }
+    } catch (error) {
+      console.error('Failed to export diagnostics:', error);
+      toast.error(t('general.diagnosticsExportFailed'));
+    } finally {
+      setIsExportingDiagnostics(false);
     }
   };
 
@@ -206,6 +230,29 @@ export function PreferenceSettings() {
           <p className="text-xs text-blue-800">
             <strong>{t('general.noteLabel')}</strong> {t('general.storageNote')}
           </p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="max-w-xl">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{t('general.diagnostics')}</h3>
+            <p className="text-sm text-gray-600">{t('general.diagnosticsDescription')}</p>
+            <p className="mt-2 text-xs text-gray-500">{t('general.diagnosticsPrivacy')}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleExportDiagnostics()}
+            disabled={isExportingDiagnostics}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          >
+            {isExportingDiagnostics ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            {isExportingDiagnostics ? t('general.exportingDiagnostics') : t('general.exportDiagnostics')}
+          </button>
         </div>
       </div>
 

@@ -327,8 +327,12 @@ async fn run_import<R: Runtime>(
     }
 
     info!(
-        "Starting import for '{}' from {} with language {:?}, model {:?}, provider {:?}",
-        title, source_path, language, model, provider
+        "Starting audio import (title chars: {}, extension: {:?}, language: {:?}, model: {:?}, provider: {:?})",
+        title.chars().count(),
+        source.extension().and_then(|value| value.to_str()),
+        language,
+        model,
+        provider
     );
 
     // Determine which provider to use (default to whisper)
@@ -641,20 +645,12 @@ async fn run_import<R: Runtime>(
         let trimmed = text.trim();
         if !trimmed.is_empty() {
             debug!(
-                "Segment {}/{}: {:.1}s, conf={:.2}, text='{}'",
+                "Segment {}/{}: {:.1}s, conf={:.2}, chars={}",
                 i + 1,
                 processable_count,
                 segment_duration_sec,
                 conf,
-                if trimmed.len() > 80 {
-                    let mut end = 80;
-                    while !trimmed.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    &trimmed[..end]
-                } else {
-                    trimmed
-                }
+                trimmed.chars().count()
             );
             all_transcripts.push((
                 text,
@@ -1177,6 +1173,7 @@ mod tests {
     #[test]
     fn test_audio_extensions() {
         assert!(AUDIO_EXTENSIONS.contains(&"mp4"));
+        assert!(AUDIO_EXTENSIONS.contains(&"m4a"));
         assert!(AUDIO_EXTENSIONS.contains(&"wav"));
         assert!(AUDIO_EXTENSIONS.contains(&"mp3"));
         assert!(!AUDIO_EXTENSIONS.contains(&"txt"));
@@ -1519,5 +1516,23 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Regression harness for containers such as Opus-in-M4A without committing private audio.
+    /// Run with: TEST_OPUS_M4A_PATH=/path/to/audio.m4a cargo test test_opus_m4a_decode -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn test_opus_m4a_decode() {
+        let audio_path = std::env::var("TEST_OPUS_M4A_PATH")
+            .expect("Set TEST_OPUS_M4A_PATH to run this integration test");
+        let path = Path::new(&audio_path);
+
+        let info = validate_audio_file(path).expect("M4A validation failed");
+        assert_eq!(info.format, "M4A");
+
+        let decoded = decode_audio_file(path).expect("M4A decode failed");
+        assert!(decoded.duration_seconds > 0.0);
+        assert!(!decoded.samples.is_empty());
+        assert!(!decoded.to_whisper_format().is_empty());
     }
 }

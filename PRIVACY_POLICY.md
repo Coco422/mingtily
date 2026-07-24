@@ -1,6 +1,6 @@
 # Mingtily Privacy Policy
 
-Last updated: July 23, 2026
+Last updated: July 24, 2026
 
 ## Local-first data handling
 
@@ -31,6 +31,12 @@ Use Ollama or a downloaded built-in model when transcript content must remain on
 ## User control
 
 Users can inspect, export, or delete local meeting data through the application and the operating system's application data directory. Uninstalling the application may not automatically remove user-created recordings or application data; remove those directories manually if complete deletion is required.
+
+## Diagnostic logs
+
+Mingtily keeps a small rotating set of diagnostic logs on the device to investigate startup, recording, model, and Provider failures. The default retention is five files of up to 5 MB each. Logs are not telemetry and are never uploaded automatically.
+
+A diagnostic export is created only after the user selects **Export diagnostics** in Settings and chooses a destination. The export replaces the user's home-directory path and removes obvious credential-bearing lines. It may still include device names, model names, filenames, timestamps, and technical error context, so users should review the file before sharing it.
 
 ## Security scope
 

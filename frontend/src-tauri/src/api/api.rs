@@ -218,8 +218,7 @@ async fn get_auth_token<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
     match store.get("authToken") {
         Some(token) => {
             if let Some(token_str) = token.as_str() {
-                let truncated = token_str.chars().take(20).collect::<String>();
-                log_info!("Found auth token: {}", truncated);
+                log_info!("Found an auth token in the local store");
                 Some(token_str.to_string())
             } else {
                 log_warn!("Auth token is not a string");
@@ -299,7 +298,11 @@ async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         let error_msg = format!("HTTP {}: {}", status, error_text);
-        log_error!("{}", error_msg);
+        log_error!(
+            "Request failed with HTTP status {} (response chars: {})",
+            status,
+            error_text.chars().count()
+        );
         return Err(error_msg);
     }
 
@@ -309,9 +312,10 @@ async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
         error_msg
     })?;
 
-    // Safely truncate response for logging, respecting UTF-8 character boundaries
-    let truncated = response_text.chars().take(200).collect::<String>();
-    log_info!("Response body: {}", truncated);
+    log_info!(
+        "Response body received ({} chars)",
+        response_text.chars().count()
+    );
 
     serde_json::from_str(&response_text).map_err(|e| {
         let error_msg = format!("Failed to parse JSON: {}", e);
@@ -364,8 +368,8 @@ pub async fn api_search_transcripts<R: Runtime>(
     auth_token: Option<String>,
 ) -> Result<Vec<TranscriptSearchResult>, String> {
     log_info!(
-        "api_search_transcripts called with query: '{}', auth_token: {}",
-        query,
+        "api_search_transcripts called (query chars: {}, auth_token: {})",
+        query.chars().count(),
         auth_token.is_some()
     );
 
@@ -380,7 +384,7 @@ pub async fn api_search_transcripts<R: Runtime>(
             Ok(results)
         }
         Err(e) => {
-            log_error!("Error searching transcripts for query '{}': {}", query, e);
+            log_error!("Error searching transcripts: {}", e);
             Err(format!("Failed to search transcripts: {}", e))
         }
     }
@@ -950,20 +954,12 @@ pub async fn api_save_transcript<R: Runtime>(
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_save_transcript called for meeting: {}, transcripts: {}, folder_path: {:?}, auth_token: {}",
-        meeting_title,
+        "api_save_transcript called (title chars: {}, transcripts: {}, folder_path: {}, auth_token: {})",
+        meeting_title.chars().count(),
         transcripts.len(),
-        folder_path,
+        folder_path.is_some(),
         auth_token.is_some()
     );
-
-    // Log first transcript for debugging
-    if let Some(first) = transcripts.first() {
-        log_debug!(
-            "First transcript data: {}",
-            serde_json::to_string_pretty(first).unwrap_or_default()
-        );
-    }
 
     // Convert serde_json::Value to TranscriptSegment
     let transcripts_to_save: Vec<TranscriptSegment> = transcripts
@@ -978,13 +974,15 @@ pub async fn api_save_transcript<R: Runtime>(
             )
         })?;
 
-    // Log parsed segments count and first segment details
+    // Log parsed segment timing without recording transcript content.
     if let Some(first_seg) = transcripts_to_save.first() {
-        log_debug!("First parsed segment: text='{}', audio_start_time={:?}, audio_end_time={:?}, duration={:?}",
-                   first_seg.text.chars().take(50).collect::<String>(),
-                   first_seg.audio_start_time,
-                   first_seg.audio_end_time,
-                   first_seg.duration);
+        log_debug!(
+            "First parsed segment: chars={}, audio_start_time={:?}, audio_end_time={:?}, duration={:?}",
+            first_seg.text.chars().count(),
+            first_seg.audio_start_time,
+            first_seg.audio_end_time,
+            first_seg.duration
+        );
     }
 
     let pool = state.db_manager.pool();
@@ -1010,11 +1008,7 @@ pub async fn api_save_transcript<R: Runtime>(
             }))
         }
         Err(e) => {
-            log_error!(
-                "Error saving transcript for meeting '{}': {}",
-                meeting_title,
-                e
-            );
+            log_error!("Error saving transcript: {}", e);
             Err(format!("Failed to save transcript: {}", e))
         }
     }
@@ -1043,12 +1037,12 @@ pub async fn open_meeting_folder<R: Runtime>(
     match meeting {
         Some(m) => {
             if let Some(folder_path) = m.folder_path {
-                log_info!("Opening meeting folder: {}", folder_path);
+                log_info!("Opening a meeting folder selected from local data");
 
                 // Verify folder exists
                 let path = std::path::Path::new(&folder_path);
                 if !path.exists() {
-                    log_warn!("Folder path does not exist: {}", folder_path);
+                    log_warn!("The selected meeting folder does not exist");
                     return Err(format!("Recording folder not found: {}", folder_path));
                 }
 
@@ -1077,7 +1071,7 @@ pub async fn open_meeting_folder<R: Runtime>(
                         .map_err(|e| format!("Failed to open folder: {}", e))?;
                 }
 
-                log_info!("Successfully opened folder: {}", folder_path);
+                log_info!("Successfully opened the meeting folder");
                 Ok(())
             } else {
                 log_warn!("Meeting {} has no folder_path set", meeting_id);
@@ -1197,8 +1191,8 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
     top_p: Option<f32>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_save_custom_openai_config called: endpoint='{}', model='{}'",
-        &endpoint,
+        "api_save_custom_openai_config called (endpoint configured: {}, model='{}')",
+        !endpoint.trim().is_empty(),
         &model
     );
 
@@ -1245,10 +1239,7 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
 
     match SettingsRepository::save_custom_openai_config(pool, &config).await {
         Ok(()) => {
-            log_info!(
-                "✅ Successfully saved custom OpenAI config for endpoint: {}",
-                config.endpoint
-            );
+            log_info!("Successfully saved custom OpenAI configuration");
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Custom OpenAI configuration saved successfully"
@@ -1275,8 +1266,8 @@ pub async fn api_get_custom_openai_config<R: Runtime>(
         Ok(config) => {
             if let Some(ref c) = config {
                 log_info!(
-                    "✅ Found custom OpenAI config: endpoint='{}', model='{}'",
-                    c.endpoint,
+                    "Found custom OpenAI configuration (endpoint configured: {}, model='{}')",
+                    !c.endpoint.trim().is_empty(),
                     c.model
                 );
             } else {
@@ -1301,8 +1292,8 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
     model: String,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_test_custom_openai_connection called: endpoint='{}', model='{}'",
-        &endpoint,
+        "api_test_custom_openai_connection called (endpoint configured: {}, model='{}')",
+        !endpoint.trim().is_empty(),
         &model
     );
 
@@ -1380,8 +1371,8 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
 
                         // Response was 200 but doesn't match OpenAI format
                         log_warn!(
-                            "⚠️ Endpoint returned 200 but response doesn't match OpenAI format: {}",
-                            response_text
+                            "Endpoint returned 200 but the response does not match OpenAI format ({} chars)",
+                            response_text.chars().count()
                         );
                         Err("Endpoint is reachable but doesn't appear to be OpenAI-compatible. Response is missing 'choices' array or 'message.content' / 'message.reasoning_content' field.".to_string())
                     }
@@ -1398,9 +1389,9 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                 }
             } else {
                 log_warn!(
-                    "⚠️ Custom OpenAI connection test failed with status {}: {}",
+                    "Custom OpenAI connection test failed with status {} (response chars: {})",
                     status,
-                    response_text
+                    response_text.chars().count()
                 );
                 Err(format!(
                     "Connection failed with status {}: {}",

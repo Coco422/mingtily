@@ -851,10 +851,10 @@ impl WhisperEngine {
         } else {
             if cleaned_result != final_result {
                 log::info!(
-                    "Cleaned repetitive transcription #{}: '{}' -> '{}'",
+                    "Cleaned repetitive transcription #{}: {} chars -> {} chars",
                     transcription_count,
-                    final_result,
-                    cleaned_result
+                    final_result.chars().count(),
+                    cleaned_result.chars().count()
                 );
             }
             // Reduce successful transcription logging frequency
@@ -862,15 +862,15 @@ impl WhisperEngine {
             if transcription_count % 5 == 0 || cleaned_result.len() > 50 || duration_seconds > 10.0
             {
                 log::info!(
-                    "Transcription #{} result: '{}'",
+                    "Transcription #{} completed: {} chars",
                     transcription_count,
-                    cleaned_result
+                    cleaned_result.chars().count()
                 );
             } else {
                 perf_debug!(
-                    "Transcription #{} result: '{}'",
+                    "Transcription #{} completed: {} chars",
                     transcription_count,
-                    cleaned_result
+                    cleaned_result.chars().count()
                 );
             }
         }

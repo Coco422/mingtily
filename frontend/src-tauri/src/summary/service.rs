@@ -560,7 +560,7 @@ impl SummaryService {
                 if let Some(name) =
                     extract_meeting_name_from_markdown(&final_markdown).filter(|n| !n.is_empty())
                 {
-                    info!("Extracted meeting name from summary: '{}'", name);
+                    info!("Extracted a meeting title from the generated summary");
                     if let Err(e) =
                         MeetingsRepository::update_meeting_name(&pool, &meeting_id, &name).await
                     {

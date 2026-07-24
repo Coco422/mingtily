@@ -272,10 +272,7 @@ impl RecordingSaver {
         if create_checkpoints {
             let incremental_saver = IncrementalAudioSaver::new(meeting_folder.clone(), 48000)?;
             self.incremental_saver = Some(Arc::new(AsyncMutex::new(incremental_saver)));
-            info!(
-                "✅ Incremental audio saver initialized for meeting: {}",
-                meeting_name
-            );
+            info!("Incremental audio saver initialized for the current meeting");
         } else {
             info!("⚠️  Skipped incremental audio saver (auto-save disabled)");
         }
@@ -579,5 +576,87 @@ impl RecordingSaver {
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn segment(sequence_id: u64, speaker: Option<&str>, provisional: bool) -> TranscriptSegment {
+        TranscriptSegment {
+            id: format!("segment-{sequence_id}"),
+            text: format!("text-{sequence_id}"),
+            audio_start_time: sequence_id as f64,
+            audio_end_time: sequence_id as f64 + 1.0,
+            duration: 1.0,
+            display_time: "[00:01]".to_string(),
+            confidence: 0.9,
+            sequence_id,
+            speaker: speaker.map(str::to_string),
+            speaker_is_provisional: provisional,
+        }
+    }
+
+    #[test]
+    fn transcript_segments_upsert_by_sequence_id() {
+        let saver = RecordingSaver::new();
+        saver.add_transcript_segment(segment(7, None, false));
+        let mut updated = segment(7, Some("speaker_00"), true);
+        updated.text = "updated".to_string();
+        saver.add_transcript_segment(updated);
+
+        let segments = saver.get_transcript_segments();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "updated");
+        assert_eq!(segments[0].speaker.as_deref(), Some("speaker_00"));
+        assert!(segments[0].speaker_is_provisional);
+    }
+
+    #[test]
+    fn speaker_updates_are_persisted_as_final_labels() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut saver = RecordingSaver::new();
+        saver.meeting_folder = Some(dir.path().to_path_buf());
+        saver.add_transcript_segment(segment(1, Some("speaker_00"), true));
+        saver.add_transcript_segment(segment(2, Some("speaker_01"), true));
+
+        saver.apply_speaker_updates(&[SpeakerLabelUpdate {
+            sequence_id: 1,
+            speaker: Some("speaker_01".to_string()),
+        }]);
+        let final_updates = saver.finalize_speaker_labels();
+        saver.write_transcripts_now().unwrap();
+
+        assert_eq!(final_updates.len(), 2);
+        assert!(saver
+            .get_transcript_segments()
+            .iter()
+            .all(|segment| !segment.speaker_is_provisional));
+
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("transcripts.json")).unwrap())
+                .unwrap();
+        assert_eq!(json["version"], "1.1");
+        assert_eq!(json["segments"][0]["speaker"], "speaker_01");
+        assert!(json["segments"][0].get("speaker_is_provisional").is_none());
+    }
+
+    #[test]
+    fn legacy_segment_without_speaker_fields_still_deserializes() {
+        let json = serde_json::json!({
+            "id": "legacy",
+            "text": "hello",
+            "audio_start_time": 0.0,
+            "audio_end_time": 1.0,
+            "duration": 1.0,
+            "display_time": "[00:00]",
+            "confidence": 1.0,
+            "sequence_id": 0
+        });
+
+        let segment: TranscriptSegment = serde_json::from_value(json).unwrap();
+        assert_eq!(segment.speaker, None);
+        assert!(!segment.speaker_is_provisional);
     }
 }

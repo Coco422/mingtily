@@ -41,6 +41,7 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod diagnostic_logs;
 pub mod groq;
 pub mod localization;
 pub mod notifications;
@@ -88,12 +89,11 @@ async fn start_recording<R: Runtime>(
     system_device_name: Option<String>,
     meeting_name: Option<String>,
 ) -> Result<(), String> {
-    log_info!("🔥 CALLED start_recording with meeting: {:?}", meeting_name);
     log_info!(
-        "📋 Backend received parameters - mic: {:?}, system: {:?}, meeting: {:?}",
-        mic_device_name,
-        system_device_name,
-        meeting_name
+        "start_recording requested (microphone configured: {}, system audio configured: {}, custom title: {})",
+        mic_device_name.is_some(),
+        system_device_name.is_some(),
+        meeting_name.is_some()
     );
 
     if is_recording().await {
@@ -224,7 +224,7 @@ fn read_audio_file(file_path: String) -> Result<Vec<u8>, String> {
 
 #[tauri::command]
 async fn save_transcript(file_path: String, content: String) -> Result<(), String> {
-    log_info!("Saving transcript to: {}", file_path);
+    log_info!("Saving transcript to a user-selected path");
 
     // Ensure parent directory exists
     if let Some(parent) = std::path::Path::new(&file_path).parent() {
@@ -308,8 +308,12 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     system_device_name: Option<String>,
     meeting_name: Option<String>,
 ) -> Result<(), String> {
-    log_info!("🚀 CALLED start_recording_with_devices_and_meeting - Mic: {:?}, System: {:?}, Meeting: {:?}",
-             mic_device_name, system_device_name, meeting_name);
+    log_info!(
+        "start_recording_with_devices requested (microphone configured: {}, system audio configured: {}, custom title: {})",
+        mic_device_name.is_some(),
+        system_device_name.is_some(),
+        meeting_name.is_some()
+    );
 
     // Clone meeting_name for notification use later
     let meeting_name_for_notification = meeting_name.clone();
@@ -317,19 +321,16 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Call the recording module functions that support meeting names
     let recording_result = match (mic_device_name.clone(), system_device_name.clone()) {
         (None, None) => {
-            log_info!(
-                "No devices specified, starting with defaults and meeting: {:?}",
-                meeting_name
-            );
+            log_info!("No devices specified; starting with default devices");
             audio::recording_commands::start_recording_with_meeting_name(app.clone(), meeting_name)
                 .await
         }
         _ => {
             log_info!(
-                "Starting with specified devices: mic={:?}, system={:?}, meeting={:?}",
-                mic_device_name,
-                system_device_name,
-                meeting_name
+                "Starting with selected devices (microphone: {}, system audio: {}, custom title: {})",
+                mic_device_name.is_some(),
+                system_device_name.is_some(),
+                meeting_name.is_some()
             );
             audio::recording_commands::start_recording_with_devices_and_meeting(
                 app.clone(),
@@ -383,9 +384,16 @@ pub fn get_language_preference_internal() -> Option<String> {
 }
 
 pub fn run() {
-    log::set_max_level(log::LevelFilter::Info);
-
-    let mut builder = tauri::Builder::default();
+    let mut builder = tauri::Builder::default().plugin(
+        tauri_plugin_log::Builder::new()
+            .level(log::LevelFilter::Info)
+            .max_file_size(diagnostic_logs::LOG_FILE_SIZE_BYTES)
+            .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(
+                diagnostic_logs::LOG_ARCHIVES_TO_KEEP,
+            ))
+            .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+            .build(),
+    );
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     {
@@ -715,6 +723,7 @@ pub fn run() {
             // Database and Models path commands
             database::commands::get_database_directory,
             database::commands::open_database_folder,
+            diagnostic_logs::export_diagnostic_logs,
             whisper_engine::commands::open_models_folder,
             // Onboarding commands
             onboarding::get_onboarding_status,

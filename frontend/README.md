@@ -18,6 +18,7 @@ From this directory:
 ```bash
 pnpm install
 pnpm check:i18n
+pnpm check:network-boundary
 pnpm tauri:dev
 ```
 
@@ -50,8 +51,10 @@ The current app does not require the archived FastAPI server under `backend/`. T
 ## Important checks
 
 - Run `pnpm check:i18n` whenever user-facing copy or locale resources change.
+- Run `pnpm check:network-boundary` when startup behavior or network-capable commands change.
 - Run `pnpm build` for frontend type and production-build validation.
 - Validate audio, ASR, speaker, and Provider changes in the packaged or development Tauri app.
 - External summary Providers are optional; local recording and transcription must remain usable without them.
+- Diagnostic logs remain local, rotate automatically, and are exported only after a user action in Settings.
 
 See the repository [README](../README.md), [Roadmap](../ROADMAP.md), and [project agent rules](../AGENTS.md) for current product and engineering boundaries.

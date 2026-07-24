@@ -15,9 +15,9 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - **失败可降级**：说话人分离、摘要或单个 Provider 失败时，不应丢失录音和原始转写。
 - **隐私边界可验证**：不加入使用分析、广告追踪或后台更新；远程调用前明确说明数据去向。
 
-## 当前基础：0.5.0
+## 当前基础：0.5.2
 
-0.5.0 是 Mingtily 独立 fork 的基础版本，重点是建立清晰的产品身份、离线边界和可扩展配置结构。
+0.5.2 完成了 Mingtily 独立 fork 的第一轮稳定化，重点是建立清晰的产品身份、离线边界、可扩展配置结构和可持续验证基础。
 
 - Mingtily 品牌、独立 bundle identifier 和全新本地数据空间。
 - 移除遥测、后台更新、PRO/订阅及上游营销入口。
@@ -29,25 +29,29 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 实时 provisional speaker label，停止录音后的全局 speaker 校正。
 - 保留 Built-in AI、Ollama 和用户主动配置的外部 LLM Provider。
 - 本地模型仅在用户点击后下载；Parakeet 使用固定 revision 和 SHA256 校验。
+- 隐私友好的本地滚动日志与用户主动诊断导出，不自动上传。
+- PR 自动执行 i18n、前端构建、网络边界静态审计、Rust fmt/test/check。
+- Linux PR 构建无签名 DEB，并对冷启动的非 loopback 连接进行运行时检查。
+- macOS Apple Silicon、Windows x64 和 Linux x64 提供不依赖 secrets 的手动无签名构建。
+- 当前工作流不包含 Apple Developer、DigiCert、notarization 或正式 Release 自动化。
+- 录音 transcript 保存、speaker 最终标签、导入格式、模型损坏和恢复状态具有直接回归测试。
 
-## 0.5.x：稳定性与发布基础
+## 0.5.x：后续维护项
 
-目标：把 0.5.0 从开发可用推进到可供社区下载和持续迭代的稳定基础。
+目标：在不扩大产品边界的前提下，继续提高 0.5.2 的真实设备可靠性和社区可用性。
 
 - 补齐录音、导入、重新转写、speaker label、摘要和数据恢复的回归测试。
 - 持续清理 i18n 遗漏、窄窗口布局和中英文文案长度问题。
-- 重新编写面向 Mingtily 的公开 README：包含产品定位、隐私边界、快速开始、当前界面截图、模型说明、平台支持矩阵和贡献入口，不复用旧 Meetily 素材。
-- 增加隐私友好的本地诊断日志：默认不上传、可轮转、可由用户主动导出。
-- 建立网络边界测试，验证冷启动和普通使用没有非预期外网连接。
+- 为公开 README 补充全新的 Mingtily 界面截图，不复用旧 Meetily 素材。
+- 扩大网络边界运行时测试，覆盖启动后的普通浏览与录音准备流程。
 - 统一模型 manifest、断点下载、SHA256、损坏检测和原地修复行为。
-- 完善 macOS Apple Silicon 打包、签名、notarization 和 Gatekeeper 验证。
-- 验证 Windows x64 与 Linux x64 的编译和基础功能，明确仍不支持的能力。
-- 建立 GitHub Actions 分层门禁：
-  - Pull Request：i18n key、TypeScript、前端构建、Rust 检查与单元测试。
-  - 手动 DevTest：macOS、Windows、Linux 无签名安装包。
-  - 手动 Release：仅使用 Mingtily 自己的签名凭证生成 draft release。
+- 将构建期 FFmpeg sidecar 从当前上游二进制镜像迁移到固定版本、带 SHA256 且可复现的独立来源。
+- 清理 workspace member 中当前被 Cargo 忽略的 `[patch.crates-io]` 与 `[profile.release]` 配置，并用根 workspace 配置表达真实构建意图。
+- 验证 Windows x64 与 Linux x64 的编译、安装和基础录音功能，明确仍不支持的能力。
+- 根据 CI 和真实设备结果修复 macOS、Windows、Linux 打包差异。
+- 补充无签名安装包的安装、系统拦截提示和卸载说明。
 
-验收标准：主要录音路径无数据丢失；三平台 CI 状态明确；macOS 安装包可在干净机器启动；仓库不依赖 Meetily 的私有服务或凭证。
+验收标准：主要录音路径无数据丢失；三平台构建状态明确；无签名安装包的限制有清晰说明；仓库不依赖 Meetily 的私有服务或凭证。macOS Developer ID、notarization 和 Gatekeeper 发布验证不作为 0.5.x 门禁。
 
 ## 0.6：中文 ASR 与统一转写架构
 
@@ -84,8 +88,9 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 
 - 建立 Provider Registry，核心协议收敛为：
   - Ollama
-  - 字节火山引擎
-  - 阿里云百炼
+  - OpenAI Compatible
+  - Anthropic
+  - Gemini
   - Built-in Local AI
 - 增加 LM Studio、vLLM、Xinference、SiliconFlow、火山方舟、DashScope 和 DeepSeek preset。
 - 自动检测仅扫描明确的 localhost 常用端口，不扫描局域网。
@@ -119,6 +124,7 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 完成可访问性、键盘操作和主要界面的响应式检查。
 - 安全、隐私、第三方许可证和模型来源审计完成。
 - 可复现的 CI 构建、签名、notarization、校验和发布说明流程。
+- 当具备 Mingtily 自有 Apple/Windows 凭证且社区确有安装需求时，再启用正式签名与 macOS notarization。
 
 ## 持续演进方向
 
@@ -129,7 +135,7 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - **诊断能力**：本地滚动日志、隐私脱敏、诊断包导出和性能指标展示。
 - **数据互操作**：Markdown、JSON、字幕和常用会议格式导出。
 - **社区模型**：通过 manifest 增加模型，而不是为每个模型复制下载器和设置页面。
-- **RAG 功能**: 可以成为知识库衍生产品，会议作为旧版本产品进行过渡。
+- **RAG 功能**：让会议内容成为可检索、可追溯的知识来源，同时保持录音与转写是核心体验。
 
 ## 当前不做
 
