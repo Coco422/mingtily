@@ -3,9 +3,10 @@
 // Slim Tauri command layer for recording functionality.
 // Delegates to transcription and recording modules for actual implementation.
 
+use crate::speaker_diarization::engine::diarize_audio_file_in_windows_with_progress;
 use crate::speaker_diarization::{
-    diarize_audio_file_in_windows, installed_model_paths,
-    is_enabled as speaker_diarization_is_enabled, refine_speaker_labels, SpeakerLabelUpdate,
+    installed_model_paths, is_enabled as speaker_diarization_is_enabled, refine_speaker_labels,
+    SpeakerLabelUpdate,
 };
 use anyhow::Result;
 use log::{error, info, warn};
@@ -42,6 +43,7 @@ static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+static LIVE_TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
 static TRANSCRIPT_LISTENER_ID: Mutex<Option<tauri::EventId>> = Mutex::new(None);
@@ -60,6 +62,37 @@ pub struct TranscriptionStatus {
     pub chunks_in_queue: usize,
     pub is_processing: bool,
     pub last_activity_ms: u64,
+}
+
+async fn configured_streaming_model<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Option<crate::sherpa_asr::models::InstalledSherpaModel>, String> {
+    let selection = transcription::resolve_transcription_selection(app, None, None).await;
+    if selection.provider != crate::sherpa_asr::PROVIDER_ID
+        || !crate::sherpa_asr::is_online_model(&selection.model)
+    {
+        return Ok(None);
+    }
+
+    crate::sherpa_asr::installed_model(app, &selection.model).map_err(|error| error.to_string())
+}
+
+fn start_recording_transcription_tasks<R: Runtime>(
+    app: &AppHandle<R>,
+    receivers: super::recording_manager::RecordingReceivers,
+    streaming_model: Option<crate::sherpa_asr::models::InstalledSherpaModel>,
+) {
+    let task_handle = transcription::start_transcription_task(app.clone(), receivers.segmented);
+    *TRANSCRIPTION_TASK.lock().unwrap() = Some(task_handle);
+
+    if let (Some(streaming_receiver), Some(model)) = (receivers.streaming, streaming_model) {
+        let task_handle = crate::sherpa_asr::start_live_transcription_task(
+            app.clone(),
+            streaming_receiver,
+            model,
+        );
+        *LIVE_TRANSCRIPTION_TASK.lock().unwrap() = Some(task_handle);
+    }
 }
 
 // ============================================================================
@@ -106,6 +139,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
+    let streaming_model = configured_streaming_model(&app).await?;
 
     // Async-first approach - no more blocking operations!
     info!("🚀 Starting async recording initialization");
@@ -249,8 +283,13 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     });
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
-    let transcription_receiver = manager
-        .start_recording(microphone_device, system_device, auto_save)
+    let recording_receivers = manager
+        .start_recording(
+            microphone_device,
+            system_device,
+            auto_save,
+            streaming_model.is_some(),
+        )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
@@ -266,12 +305,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
-    // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
-    {
-        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-        *global_task = Some(task_handle);
-    }
+    start_recording_transcription_tasks(&app, recording_receivers, streaming_model);
 
     // CRITICAL: Listen for transcript-update events and save to recording manager
     // This enables transcript history persistence for page reload sync
@@ -375,6 +409,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
+    let streaming_model = configured_streaming_model(&app).await?;
 
     // Parse devices
     let mic_device = if let Some(ref name) = mic_device_name {
@@ -431,8 +466,13 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     });
 
     // Start recording with specified devices and auto_save setting
-    let transcription_receiver = manager
-        .start_recording(mic_device, system_device, auto_save)
+    let recording_receivers = manager
+        .start_recording(
+            mic_device,
+            system_device,
+            auto_save,
+            streaming_model.is_some(),
+        )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
@@ -448,12 +488,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
-    // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
-    {
-        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-        *global_task = Some(task_handle);
-    }
+    start_recording_transcription_tasks(&app, recording_receivers, streaming_model);
 
     // CRITICAL: Listen for transcript-update events and save to recording manager
     // This enables transcript history persistence for page reload sync
@@ -533,7 +568,7 @@ pub async fn stop_recording<R: Runtime>(
         serde_json::json!({
             "stage": "stopping_audio",
             "message": "Stopping audio capture...",
-            "progress": 20
+            "progress": 10
         }),
     );
 
@@ -580,7 +615,7 @@ pub async fn stop_recording<R: Runtime>(
         serde_json::json!({
             "stage": "processing_transcripts",
             "message": "Processing remaining transcript chunks...",
-            "progress": 40
+            "progress": 30
         }),
     );
 
@@ -608,7 +643,7 @@ pub async fn stop_recording<R: Runtime>(
                     serde_json::json!({
                         "stage": "processing_transcripts",
                         "message": format!("Processing transcripts... ({}s elapsed)", elapsed),
-                        "progress": 40,
+                        "progress": 30,
                         "detailed": true,
                         "elapsed_seconds": elapsed
                     }),
@@ -634,6 +669,20 @@ pub async fn stop_recording<R: Runtime>(
         info!("ℹ️ No transcription task found to wait for");
     }
 
+    let live_transcription_task = {
+        let mut global_task = LIVE_TRANSCRIPTION_TASK.lock().unwrap();
+        global_task.take()
+    };
+    if let Some(task_handle) = live_transcription_task {
+        match task_handle.await {
+            Ok(()) => info!("✅ Online Paraformer live session flushed successfully"),
+            Err(error) => warn!(
+                "⚠️ Online Paraformer live session completed with error: {:?}",
+                error
+            ),
+        }
+    }
+
     // Keep this listener alive until every worker has emitted its final transcript.
     {
         use tauri::Listener;
@@ -654,7 +703,7 @@ pub async fn stop_recording<R: Runtime>(
         serde_json::json!({
             "stage": "unloading_model",
             "message": "Unloading speech recognition model...",
-            "progress": 70
+            "progress": 50
         }),
     );
 
@@ -747,7 +796,7 @@ pub async fn stop_recording<R: Runtime>(
         serde_json::json!({
             "stage": "finalizing",
             "message": "Finalizing recording and cleaning up resources...",
-            "progress": 90
+            "progress": 60
         }),
     );
 
@@ -789,6 +838,14 @@ pub async fn stop_recording<R: Runtime>(
         )
         .await;
         manager.apply_speaker_updates(&speaker_updates);
+        let _ = app.emit(
+            "recording-shutdown-progress",
+            serde_json::json!({
+                "stage": "finalizing",
+                "message": "Writing final transcript data...",
+                "progress": 96
+            }),
+        );
         let speaker_updates = manager.finalize_speaker_labels();
         if !speaker_updates.is_empty() {
             let _ = app.emit(
@@ -914,11 +971,27 @@ async fn refine_recording_speakers<R: Runtime>(
         .map(|(_, start, end, _)| (*start, *end))
         .collect::<Vec<_>>();
     let audio_path = audio_path.to_string();
+    let progress_app = app.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let turns = diarize_audio_file_in_windows(
+        let turns = diarize_audio_file_in_windows_with_progress(
             std::path::Path::new(&audio_path),
             &paths,
             &diarization_ranges,
+            |window| {
+                let progress =
+                    speaker_refinement_progress(window.completed_windows, window.total_windows);
+                let _ = progress_app.emit(
+                    "recording-shutdown-progress",
+                    serde_json::json!({
+                        "stage": "refining_speakers",
+                        "message": "Refining speaker labels...",
+                        "progress": progress,
+                        "current_window": window.current_window,
+                        "completed_windows": window.completed_windows,
+                        "total_windows": window.total_windows
+                    }),
+                );
+            },
         )?;
         Ok::<_, anyhow::Error>(refine_speaker_labels(&transcript_ranges, &turns))
     })
@@ -941,6 +1014,18 @@ async fn refine_recording_speakers<R: Runtime>(
             fallback()
         }
     }
+}
+
+fn speaker_refinement_progress(completed_windows: usize, total_windows: usize) -> u8 {
+    const START: usize = 65;
+    const SPAN: usize = 30;
+
+    if total_windows == 0 {
+        return START as u8;
+    }
+
+    let completed = completed_windows.min(total_windows);
+    (START + completed * SPAN / total_windows) as u8
 }
 
 /// Check if recording is active
@@ -1268,5 +1353,19 @@ pub async fn attempt_device_reconnect(
             error!("Manual reconnection error: {}", e);
             Err(e.to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::speaker_refinement_progress;
+
+    #[test]
+    fn speaker_refinement_progress_is_bounded_and_monotonic() {
+        assert_eq!(speaker_refinement_progress(0, 12), 65);
+        assert_eq!(speaker_refinement_progress(6, 12), 80);
+        assert_eq!(speaker_refinement_progress(12, 12), 95);
+        assert_eq!(speaker_refinement_progress(20, 12), 95);
+        assert_eq!(speaker_refinement_progress(0, 0), 65);
     }
 }

@@ -35,7 +35,7 @@ export default function Home() {
   const recordingState = useRecordingState();
 
   // Extract status from global state
-  const { status, isStopping, isProcessing, isSaving } = recordingState;
+  const { status, isStopping, isProcessing, isSaving, shutdownProgress } = recordingState;
 
   // Hooks
   const { hasMicrophone } = usePermissionCheck();
@@ -217,6 +217,7 @@ export default function Home() {
 
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
         {(hasMicrophone || isRecording) &&
+          status !== RecordingStatus.STOPPING &&
           status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
           status !== RecordingStatus.SAVING && (
             <div className="fixed bottom-12 left-0 right-0 z-10">
@@ -251,8 +252,10 @@ export default function Home() {
 
         {/* Status Overlays - Processing and Saving */}
         <StatusOverlays
+          isStopping={isStopping}
           isProcessing={status === RecordingStatus.PROCESSING_TRANSCRIPTS && !recordingState.isRecording}
           isSaving={status === RecordingStatus.SAVING}
+          shutdownProgress={shutdownProgress}
           sidebarCollapsed={sidebarCollapsed}
         />
       </div>

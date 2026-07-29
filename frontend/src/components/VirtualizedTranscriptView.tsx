@@ -25,6 +25,8 @@ export interface VirtualizedTranscriptViewProps {
     isStopping?: boolean;
     /** Enable streaming effect for latest segment */
     enableStreaming?: boolean;
+    /** True streaming hypothesis that may be revised by the recognizer */
+    liveSegment?: TranscriptSegmentData | null;
     /** Show confidence indicators */
     showConfidence?: boolean;
     /** Completely disable auto-scroll behavior (for meeting details page) */
@@ -74,6 +76,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speaker,
     speakerIsProvisional,
     isStreaming,
+    isLiveHypothesis,
     showConfidence,
 }: {
     id: string;
@@ -83,9 +86,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speaker?: string | null;
     speakerIsProvisional?: boolean;
     isStreaming: boolean;
+    isLiveHypothesis?: boolean;
     showConfidence: boolean;
 }) {
-    const { t } = useTranslation('common');
+    const { t } = useTranslation(['common', 'recording']);
     const displayText = cleanStopWords(text) || (text.trim() === '' ? t('silence') : text);
     const speakerLabel = formatSpeakerLabel(speaker, t);
 
@@ -111,7 +115,16 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         </div>
                     )}
                     {isStreaming ? (
-                        <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
+                        <div className={isLiveHypothesis
+                            ? 'rounded-md border border-purple-200 bg-purple-50/50 px-3 py-2 transition-colors duration-150'
+                            : 'rounded-md border border-gray-200 bg-gray-100 px-3 py-2'
+                        }>
+                            {isLiveHypothesis && (
+                                <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-purple-700">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-purple-600 animate-pulse" />
+                                    {t('recording:liveRevisionHint')}
+                                </div>
+                            )}
                             <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
                         </div>
                     ) : (
@@ -130,6 +143,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     isProcessing = false,
     isStopping = false,
     enableStreaming = false,
+    liveSegment = null,
     showConfidence = true,
     disableAutoScroll = false,
     hasMore = false,
@@ -250,7 +264,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
 
             {/* Content - add padding when recording to prevent overlap */}
             <div className={isRecording ? 'pt-2' : ''}>
-            {segments.length === 0 ? (
+            {segments.length === 0 && !liveSegment ? (
                 // Empty state
                 <motion.div
                     initial={{ opacity: 0 }}
@@ -311,6 +325,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         speaker={segment.speaker}
                                         speakerIsProvisional={segment.speakerIsProvisional}
                                         isStreaming={isStreaming}
+                                        isLiveHypothesis={false}
                                         showConfidence={showConfidence}
                                     />
                                 </div>
@@ -369,6 +384,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         speaker={segment.speaker}
                                         speakerIsProvisional={segment.speakerIsProvisional}
                                         isStreaming={isStreaming}
+                                        isLiveHypothesis={false}
                                         showConfidence={showConfidence}
                                     />
                                 </motion.div>
@@ -405,6 +421,27 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                         </motion.div>
                     )}
                 </>
+            )}
+            {isRecording && liveSegment && liveSegment.text.trim() && (
+                <motion.div
+                    key={liveSegment.id}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="mt-2"
+                >
+                    <TranscriptSegment
+                        id={liveSegment.id}
+                        timestamp={liveSegment.timestamp}
+                        text={liveSegment.text}
+                        confidence={liveSegment.confidence}
+                        speaker={liveSegment.speaker}
+                        speakerIsProvisional={liveSegment.speakerIsProvisional}
+                        isStreaming
+                        isLiveHypothesis
+                        showConfidence={false}
+                    />
+                </motion.div>
             )}
             </div>
         </div>

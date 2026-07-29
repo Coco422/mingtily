@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Transcript, Summary } from '@/types';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
@@ -52,6 +53,14 @@ async function resolveSummaryLanguage(
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
+interface SummaryGenerationStreamPayload {
+  meeting_id: string;
+  markdown: string;
+  thinking: string | null;
+  thinking_complete: boolean;
+  phase: 'final';
+}
+
 interface UseSummaryGenerationProps {
   meeting: any;
   transcripts: Transcript[];
@@ -78,8 +87,71 @@ export function useSummaryGeneration({
   const { t } = useTranslation(['summary', 'common']);
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [streamingSummary, setStreamingSummary] = useState('');
+  const [streamingThinking, setStreamingThinking] = useState<string | null>(null);
+  const [streamingThinkingComplete, setStreamingThinkingComplete] = useState(false);
+  const generationActiveRef = useRef(false);
+  const pendingStreamUpdateRef = useRef<SummaryGenerationStreamPayload | null>(null);
+  const streamingFrameRef = useRef<number | null>(null);
 
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
+
+  const clearStreamingSummary = useCallback(() => {
+    pendingStreamUpdateRef.current = null;
+    if (streamingFrameRef.current !== null) {
+      cancelAnimationFrame(streamingFrameRef.current);
+      streamingFrameRef.current = null;
+    }
+    setStreamingSummary('');
+    setStreamingThinking(null);
+    setStreamingThinkingComplete(false);
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: UnlistenFn | undefined;
+
+    clearStreamingSummary();
+    generationActiveRef.current = false;
+
+    void listen<SummaryGenerationStreamPayload>('summary-generation-stream', (event) => {
+      if (
+        generationActiveRef.current &&
+        event.payload.meeting_id === meeting.id &&
+        event.payload.phase === 'final'
+      ) {
+        pendingStreamUpdateRef.current = event.payload;
+        if (streamingFrameRef.current === null) {
+          streamingFrameRef.current = requestAnimationFrame(() => {
+            streamingFrameRef.current = null;
+            const pending = pendingStreamUpdateRef.current;
+            if (pending) {
+              setStreamingSummary(pending.markdown);
+              setStreamingThinking(pending.thinking);
+              setStreamingThinkingComplete(pending.thinking_complete);
+            }
+          });
+        }
+      }
+    }).then((stopListening) => {
+      if (disposed) {
+        stopListening();
+      } else {
+        unlisten = stopListening;
+      }
+    }).catch((error) => {
+      console.error('Failed to listen for summary stream:', error);
+    });
+
+    return () => {
+      disposed = true;
+      if (streamingFrameRef.current !== null) {
+        cancelAnimationFrame(streamingFrameRef.current);
+        streamingFrameRef.current = null;
+      }
+      unlisten?.();
+    };
+  }, [meeting.id, clearStreamingSummary]);
 
   // Helper to get status message
   const getSummaryStatusMessage = useCallback((status: SummaryStatus) => {
@@ -111,6 +183,8 @@ export function useSummaryGeneration({
     customPrompt?: string;
     isRegeneration?: boolean;
   }) => {
+    generationActiveRef.current = true;
+    clearStreamingSummary();
     setSummaryStatus(isRegeneration ? 'regenerating' : 'processing');
     setSummaryError(null);
 
@@ -156,6 +230,8 @@ export function useSummaryGeneration({
 
         // Handle cancellation
         if (pollingResult.status === 'cancelled') {
+          generationActiveRef.current = false;
+          clearStreamingSummary();
           console.log('Summary generation was cancelled');
 
           // Reload summary from database (backend has already restored from backup)
@@ -182,6 +258,8 @@ export function useSummaryGeneration({
 
         // Handle errors
         if (pollingResult.status === 'error' || pollingResult.status === 'failed') {
+          generationActiveRef.current = false;
+          clearStreamingSummary();
           console.error('Backend returned error:', pollingResult.error);
           const errorMessage = pollingResult.error || t(isRegeneration ? 'summary:regenerationFailed' : 'summary:generationFailed');
 
@@ -237,6 +315,7 @@ export function useSummaryGeneration({
 
         // Handle successful completion
         if (pollingResult.status === 'completed' && pollingResult.data) {
+          generationActiveRef.current = false;
           console.log('Summary generation completed:', pollingResult.data);
 
           // Update meeting title if available
@@ -249,6 +328,7 @@ export function useSummaryGeneration({
           if (pollingResult.data.markdown) {
             console.log('Received markdown format from backend');
             setAiSummary({ markdown: pollingResult.data.markdown } as any);
+            clearStreamingSummary();
             setSummaryStatus('completed');
 
             // Show success toast
@@ -270,7 +350,8 @@ export function useSummaryGeneration({
 
           if (allEmpty) {
             console.error('Summary completed but all sections empty');
-          setSummaryError(t('summary:emptyResult'));
+            clearStreamingSummary();
+            setSummaryError(t('summary:emptyResult'));
             setSummaryStatus('error');
 
             return;
@@ -311,6 +392,7 @@ export function useSummaryGeneration({
           }
 
           setAiSummary(formattedSummary);
+          clearStreamingSummary();
           setSummaryStatus('completed');
 
           // Show success toast
@@ -325,6 +407,8 @@ export function useSummaryGeneration({
         }
       });
     } catch (error) {
+      generationActiveRef.current = false;
+      clearStreamingSummary();
       console.error(`Failed to ${isRegeneration ? 'regenerate' : 'generate'} summary:`, error);
       const errorMessage = error instanceof Error ? error.message : t('common:unknown');
       setSummaryError(errorMessage);
@@ -345,6 +429,7 @@ export function useSummaryGeneration({
     setAiSummary,
     updateMeetingTitle,
     onMeetingUpdated,
+    clearStreamingSummary,
     t,
   ]);
 
@@ -601,6 +686,8 @@ export function useSummaryGeneration({
     stopSummaryPolling(meeting.id);
 
     // Reset status to idle
+    generationActiveRef.current = false;
+    clearStreamingSummary();
     setSummaryStatus('idle');
     setSummaryError(null);
 
@@ -609,11 +696,14 @@ export function useSummaryGeneration({
       description: t('summary:stoppedHint'),
       duration: 3000,
     });
-  }, [meeting.id, stopSummaryPolling, t]);
+  }, [meeting.id, stopSummaryPolling, clearStreamingSummary, t]);
 
   return {
     summaryStatus,
     summaryError,
+    streamingSummary,
+    streamingThinking,
+    streamingThinkingComplete,
     handleGenerateSummary,
     handleRegenerateSummary,
     handleStopGeneration,

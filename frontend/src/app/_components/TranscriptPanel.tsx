@@ -9,9 +9,14 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { isAutomaticLanguageOnly } from '@/lib/sherpa-asr';
+import {
+  isAutomaticLanguageOnly,
+  isStreamingRecognitionModel,
+} from '@/lib/sherpa-asr';
+import { transcriptService } from '@/services/transcriptService';
+import type { LiveTranscriptUpdate } from '@/types';
 
 /**
  * TranscriptPanel Component
@@ -39,6 +44,45 @@ export function TranscriptPanel({
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
   const isLinux = useIsLinux();
+  const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptUpdate | null>(null);
+  const usesStreamingRecognition = isStreamingRecognitionModel(
+    transcriptModelConfig.provider,
+    transcriptModelConfig.model
+  );
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    void transcriptService.onLiveTranscriptUpdate((update) => {
+      if (!cancelled) setLiveTranscript(update);
+    }).then((nextUnlisten) => {
+      if (cancelled) nextUnlisten();
+      else unlisten = nextUnlisten;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isRecording || !usesStreamingRecognition) {
+      setLiveTranscript(null);
+    }
+  }, [isRecording, usesStreamingRecognition]);
+
+  useEffect(() => {
+    if (!liveTranscript?.is_final) return;
+    const finalizedOverlap = transcripts.some((transcript) => {
+      const start = transcript.audio_start_time ?? 0;
+      const end = transcript.audio_end_time ?? start;
+      return end >= liveTranscript.audio_start_time
+        && start <= liveTranscript.audio_end_time;
+    });
+    if (finalizedOverlap) setLiveTranscript(null);
+  }, [liveTranscript, transcripts]);
 
   // Convert transcripts to segments for virtualized view
   const segments = useMemo(() =>
@@ -53,6 +97,15 @@ export function TranscriptPanel({
     })),
     [transcripts]
   );
+  const liveSegment = useMemo(() => {
+    if (!usesStreamingRecognition || !liveTranscript?.text.trim()) return null;
+    return {
+      id: `live-${liveTranscript.utterance_id}`,
+      timestamp: liveTranscript.audio_start_time,
+      endTime: liveTranscript.audio_end_time,
+      text: liveTranscript.text,
+    };
+  }, [liveTranscript, usesStreamingRecognition]);
 
   return (
     <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
@@ -119,7 +172,8 @@ export function TranscriptPanel({
               isPaused={isPaused}
               isProcessing={isProcessingStop}
               isStopping={isStopping}
-              enableStreaming={isRecording}
+              enableStreaming={isRecording && !usesStreamingRecognition}
+              liveSegment={liveSegment}
               showConfidence={true}
             />
           </div>

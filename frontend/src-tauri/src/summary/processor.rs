@@ -1,5 +1,6 @@
-use crate::summary::llm_client::{generate_summary, LLMProvider};
+use crate::summary::llm_client::{generate_summary, generate_summary_with_callback, LLMProvider};
 use crate::summary::templates::Template;
+use crate::summary::{SummaryStreamCallback, SummaryStreamUpdate, SummaryTextStreamCallback};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
@@ -9,7 +10,8 @@ use tracing::{error, info};
 
 // Compile regex once and reuse (significant performance improvement for repeated calls)
 static THINKING_TAG_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").unwrap());
+    Lazy::new(|| Regex::new(r"(?s)<think(?:ing)?>(.*?)</think(?:ing)?>").unwrap());
+static THINKING_OPEN_TAG_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"<think(?:ing)?>").unwrap());
 
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
     "**Write the summary/report in English regardless of transcript language; non-English prose is invalid.**";
@@ -262,25 +264,83 @@ pub fn chunk_text(text: &str, chunk_size_tokens: usize, overlap_tokens: usize) -
 /// # Returns
 /// Cleaned markdown string
 pub fn clean_llm_markdown_output(markdown: &str) -> String {
-    // Remove <think>...</think> or <thinking>...</thinking> blocks using cached regex
-    let without_thinking = THINKING_TAG_REGEX.replace_all(markdown, "");
+    split_llm_stream_snapshot(markdown).markdown
+}
 
-    let trimmed = without_thinking.trim();
-
-    // List of possible language identifiers for code blocks
-    const PREFIXES: &[&str] = &["```markdown\n", "```\n"];
-    const SUFFIX: &str = "```";
-
-    for prefix in PREFIXES {
-        if trimmed.starts_with(prefix) && trimmed.ends_with(SUFFIX) {
-            // Extract content between the fences
-            let content = &trimmed[prefix.len()..trimmed.len() - SUFFIX.len()];
-            return content.trim().to_string();
+fn clean_visible_markdown(markdown: &str) -> String {
+    let trimmed = markdown.trim();
+    for prefix in ["```markdown\n", "```\n"] {
+        if let Some(content) = trimmed.strip_prefix(prefix) {
+            return content
+                .strip_suffix("```")
+                .unwrap_or(content)
+                .trim()
+                .to_string();
         }
     }
 
-    // If no fences found, return the trimmed string
     trimmed.to_string()
+}
+
+fn strip_partial_tag_suffix(value: &str, tags: &[&str]) -> String {
+    let Some(tag_start) = value.rfind('<') else {
+        return value.to_string();
+    };
+    let suffix = &value[tag_start..];
+    if tags
+        .iter()
+        .any(|tag| tag.starts_with(suffix) && suffix != *tag)
+    {
+        value[..tag_start].to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn split_llm_stream_snapshot(markdown: &str) -> SummaryStreamUpdate {
+    let mut thinking_parts: Vec<String> = THINKING_TAG_REGEX
+        .captures_iter(markdown)
+        .filter_map(|captures| captures.get(1))
+        .map(|content| content.as_str().trim().to_string())
+        .collect();
+    let completed_thinking_count = thinking_parts.len();
+    let without_completed_thinking = THINKING_TAG_REGEX.replace_all(markdown, "");
+    let mut visible = without_completed_thinking.into_owned();
+    let mut has_unfinished_thinking = false;
+
+    if let Some(open_tag) = THINKING_OPEN_TAG_REGEX.find(&visible) {
+        let unfinished =
+            strip_partial_tag_suffix(&visible[open_tag.end()..], &["</think>", "</thinking>"]);
+        thinking_parts.push(unfinished.trim().to_string());
+        visible.truncate(open_tag.start());
+        has_unfinished_thinking = true;
+    }
+
+    visible = strip_partial_tag_suffix(&visible, &["<think>", "<thinking>"]);
+    let has_thinking = completed_thinking_count > 0 || has_unfinished_thinking;
+    let thinking = has_thinking.then(|| {
+        thinking_parts
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    });
+
+    SummaryStreamUpdate {
+        markdown: clean_visible_markdown(&visible),
+        thinking,
+        thinking_complete: completed_thinking_count > 0 && !has_unfinished_thinking,
+    }
+}
+
+fn sanitized_stream_callback(callback: &SummaryStreamCallback) -> SummaryTextStreamCallback {
+    let callback = callback.clone();
+    std::sync::Arc::new(move |snapshot| {
+        let update = split_llm_stream_snapshot(&snapshot);
+        if !update.markdown.is_empty() || update.thinking.is_some() {
+            callback(update);
+        }
+    })
 }
 
 /// Extracts meeting name from the first heading in markdown
@@ -343,6 +403,7 @@ pub async fn generate_meeting_summary(
     summary_language: Option<&str>,
     detected_transcript_language: Option<&str>,
     cached_english: Option<&str>,
+    stream_callback: Option<&SummaryStreamCallback>,
 ) -> Result<(String, String, i64), String> {
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
@@ -354,6 +415,8 @@ pub async fn generate_meeting_summary(
         provider, model_name
     );
 
+    let final_language_action =
+        resolve_final_language_action(summary_language, detected_transcript_language);
     let total_tokens = rough_token_count(text);
     info!("Transcript length: {} tokens", total_tokens);
 
@@ -514,7 +577,12 @@ pub async fn generate_meeting_summary(
             }
         }
 
-        let raw_markdown = generate_summary(
+        let final_report_stream = if final_language_action == FinalLanguageAction::ReturnEnglish {
+            stream_callback.map(sanitized_stream_callback)
+        } else {
+            None
+        };
+        let raw_markdown = generate_summary_with_callback(
             client,
             provider,
             model_name,
@@ -528,6 +596,7 @@ pub async fn generate_meeting_summary(
             top_p,
             app_data_dir,
             cancellation_token,
+            final_report_stream.as_ref(),
         )
         .await?;
 
@@ -537,10 +606,7 @@ pub async fn generate_meeting_summary(
         (english_markdown, successful_chunk_count)
     };
 
-    let final_markdown = match resolve_final_language_action(
-        summary_language,
-        detected_transcript_language,
-    ) {
+    let final_markdown = match final_language_action {
         FinalLanguageAction::Translate(name) => {
             match translate_markdown(
                 client,
@@ -556,6 +622,7 @@ pub async fn generate_meeting_summary(
                 top_p,
                 app_data_dir,
                 cancellation_token,
+                stream_callback,
             )
             .await
             {
@@ -583,6 +650,7 @@ pub async fn generate_meeting_summary(
                     top_p,
                     app_data_dir,
                     cancellation_token,
+                    stream_callback,
                 )
                 .await,
             )?;
@@ -612,6 +680,7 @@ async fn run_markdown_transform(
     top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
+    stream_callback: Option<&SummaryStreamCallback>,
 ) -> Result<String, String> {
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
@@ -619,7 +688,8 @@ async fn run_markdown_transform(
         }
     }
 
-    let raw = generate_summary(
+    let sanitized_callback = stream_callback.map(sanitized_stream_callback);
+    let raw = generate_summary_with_callback(
         client,
         provider,
         model_name,
@@ -633,6 +703,7 @@ async fn run_markdown_transform(
         top_p,
         app_data_dir,
         cancellation_token,
+        sanitized_callback.as_ref(),
     )
     .await
     .map_err(|e| format!("{failure_label} failed: {e}"))?;
@@ -655,6 +726,7 @@ async fn translate_markdown(
     top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
+    stream_callback: Option<&SummaryStreamCallback>,
 ) -> Result<String, String> {
     info!("Translation pass: target language = {}", target_language);
 
@@ -678,6 +750,7 @@ async fn translate_markdown(
         top_p,
         app_data_dir,
         cancellation_token,
+        stream_callback,
     )
     .await
 }
@@ -696,6 +769,7 @@ async fn normalize_markdown_to_english(
     top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
+    stream_callback: Option<&SummaryStreamCallback>,
 ) -> Result<String, String> {
     info!("English normalization pass: preserving Markdown structure");
 
@@ -718,6 +792,7 @@ async fn normalize_markdown_to_english(
         top_p,
         app_data_dir,
         cancellation_token,
+        stream_callback,
     )
     .await
 }
@@ -748,6 +823,37 @@ mod tests {
 
         assert!(prompt.contains(ENGLISH_BASE_SUMMARY_INSTRUCTION));
         assert!(prompt.contains("SECTION-SPECIFIC INSTRUCTIONS"));
+    }
+
+    #[test]
+    fn stream_snapshot_exposes_thinking_separately_from_markdown() {
+        let active = split_llm_stream_snapshot("<think>working through it");
+        assert_eq!(active.markdown, "");
+        assert_eq!(active.thinking.as_deref(), Some("working through it"));
+        assert!(!active.thinking_complete);
+
+        let completed = split_llm_stream_snapshot("<think>hidden</think>\n# Visible");
+        assert_eq!(completed.markdown, "# Visible");
+        assert_eq!(completed.thinking.as_deref(), Some("hidden"));
+        assert!(completed.thinking_complete);
+    }
+
+    #[test]
+    fn partial_markdown_removes_outer_fence() {
+        assert_eq!(
+            split_llm_stream_snapshot("```markdown\n# Summary\n- item").markdown,
+            "# Summary\n- item"
+        );
+    }
+
+    #[test]
+    fn unfinished_thinking_never_enters_final_markdown() {
+        assert_eq!(clean_llm_markdown_output("<think>private reasoning"), "");
+        assert_eq!(
+            clean_llm_markdown_output("# Visible\n<thinking>private reasoning"),
+            "# Visible"
+        );
+        assert_eq!(clean_llm_markdown_output("# Visible\n<thi"), "# Visible");
     }
 
     #[test]

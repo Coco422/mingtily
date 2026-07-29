@@ -36,6 +36,15 @@ export interface TranscriptUpdate {
   speaker_is_provisional?: boolean;
 }
 
+export interface LiveTranscriptUpdate {
+  utterance_id: number;
+  revision: number;
+  text: string;
+  is_final: boolean;
+  audio_start_time: number;
+  audio_end_time: number;
+}
+
 export interface Block {
   id: string;
   type: string;

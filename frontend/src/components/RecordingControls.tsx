@@ -9,6 +9,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { formatRecordingDuration } from '@/lib/recordingDuration';
 import { useTranslation } from 'react-i18next';
 
 interface RecordingControlsProps {
@@ -45,6 +46,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   // Use global recording state context for pause state (syncs with tray operations)
   const recordingState = useRecordingState();
   const isPaused = recordingState.isPaused;
+  const recordingDuration = formatRecordingDuration(recordingState.activeDuration);
 
   const [showPlayback, setShowPlayback] = useState(false);
   const [recordingPath, setRecordingPath] = useState<string | null>(null);
@@ -453,6 +455,16 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                           <p>{t('stop')}</p>
                         </TooltipContent>
                       </Tooltip>
+
+                      <div
+                        role="timer"
+                        aria-label={`${t('duration')}: ${recordingDuration}`}
+                        className="flex min-w-[72px] items-center justify-center border-l border-gray-200 pl-4"
+                      >
+                        <span className={`font-mono text-sm font-medium tabular-nums ${isPaused ? 'text-orange-700' : 'text-gray-700'}`}>
+                          {recordingDuration}
+                        </span>
+                      </div>
                     </>
                   )}
 

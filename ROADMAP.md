@@ -26,6 +26,7 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - Models 统一管理 Whisper、Parakeet、Speaker Diarization、本地摘要和 Ollama 模型资产。
 - Services 统一选择转写、说话人分离和 AI 摘要的 Provider 与模型。
 - 本地 Whisper、Parakeet、SenseVoice、Offline Paraformer 和 Qwen3-ASR 转写，SenseVoice 作为推荐中文模型。
+- 可选的本地中英标点恢复模型，为 SenseVoice 最终转写片段补充标点；模型缺失或失败时保留原始 ASR 文本。
 - 实时录音、文件导入和重新转写统一使用 `TranscriptionProvider` 生命周期。
 - Opus-in-M4A 导入，以及 Sherpa ONNX 说话人分离。
 - 实时 provisional speaker label，停止录音后的全局 speaker 校正。
@@ -38,6 +39,20 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - macOS Apple Silicon、Windows x64 和 Linux x64 提供不依赖 secrets 的手动无签名构建。
 - 当前工作流不包含 Apple Developer、DigiCert、notarization 或正式 Release 自动化。
 - 录音 transcript 保存、speaker 最终标签、导入格式、模型损坏和恢复状态具有直接回归测试。
+
+## 当前开发进度：0.6.x 主线
+
+当前开发分支在 0.6.0 基础上完成了以下体验与可靠性改进；跨平台真实设备和正式发布验证仍按后续里程碑推进。
+
+- 录音界面持续显示有效录音时长；停止后按音频停止、剩余转写、模型释放、录音保存和说话人校正展示阶段与进度。
+- 修复 VAD 强制 flush 片段的时间轴换算，避免停止录音时末尾片段时间翻倍。
+- SenseVoice 可选接入本地中英文标点恢复，模型缺失或运行失败时保留原始文本。
+- 内置 AI、OpenAI、Anthropic、Groq、OpenRouter、Ollama 和 OpenAI Compatible 摘要支持真实流式输出；`<think>` 内容实时展示、结束后折叠，且不进入最终摘要。
+- 新增可选的 Online Paraformer zh/en int8：
+  - Models 仅在用户点击后下载固定 revision 与 SHA256 校验资产，下载完成不自动切换当前服务。
+  - Services 主动选择后，录音混音音频进入长期 `OnlineStream`，通过独立 revision 事件展示可修订文本。
+  - provisional hypothesis 不写入 SQLite、IndexedDB 或 transcript JSON；现有 VAD 最终片段继续负责持久化与 speaker label。
+  - 连续 session 与 VAD 最终解码共享同一 `OnlineRecognizer`，推理运行在采集热路径之外。
 
 ## 0.6.x：后续维护项
 
@@ -65,7 +80,7 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 增加 SenseVoice Small int8：
   - 支持普通话、粤语、英语、日语和韩语。
   - 支持自动语言识别和强制 `zh`。
-  - 默认启用中文 ITN 与标点。
+  - 默认启用中文 ITN；可选下载独立的中英标点恢复模型。
 - SenseVoice 继续复用现有 Silero VAD、speaker diarization 和分段后 ASR 流程。
 - 增加 Offline Paraformer Small int8 作为轻量中英模型；沿用 VAD 分段后转写，语言自动判断。
 - 增加 Qwen3-ASR 0.6B int8 作为高质量多语言 Beta 档；由于下载、内存和算力需求明显更高，不设为默认模型。
@@ -75,13 +90,15 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 
 验收标准：用户的中文 Opus-in-M4A 文件在强制 `zh` 时稳定输出中文；三条转写路径使用同一 Provider 接口；现有 speaker、时间轴和持久化行为不回归。
 
-## 0.7：实时中文与性能分档
+## 0.7：实时中文与性能分档（进行中）
 
 目标：从“VAD 段完成后出现文本”推进到真正连续的中文流式转写。
 
-- Online Paraformer bilingual zh/en：连续流式转写、partial hypothesis 和 final revision。首选模型为 `csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en`，固定 revision `8e40c43232a1c5c66c82111efc5820d3accca11b`；int8 encoder 与 decoder 合计约 226 MiB。
-- 为流式 Provider 增加独立 session 生命周期与 partial/final 事件契约，不把它伪装成现有离线 `transcribe(audio)` 调用。
-- 直接使用 sherpa-onnx `OnlineRecognizer` / `OnlineStream` 的 `is_ready`、`is_endpoint`、`reset` 与 `RecognizerResult.is_final`，并把推理放在录音采集热路径之外。
+- 已完成 Online Paraformer bilingual zh/en 的首版连续流式转写、partial hypothesis 和 final revision。模型为 `csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en`，固定 revision `8e40c43232a1c5c66c82111efc5820d3accca11b`；int8 资产约 226 MiB。
+- 已完成独立 session 生命周期与 provisional/final 事件契约，不把临时假设伪装成普通持久化 transcript。
+- 已直接使用 sherpa-onnx `OnlineRecognizer` / `OnlineStream` 的 `is_ready`、`is_endpoint`、`reset` 与 `RecognizerResult.is_final`，推理与音频采集、混音热路径隔离。
+- 已在 macOS Apple Silicon 无签名安装包中完成模型下载、显式服务切换、真实系统音频流式修订、录音时长、停止进度和 final-only 持久化 smoke test。
+- 待补充流式队列背压、长会议 soak test、不同设备的录音启动耗时、首字延迟与 revision 稳定性数据。
 - Offline Paraformer Large int8：本地质量优先档。
 - FunASR Nano：作为实验模型评估质量、内存、包体和许可证，不作为默认下载。
 - 为不同模型记录首段延迟、实时率、峰值内存和长会议稳定性。

@@ -153,6 +153,11 @@ fn create_recognizer(
                 ..Default::default()
             };
         }
+        SherpaAsrBackend::ParaformerOnline => {
+            return Err(TranscriptionError::EngineFailed(
+                "The online Paraformer model requires the streaming provider".into(),
+            ));
+        }
     }
 
     OfflineRecognizer::create(&config).ok_or_else(|| {
@@ -175,7 +180,9 @@ fn path_string(path: &Path) -> Result<String, TranscriptionError> {
 fn recognizer_cache_key(backend: SherpaAsrBackend, language: &str) -> String {
     match backend {
         SherpaAsrBackend::SenseVoice => language.to_string(),
-        SherpaAsrBackend::ParaformerOffline | SherpaAsrBackend::Qwen3Asr => "shared".to_string(),
+        SherpaAsrBackend::ParaformerOffline
+        | SherpaAsrBackend::ParaformerOnline
+        | SherpaAsrBackend::Qwen3Asr => "shared".to_string(),
     }
 }
 
@@ -202,7 +209,9 @@ fn normalize_language(
                 unsupported.to_string(),
             )),
         },
-        SherpaAsrBackend::ParaformerOffline => Ok("auto".to_string()),
+        SherpaAsrBackend::ParaformerOffline | SherpaAsrBackend::ParaformerOnline => {
+            Ok("auto".to_string())
+        }
         SherpaAsrBackend::Qwen3Asr => {
             if language == "auto" || qwen3_language_name(language).is_some() {
                 Ok(language.to_string())

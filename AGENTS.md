@@ -35,6 +35,8 @@ Keep model assets and runtime selection separate:
 - Services screens choose the Provider and model used for transcription, speaker diarization, and summaries.
 - Model download completion must not silently switch the active Provider or model.
 - Recording readiness checks must validate the configured transcription Provider; never hardcode Parakeet or Whisper as the universal prerequisite.
+- Streaming ASR must use an explicit session and revision event contract rather than pretending partial hypotheses are ordinary `transcribe(audio)` results.
+- Provisional streaming hypotheses are display-only. Persist only finalized transcript segments in meeting storage, recovery state, and transcript JSON.
 
 Speaker diarization is optional and must fail open: ASR and recording continue without speaker labels when the feature is disabled, missing, damaged, or fails at runtime.
 

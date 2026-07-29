@@ -7,6 +7,17 @@
 /// - Templates for structured meeting summary generation
 /// - Tauri commands for frontend integration
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SummaryStreamUpdate {
+    pub markdown: String,
+    pub thinking: Option<String>,
+    pub thinking_complete: bool,
+}
+
+pub type SummaryStreamCallback = Arc<dyn Fn(SummaryStreamUpdate) + Send + Sync + 'static>;
+pub type SummaryTextStreamCallback = Arc<dyn Fn(String) + Send + Sync + 'static>;
 
 /// Custom OpenAI-compatible endpoint configuration
 /// Stored as JSON in the database and used for connecting to any OpenAI-compatible API server

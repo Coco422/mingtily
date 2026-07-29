@@ -14,7 +14,7 @@ A normal application cold start is designed not to contact non-loopback services
 
 Non-loopback network requests occur only after a user action or configuration that requires them:
 
-- Downloading an ASR, speaker diarization, Whisper, or built-in summary model.
+- Downloading an ASR, punctuation restoration, speaker diarization, Whisper, or built-in summary model.
 - Using an external summary provider such as OpenAI, Anthropic, Groq, OpenRouter, or a custom OpenAI-compatible endpoint.
 - Opening an external link selected by the user.
 

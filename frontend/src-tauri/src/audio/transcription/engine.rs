@@ -16,6 +16,21 @@ pub struct TranscriptionSelection {
 pub async fn validate_transcription_model_ready<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<(), String> {
+    let selection = resolve_transcription_selection(app, None, None).await;
+    if selection.provider == crate::sherpa_asr::PROVIDER_ID
+        && crate::sherpa_asr::is_online_model(&selection.model)
+    {
+        return crate::sherpa_asr::installed_model(app, &selection.model)
+            .map_err(|error| error.to_string())?
+            .map(|_| ())
+            .ok_or_else(|| {
+                format!(
+                    "Sherpa ONNX model '{}' is missing or damaged. Download or repair it in Models.",
+                    selection.model
+                )
+            });
+    }
+
     let provider = load_transcription_provider(app, None, None).await?;
     if provider.is_model_loaded().await {
         Ok(())
@@ -59,9 +74,17 @@ pub async fn load_transcription_provider<R: Runtime>(
                         selection.model
                     )
                 })?;
-            Ok(Arc::new(crate::sherpa_asr::SherpaOfflineAsrProvider::new(
-                installed,
-            )))
+            let provider: Arc<dyn TranscriptionProvider> =
+                if crate::sherpa_asr::is_online_model(&selection.model) {
+                    Arc::new(crate::sherpa_asr::SherpaOnlineAsrProvider::new(installed))
+                } else {
+                    Arc::new(crate::sherpa_asr::SherpaOfflineAsrProvider::new(installed))
+                };
+            if selection.model == crate::sherpa_asr::models::SENSEVOICE_MODEL_ID {
+                Ok(crate::punctuation::wrap_if_available(app, provider))
+            } else {
+                Ok(provider)
+            }
         }
         other => Err(format!(
             "Provider '{other}' is not supported for local transcription. Select Whisper, Parakeet, or Sherpa ONNX."

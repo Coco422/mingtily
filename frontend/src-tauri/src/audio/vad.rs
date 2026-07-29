@@ -28,6 +28,10 @@ pub struct ContinuousVadProcessor {
     last_logged_state: bool,
 }
 
+fn vad_timestamp_ms_to_sample(timestamp_ms: usize) -> usize {
+    timestamp_ms * 16_000 / 1_000
+}
+
 impl ContinuousVadProcessor {
     pub fn new(input_sample_rate: u32, redemption_time_ms: u32) -> Result<Self> {
         // Silero VAD MUST use 16kHz - this is hardcoded requirement
@@ -254,9 +258,9 @@ impl ContinuousVadProcessor {
                         self.last_logged_state = true;
                     }
                     self.in_speech = true;
-                    // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples
-                    self.speech_start_sample =
-                        self.processed_samples + (timestamp_ms * 16000 / 1000);
+                    // Silero timestamps are already absolute within the VAD session.
+                    // Adding processed_samples again doubles the final forced-flush timestamp.
+                    self.speech_start_sample = vad_timestamp_ms_to_sample(timestamp_ms);
                     self.current_speech.clear();
                 }
                 VadTransition::SpeechEnd {
@@ -658,6 +662,22 @@ mod tests {
             all_segments.len() >= 1,
             "Expected at least 1 speech segment"
         );
+    }
+
+    #[test]
+    fn forced_flush_keeps_timestamps_within_recording_duration() {
+        let mut processor =
+            ContinuousVadProcessor::new(16_000, 2_000).expect("Failed to create processor");
+        processor.in_speech = true;
+        processor.speech_start_sample = vad_timestamp_ms_to_sample(10_000);
+        processor.processed_samples = 13 * 16_000;
+        processor.current_speech = vec![0.1; 3 * 16_000];
+
+        let segments = processor.flush().expect("Flush failed");
+        let final_segment = segments.last().expect("Expected a flushed speech segment");
+        assert_eq!(final_segment.start_timestamp_ms, 10_000.0);
+        assert_eq!(final_segment.end_timestamp_ms, 13_000.0);
+        assert_eq!(vad_timestamp_ms_to_sample(10_000), 10 * 16_000);
     }
 
     #[test]

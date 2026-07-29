@@ -457,6 +457,88 @@ impl SidecarManager {
         }
     }
 
+    /// Send a request whose response may contain token messages before the
+    /// terminal response line.
+    pub async fn send_streaming_request<F>(
+        &self,
+        request_json: String,
+        timeout: Duration,
+        mut on_message: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str) -> Result<()>,
+    {
+        let _guard = RequestGuard::new(self.active_request_count.clone());
+
+        {
+            let mut stdin_lock = self.stdin_writer.lock().await;
+            let stdin = stdin_lock
+                .as_mut()
+                .ok_or_else(|| anyhow!("Sidecar not running"))?;
+
+            stdin
+                .write_all(request_json.as_bytes())
+                .await
+                .context("Failed to write request to stdin")?;
+            stdin
+                .write_all(b"\n")
+                .await
+                .context("Failed to write newline")?;
+            stdin.flush().await.context("Failed to flush stdin")?;
+        }
+
+        let read_future = async {
+            let mut stdout_lock = self.stdout_reader.lock().await;
+            let reader = stdout_lock
+                .as_mut()
+                .ok_or_else(|| anyhow!("Sidecar not running"))?;
+
+            loop {
+                let mut line = String::new();
+                reader
+                    .read_line(&mut line)
+                    .await
+                    .context("Failed to read response from stdout")?;
+
+                if line.is_empty() {
+                    return Err(anyhow!("Sidecar closed stdout (process may have crashed)"));
+                }
+
+                let line = line.trim();
+                let message_type = serde_json::from_str::<serde_json::Value>(line)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("type")
+                            .and_then(|kind| kind.as_str())
+                            .map(str::to_string)
+                    });
+
+                if message_type.as_deref() == Some("token") {
+                    on_message(line)?;
+                    continue;
+                }
+
+                return Ok(line.to_string());
+            }
+        };
+
+        match tokio::time::timeout(timeout, read_future).await {
+            Ok(Ok(response)) => {
+                self.update_activity().await;
+                Ok(response)
+            }
+            Ok(Err(e)) => Err(e),
+            Err(_) => {
+                log::error!("Request timeout after {:?}, shutting down sidecar", timeout);
+                if let Err(shutdown_err) = self.shutdown().await {
+                    log::error!("Failed to shutdown sidecar after timeout: {}", shutdown_err);
+                }
+                Err(anyhow!("Request timed out after {:?}", timeout))
+            }
+        }
+    }
+
     /// Read a single line response from stdout
     async fn read_response(&self) -> Result<String> {
         let mut stdout_lock = self.stdout_reader.lock().await;

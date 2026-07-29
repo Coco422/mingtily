@@ -22,6 +22,23 @@ export interface RecordingStoppedPayload {
   meeting_name?: string;
 }
 
+export type RecordingShutdownStage =
+  | 'stopping_audio'
+  | 'processing_transcripts'
+  | 'unloading_model'
+  | 'finalizing'
+  | 'refining_speakers'
+  | 'complete';
+
+export interface RecordingShutdownProgressPayload {
+  stage: RecordingShutdownStage;
+  message: string;
+  progress: number;
+  current_window?: number;
+  completed_windows?: number;
+  total_windows?: number;
+}
+
 /**
  * Recording Service
  * Singleton service for managing recording lifecycle operations
@@ -123,6 +140,14 @@ export class RecordingService {
    */
   async onRecordingStopped(callback: (payload: RecordingStoppedPayload) => void): Promise<UnlistenFn> {
     return listen<RecordingStoppedPayload>('recording-stopped', (event) => {
+      callback(event.payload);
+    });
+  }
+
+  async onRecordingShutdownProgress(
+    callback: (payload: RecordingShutdownProgressPayload) => void
+  ): Promise<UnlistenFn> {
+    return listen<RecordingShutdownProgressPayload>('recording-shutdown-progress', (event) => {
       callback(event.payload);
     });
   }

@@ -29,6 +29,13 @@ struct DiarizationWindow {
     keep_end: f64,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DiarizationWindowProgress {
+    pub current_window: usize,
+    pub total_windows: usize,
+    pub completed_windows: usize,
+}
+
 pub struct DiarizationEngine {
     diarizer: OfflineSpeakerDiarization,
     extractor: SpeakerEmbeddingExtractor,
@@ -309,6 +316,18 @@ pub fn diarize_audio_file_in_windows(
     paths: &SpeakerModelPaths,
     transcript_ranges: &[(f64, f64)],
 ) -> Result<Vec<DiarizationTurn>> {
+    diarize_audio_file_in_windows_with_progress(audio_path, paths, transcript_ranges, |_| {})
+}
+
+pub(crate) fn diarize_audio_file_in_windows_with_progress<F>(
+    audio_path: &Path,
+    paths: &SpeakerModelPaths,
+    transcript_ranges: &[(f64, f64)],
+    mut on_progress: F,
+) -> Result<Vec<DiarizationTurn>>
+where
+    F: FnMut(DiarizationWindowProgress),
+{
     let total_duration = transcript_ranges
         .iter()
         .map(|(_, end)| *end)
@@ -331,6 +350,11 @@ pub fn diarize_audio_file_in_windows(
     let mut turns = Vec::new();
 
     for (index, window) in windows.into_iter().enumerate() {
+        on_progress(DiarizationWindowProgress {
+            current_window: index + 1,
+            total_windows,
+            completed_windows: index,
+        });
         log::info!(
             "Final speaker correction window {}/{}: {:.1}s-{:.1}s",
             index + 1,
@@ -343,24 +367,27 @@ pub fn diarize_audio_file_in_windows(
             window.decode_start,
             window.decode_end - window.decode_start,
         )?;
-        if samples.is_empty() {
-            continue;
-        }
-
-        for segment in session.process_chunk(&samples, window.decode_start)? {
-            let start = segment.start_seconds.max(window.keep_start);
-            let end = segment.end_seconds.min(window.keep_end);
-            if end <= start {
-                continue;
-            }
-            if let Some(speaker) = segment.speaker {
-                turns.push(DiarizationTurn {
-                    start,
-                    end,
-                    speaker,
-                });
+        if !samples.is_empty() {
+            for segment in session.process_chunk(&samples, window.decode_start)? {
+                let start = segment.start_seconds.max(window.keep_start);
+                let end = segment.end_seconds.min(window.keep_end);
+                if end <= start {
+                    continue;
+                }
+                if let Some(speaker) = segment.speaker {
+                    turns.push(DiarizationTurn {
+                        start,
+                        end,
+                        speaker,
+                    });
+                }
             }
         }
+        on_progress(DiarizationWindowProgress {
+            current_window: index + 1,
+            total_windows,
+            completed_windows: index + 1,
+        });
     }
 
     turns.sort_by(|left, right| {

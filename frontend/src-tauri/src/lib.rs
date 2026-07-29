@@ -51,6 +51,7 @@ pub mod onboarding;
 pub mod openai;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod punctuation;
 pub mod sherpa_asr;
 pub mod speaker_diarization;
 pub mod state;
@@ -577,6 +578,10 @@ pub fn run() {
             sherpa_asr::commands::sherpa_asr_list_models,
             sherpa_asr::commands::sherpa_asr_download_model,
             sherpa_asr::commands::sherpa_asr_delete_model,
+            // Local punctuation restoration model commands
+            punctuation::commands::punctuation_get_status,
+            punctuation::commands::punctuation_download_model,
+            punctuation::commands::punctuation_delete_model,
             // Speaker diarization model commands
             speaker_diarization::commands::speaker_diarization_get_config,
             speaker_diarization::commands::speaker_diarization_save_config,

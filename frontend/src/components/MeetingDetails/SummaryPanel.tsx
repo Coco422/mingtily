@@ -21,6 +21,8 @@ import {
   SummaryLanguageStorage,
 } from '@/lib/summary-language-preferences';
 import { useTranslation } from 'react-i18next';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface SummaryPanelProps {
   meeting: {
@@ -41,6 +43,9 @@ interface SummaryPanelProps {
   onOpenFolder: () => Promise<void>;
   aiSummary: Summary | null;
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
+  streamingSummary?: string;
+  streamingThinking?: string | null;
+  streamingThinkingComplete?: boolean;
   transcripts: Transcript[];
   modelConfig: ModelConfig;
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
@@ -77,6 +82,9 @@ export function SummaryPanel({
   onOpenFolder,
   aiSummary,
   summaryStatus,
+  streamingSummary = '',
+  streamingThinking = null,
+  streamingThinkingComplete = false,
   transcripts,
   modelConfig,
   setModelConfig,
@@ -105,6 +113,7 @@ export function SummaryPanel({
   const activeMeetingIdRef = useRef(meeting.id);
   const languageSaveVersionRef = useRef(0);
   const languageSaveLoopRunningRef = useRef(false);
+  const thinkingContentRef = useRef<HTMLDivElement>(null);
   const latestLanguageSaveRequestRef = useRef<{
     version: number;
     meetingId: string;
@@ -116,6 +125,12 @@ export function SummaryPanel({
   } | null>(null);
   activeMeetingIdRef.current = meeting.id;
   const { addRecent } = useRecentLanguages();
+
+  useEffect(() => {
+    if (!streamingThinkingComplete && thinkingContentRef.current) {
+      thinkingContentRef.current.scrollTop = thinkingContentRef.current.scrollHeight;
+    }
+  }, [streamingThinking, streamingThinkingComplete]);
 
   const effectiveLangLabel = summaryLang
     ? labelForCode(summaryLang, i18n.resolvedLanguage || i18n.language)
@@ -330,12 +345,92 @@ export function SummaryPanel({
               onOpenModelSettings={onOpenModelSettings}
             />
           </div>
-          {/* Loading spinner */}
-          <div className="flex items-center justify-center flex-1">
-            <div className="text-center">
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-              <p className="text-gray-600">{t('meeting:generatingSummary')}</p>
+          <div
+            className="flex-1 min-h-0 overflow-y-auto"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div className="sticky top-0 z-10 flex items-center justify-between border-y border-gray-200 bg-white/95 px-6 py-3 backdrop-blur-sm">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${streamingSummary || streamingThinking !== null ? 'bg-gray-900 animate-pulse' : 'bg-gray-400'}`}
+                  aria-hidden="true"
+                />
+                <span className="text-sm font-medium text-gray-800">
+                  {streamingThinking !== null && !streamingThinkingComplete && !streamingSummary
+                    ? t('summary:thinkingLive')
+                    : streamingSummary
+                    ? t('summary:streamingLive')
+                    : t('summary:preparingStream')}
+                </span>
+              </div>
+              {streamingSummary && (
+                <span className="text-xs text-gray-500">{t('summary:streamingHint')}</span>
+              )}
             </div>
+
+            {streamingSummary || streamingThinking !== null ? (
+              <div className="space-y-4 p-6 transition-opacity duration-150 ease-out">
+                {streamingThinking !== null && (
+                  streamingThinkingComplete ? (
+                    <details className="group rounded-md border border-gray-200 bg-gray-50/70 text-gray-600">
+                      <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-gray-600 transition-colors duration-150 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-2">
+                        {t('summary:thinkingComplete')}
+                      </summary>
+                      <div className="border-t border-gray-200 px-3 py-3">
+                        <article className="prose prose-sm max-w-none prose-headings:text-gray-700 prose-p:text-gray-600 prose-li:text-gray-600">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {streamingThinking}
+                          </ReactMarkdown>
+                        </article>
+                      </div>
+                    </details>
+                  ) : (
+                    <section className="rounded-md border border-gray-200 bg-gray-50/70 px-3 py-3">
+                      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-gray-600">
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-500" aria-hidden="true" />
+                        {t('summary:thinkingProcess')}
+                      </div>
+                      <div
+                        ref={thinkingContentRef}
+                        className="max-h-48 overflow-y-auto pr-2 text-sm leading-6 text-gray-600"
+                      >
+                        {streamingThinking ? (
+                          <article className="prose prose-sm max-w-none prose-headings:text-gray-700 prose-p:text-gray-600 prose-li:text-gray-600">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {streamingThinking}
+                            </ReactMarkdown>
+                          </article>
+                        ) : (
+                          <span className="text-gray-500">{t('summary:thinkingStarting')}</span>
+                        )}
+                      </div>
+                    </section>
+                  )
+                )}
+
+                {streamingSummary && (
+                  <div>
+                    <article className="prose prose-sm max-w-none prose-headings:font-semibold prose-headings:text-gray-900 prose-p:text-gray-700 prose-li:text-gray-700 prose-strong:text-gray-900 prose-table:text-sm">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {streamingSummary}
+                      </ReactMarkdown>
+                    </article>
+                    <span
+                      className="mt-1 inline-block h-4 w-0.5 animate-pulse rounded-sm bg-gray-400 align-text-bottom"
+                      aria-hidden="true"
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex min-h-[240px] items-center justify-center px-6">
+                <div className="flex items-center gap-3 rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-700" aria-hidden="true" />
+                  <span>{t('meeting:generatingSummary')}</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       ) : !aiSummary ? (

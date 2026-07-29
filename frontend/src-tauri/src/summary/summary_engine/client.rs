@@ -13,6 +13,8 @@ use std::sync::RwLock;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use crate::summary::SummaryTextStreamCallback;
+
 use super::models;
 use super::sidecar::SidecarManager;
 
@@ -37,6 +39,7 @@ enum Request {
         repeat_penalty: Option<f32>,
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
+        stream: Option<bool>,
     },
 }
 
@@ -44,6 +47,7 @@ enum Request {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Response {
     Response { text: String, error: Option<String> },
+    Token { text: String },
     Error { message: String },
 }
 
@@ -136,6 +140,25 @@ pub async fn generate_with_builtin(
     user_prompt: &str,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String> {
+    generate_with_builtin_streaming(
+        app_data_dir,
+        model_name,
+        system_prompt,
+        user_prompt,
+        cancellation_token,
+        None,
+    )
+    .await
+}
+
+pub async fn generate_with_builtin_streaming(
+    app_data_dir: &PathBuf,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    cancellation_token: Option<&CancellationToken>,
+    stream_callback: Option<&SummaryTextStreamCallback>,
+) -> Result<String> {
     // Check cancellation at start
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
@@ -191,6 +214,7 @@ pub async fn generate_with_builtin(
         repeat_penalty: Some(sampling.repeat_penalty),
         penalty_last_n: Some(sampling.penalty_last_n),
         stop_tokens: Some(sampling.stop_tokens),
+        stream: stream_callback.map(|_| true),
     };
 
     let request_json = serde_json::to_string(&request)?;
@@ -201,14 +225,30 @@ pub async fn generate_with_builtin(
     log::info!("Sending generation request to sidecar");
 
     // Race between send_request and cancellation token
+    let mut streamed_text = String::new();
+    let request_future = async {
+        if let Some(callback) = stream_callback {
+            manager
+                .send_streaming_request(request_json, timeout, |message| {
+                    let response: Response = serde_json::from_str(message)
+                        .with_context(|| format!("Failed to parse stream message: {message}"))?;
+                    if let Response::Token { text } = response {
+                        streamed_text.push_str(&text);
+                        callback(streamed_text.clone());
+                    }
+                    Ok(())
+                })
+                .await
+        } else {
+            manager.send_request(request_json, timeout).await
+        }
+    };
+
     let response_json = if let Some(token) = cancellation_token {
         tokio::select! {
-            result = manager.send_request(request_json, timeout) => {
-                result?
-            }
+            result = request_future => result?,
             _ = token.cancelled() => {
                 log::warn!("Generation cancelled by user, shutting down sidecar");
-                // Shutdown sidecar to stop generation immediately
                 if let Err(e) = manager.shutdown().await {
                     log::error!("Failed to shutdown sidecar during cancellation: {}", e);
                 }
@@ -216,7 +256,7 @@ pub async fn generate_with_builtin(
             }
         }
     } else {
-        manager.send_request(request_json, timeout).await?
+        request_future.await?
     };
 
     // Check cancellation before parsing response
@@ -235,10 +275,16 @@ pub async fn generate_with_builtin(
             if let Some(err_msg) = error {
                 Err(anyhow!("Generation failed: {}", err_msg))
             } else {
+                if let Some(callback) = stream_callback {
+                    if streamed_text != text {
+                        callback(text.clone());
+                    }
+                }
                 log::info!("Generation completed: {} chars", text.len());
                 Ok(text)
             }
         }
+        Response::Token { .. } => Err(anyhow!("Sidecar ended without a terminal response")),
         Response::Error { message } => Err(anyhow!("Sidecar error: {}", message)),
     }
 }
@@ -315,6 +361,7 @@ mod tests {
             repeat_penalty: Some(1.05),
             penalty_last_n: Some(256),
             stop_tokens: Some(vec!["<end_of_turn>".to_string()]),
+            stream: None,
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -351,6 +398,17 @@ mod tests {
             Response::Error { message } => {
                 assert_eq!(message, "something went wrong");
             }
+            _ => panic!("Wrong response type"),
+        }
+    }
+
+    #[test]
+    fn test_token_response_deserialization() {
+        let json = r#"{"type":"token","text":"partial"}"#;
+        let response: Response = serde_json::from_str(json).unwrap();
+
+        match response {
+            Response::Token { text } => assert_eq!(text, "partial"),
             _ => panic!("Wrong response type"),
         }
     }

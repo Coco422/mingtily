@@ -1,11 +1,12 @@
 'use client';
 
 import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react';
-import { AlertTriangle, AudioLines, Bot, Users } from 'lucide-react';
+import { AlertTriangle, AudioLines, Bot, MessageSquareText, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ModelManager } from '@/components/WhisperModelManager';
 import { ParakeetModelManager } from '@/components/ParakeetModelManager';
 import { SherpaAsrModelManager } from '@/components/SherpaAsrModelManager';
+import { PunctuationModelManager } from '@/components/PunctuationModelManager';
 import { SpeakerDiarizationModelManager } from '@/components/SpeakerDiarizationModelManager';
 import { BuiltInModelManager } from '@/components/BuiltInModelManager';
 import { OllamaModelManager } from '@/components/OllamaModelManager';
@@ -158,6 +159,14 @@ function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
             selectedModel={transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : undefined}
           />
         </div>
+      </ModelSection>
+
+      <ModelSection
+        icon={MessageSquareText}
+        title={t('sections.punctuation')}
+        description={t('sections.punctuationDescription')}
+      >
+        <PunctuationModelManager />
       </ModelSection>
 
       <ModelSection

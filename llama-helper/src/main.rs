@@ -36,6 +36,7 @@ enum Request {
         repeat_penalty: Option<f32>,
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
+        stream: Option<bool>,
     },
     Ping,
     Shutdown,
@@ -45,6 +46,7 @@ enum Request {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Response {
     Response { text: String, error: Option<String> },
+    Token { text: String },
     Pong,
     Goodbye,
     Error { message: String },
@@ -351,6 +353,7 @@ impl ModelState {
         max_tokens: i32,
         sampling: SamplingConfig,
         stop_tokens: Vec<String>,
+        on_token: &mut dyn FnMut(&str) -> Result<()>,
     ) -> Result<String> {
         let start_time = Instant::now();
         let model = self.model.as_ref().context("Model not loaded")?;
@@ -501,6 +504,10 @@ impl ModelState {
                 break;
             }
 
+            if !token_text.is_empty() {
+                on_token(&token_text)?;
+            }
+
             batch.clear();
             batch
                 .add(token, n_cur, &[0], true)
@@ -600,6 +607,7 @@ fn main() -> Result<()> {
                         repeat_penalty,
                         penalty_last_n,
                         stop_tokens,
+                        stream,
                     }) => {
                         let max_tokens = max_tokens.unwrap_or(512);
                         let context_size = context_size.unwrap_or(2048);
@@ -614,6 +622,7 @@ fn main() -> Result<()> {
                             penalty_last_n,
                         );
                         let stop_tokens = stop_tokens.unwrap_or_else(Vec::new);
+                        let stream = stream.unwrap_or(false);
 
                         // Load model if path provided
                         if let Some(path_str) = model_path {
@@ -628,7 +637,22 @@ fn main() -> Result<()> {
                         }
 
                         // Generate response with sampling parameters
-                        match state.generate(prompt, max_tokens, sampling, stop_tokens) {
+                        let mut send_token = |text: &str| {
+                            if stream {
+                                send_response(&Response::Token {
+                                    text: text.to_string(),
+                                })?;
+                            }
+                            Ok(())
+                        };
+
+                        match state.generate(
+                            prompt,
+                            max_tokens,
+                            sampling,
+                            stop_tokens,
+                            &mut send_token,
+                        ) {
                             Ok(text) => {
                                 send_response(&Response::Response { text, error: None })?;
                             }
@@ -744,5 +768,16 @@ mod tests {
         assert_eq!(sampling.repeat_penalty, 1.05);
         assert_eq!(sampling.penalty_last_n, 256);
         assert!(sampling.uses_penalties());
+    }
+
+    #[test]
+    fn generate_request_deserializes_stream_flag() {
+        let json = r#"{"type":"generate","prompt":"summarize","stream":true}"#;
+        let request: Request = serde_json::from_str(json).unwrap();
+        let Request::Generate { stream, .. } = request else {
+            panic!("expected generate request");
+        };
+
+        assert_eq!(stream, Some(true));
     }
 }

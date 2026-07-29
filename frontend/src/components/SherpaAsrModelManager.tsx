@@ -188,6 +188,9 @@ export function SherpaAsrModelManager({
           ...(model.recommended
             ? [{ label: t('status.recommended'), tone: 'accent' as const }]
             : []),
+          ...(model.streaming_mode === 'continuous'
+            ? [{ label: t('status.streaming'), tone: 'accent' as const }]
+            : []),
           ...(model.beta ? [{ label: 'Beta', tone: 'warning' as const }] : []),
         ];
         const actions = installed && mode === 'select' ? (

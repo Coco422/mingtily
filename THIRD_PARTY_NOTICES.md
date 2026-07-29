@@ -24,6 +24,14 @@ Mingtily is an independent community fork. The original MIT notice is preserved 
 
 Mingtily downloads the model only after user action, verifies the archive and installed files with built-in SHA256 values, and stores the model license with the installed asset.
 
+## Chinese and English punctuation restoration int8
+
+- Base model: [iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch](https://modelscope.cn/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch)
+- ONNX distribution: `sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8.tar.bz2` from the sherpa-onnx `punctuation-models` release
+- License: Apache License 2.0, according to the upstream model metadata
+
+Mingtily downloads this optional model only after user action, verifies both the archive and installed ONNX file with built-in SHA256 values, and stores the Apache License with the installed asset. Punctuation inference remains local and falls back to the original ASR text when the model is unavailable.
+
 ## Paraformer Small int8
 
 - ONNX repository: [csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09](https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09)
@@ -32,6 +40,15 @@ Mingtily downloads the model only after user action, verifies the archive and in
 - License included by Mingtily for the model family: FunASR Model Open Source License Agreement 1.1
 
 Mingtily downloads only the pinned model and token files after user action and verifies both files with built-in SHA256 values.
+
+## Paraformer Streaming zh/en int8
+
+- ONNX repository: [csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en](https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en)
+- Pinned revision: `8e40c43232a1c5c66c82111efc5820d3accca11b`
+- Upstream model identified by the conversion repository: `damo/speech_paraformer_asr_nat-zh-cn-16k-common-vocab8404-online`
+- License: Apache License 2.0, according to the pinned model card
+
+Mingtily downloads the int8 encoder, int8 decoder, and token file only after user action and verifies all three files with built-in SHA256 values. Live inference remains local. Provisional hypotheses are display-only and are not stored as meeting transcripts.
 
 ## Qwen3-ASR 0.6B int8
 

@@ -742,6 +742,8 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    // Optional continuous mixed-audio feed for a true streaming recognizer.
+    streaming_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
 }
 
 impl AudioPipeline {
@@ -821,6 +823,7 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None, // Will be set by manager
+            streaming_sender_for_mixed: None,
         }
     }
 
@@ -905,6 +908,31 @@ impl AudioPipeline {
                             // System audio at natural levels
                             // Previous 2x gain was causing excessive limiting/distortion
                             let mixed_with_gain = mixed_clean;
+
+                            // Feed the long-lived streaming recognizer before VAD segmentation.
+                            // This is an independent channel, so inference never blocks capture or mixing.
+                            let streaming_send_failed = if let Some(ref sender) =
+                                self.streaming_sender_for_mixed
+                            {
+                                let streaming_chunk = AudioChunk {
+                                    data: mixed_with_gain.clone(),
+                                    sample_rate: self.sample_rate,
+                                    timestamp: chunk.timestamp,
+                                    chunk_id: self.processed_chunks,
+                                    device_type: DeviceType::Microphone,
+                                };
+                                if let Err(error) = sender.send(streaming_chunk) {
+                                    warn!("Failed to send mixed audio to streaming ASR: {error}");
+                                    true
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+                            if streaming_send_failed {
+                                self.streaming_sender_for_mixed = None;
+                            }
 
                             // STEP 3: Send mixed audio for transcription (VAD + Whisper)
                             match self.vad_processor.process_audio(&mixed_with_gain) {
@@ -1055,6 +1083,7 @@ impl AudioPipelineManager {
         target_chunk_duration_ms: u32,
         sample_rate: u32,
         recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+        streaming_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
         mic_device_name: String,
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
@@ -1093,6 +1122,7 @@ impl AudioPipelineManager {
         // CRITICAL FIX: Connect recording sender to receive pre-mixed audio
         // This ensures both mic AND system audio are captured in recordings
         pipeline.recording_sender_for_mixed = recording_sender;
+        pipeline.streaming_sender_for_mixed = streaming_sender;
 
         let handle = tokio::spawn(async move { pipeline.run().await });
 

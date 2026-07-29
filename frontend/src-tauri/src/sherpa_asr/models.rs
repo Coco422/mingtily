@@ -11,6 +11,7 @@ pub const PROVIDER_ID: &str = "sherpa-onnx";
 pub const SENSEVOICE_MODEL_ID: &str = "sensevoice-small-int8";
 pub const QWEN3_ASR_MODEL_ID: &str = "qwen3-asr-0.6b-int8";
 pub const PARAFORMER_SMALL_MODEL_ID: &str = "paraformer-zh-small-int8";
+pub const PARAFORMER_ONLINE_MODEL_ID: &str = "paraformer-online-zh-en-int8";
 
 const FUNASR_LICENSE: &str = include_str!("../../resources/licenses/FUNASR_MODEL_LICENSE.txt");
 const APACHE_LICENSE: &str = include_str!("../../resources/licenses/APACHE-2.0.txt");
@@ -108,6 +109,29 @@ static PARAFORMER_FILES: &[DirectDownloadFileSpec] = &[
     },
 ];
 
+#[cfg(test)]
+const PARAFORMER_ONLINE_REVISION: &str = "8e40c43232a1c5c66c82111efc5820d3accca11b";
+static PARAFORMER_ONLINE_FILES: &[DirectDownloadFileSpec] = &[
+    DirectDownloadFileSpec {
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/8e40c43232a1c5c66c82111efc5820d3accca11b/encoder.int8.onnx",
+        install_path: "encoder.int8.onnx",
+        size: 165_462_184,
+        sha256: "81a70226a8934e6ed92aa1d4fc486b428b5398e2f2619ed4897b7294cab90e9a",
+    },
+    DirectDownloadFileSpec {
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/8e40c43232a1c5c66c82111efc5820d3accca11b/decoder.int8.onnx",
+        install_path: "decoder.int8.onnx",
+        size: 71_664_561,
+        sha256: "f3cca9f77bb9d93c8fcbfb63ae617b6b1ee96818df3aa3b151c40658fe38594f",
+    },
+    DirectDownloadFileSpec {
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/8e40c43232a1c5c66c82111efc5820d3accca11b/tokens.txt",
+        install_path: "tokens.txt",
+        size: 75_756,
+        sha256: "59aba8873a2ed1e122c25fee421e25f283b63290efbde85c1f01a853d83cb6e6",
+    },
+];
+
 static SENSEVOICE_SPEC: ModelInstallSpec = ModelInstallSpec {
     id: SENSEVOICE_MODEL_ID,
     provider: PROVIDER_ID,
@@ -148,11 +172,24 @@ static PARAFORMER_SPEC: ModelInstallSpec = ModelInstallSpec {
     licenses: FUNASR_LICENSE_FILES,
 };
 
+static PARAFORMER_ONLINE_SPEC: ModelInstallSpec = ModelInstallSpec {
+    id: PARAFORMER_ONLINE_MODEL_ID,
+    provider: PROVIDER_ID,
+    backend: "paraformer-online",
+    source: ModelInstallSource::DirectFiles {
+        files: PARAFORMER_ONLINE_FILES,
+    },
+    download_size: 237_202_501,
+    installed_size: 237_202_501,
+    licenses: APACHE_LICENSE_FILES,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SherpaAsrBackend {
     SenseVoice,
     Qwen3Asr,
     ParaformerOffline,
+    ParaformerOnline,
 }
 
 #[derive(Debug, Clone)]
@@ -180,8 +217,13 @@ pub struct SherpaAsrModelStatus {
     pub error: Option<String>,
 }
 
-pub fn all_specs() -> [&'static ModelInstallSpec; 3] {
-    [&SENSEVOICE_SPEC, &PARAFORMER_SPEC, &QWEN3_SPEC]
+pub fn all_specs() -> [&'static ModelInstallSpec; 4] {
+    [
+        &SENSEVOICE_SPEC,
+        &PARAFORMER_SPEC,
+        &PARAFORMER_ONLINE_SPEC,
+        &QWEN3_SPEC,
+    ]
 }
 
 pub fn spec_for_model(model_id: &str) -> Option<&'static ModelInstallSpec> {
@@ -238,6 +280,7 @@ pub fn backend_for_model(model_id: &str) -> Result<SherpaAsrBackend> {
         SENSEVOICE_MODEL_ID => Ok(SherpaAsrBackend::SenseVoice),
         QWEN3_ASR_MODEL_ID => Ok(SherpaAsrBackend::Qwen3Asr),
         PARAFORMER_SMALL_MODEL_ID => Ok(SherpaAsrBackend::ParaformerOffline),
+        PARAFORMER_ONLINE_MODEL_ID => Ok(SherpaAsrBackend::ParaformerOnline),
         _ => Err(anyhow!("Unknown Sherpa ASR model: {model_id}")),
     }
 }
@@ -274,6 +317,15 @@ fn status_for_spec<R: Runtime>(
             "FunASR Model License 1.1",
             false,
             false,
+        ),
+        PARAFORMER_ONLINE_MODEL_ID => (
+            "Paraformer Streaming zh/en int8",
+            vec!["zh", "en"],
+            "auto-only",
+            "continuous",
+            "Apache-2.0",
+            false,
+            true,
         ),
         QWEN3_ASR_MODEL_ID => (
             "Qwen3-ASR 0.6B int8",
@@ -312,10 +364,12 @@ mod tests {
     #[test]
     fn catalog_contains_unique_model_ids() {
         let specs = all_specs();
-        assert_eq!(specs.len(), 3);
-        assert_ne!(specs[0].id, specs[1].id);
-        assert_ne!(specs[0].id, specs[2].id);
-        assert_ne!(specs[1].id, specs[2].id);
+        let unique = specs
+            .iter()
+            .map(|spec| spec.id)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(specs.len(), 4);
+        assert_eq!(unique.len(), specs.len());
     }
 
     #[test]
@@ -324,5 +378,13 @@ mod tests {
         assert!(PARAFORMER_FILES
             .iter()
             .all(|file| file.url.contains(PARAFORMER_REVISION)));
+    }
+
+    #[test]
+    fn online_paraformer_revision_is_pinned() {
+        assert_eq!(PARAFORMER_ONLINE_REVISION.len(), 40);
+        assert!(PARAFORMER_ONLINE_FILES
+            .iter()
+            .all(|file| file.url.contains(PARAFORMER_ONLINE_REVISION)));
     }
 }

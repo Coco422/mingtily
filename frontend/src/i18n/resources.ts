@@ -14,9 +14,18 @@ export const resources = {
     recording: {
       ...experienceResources['en-US'].recording,
       start: 'Start recording', stop: 'Stop recording', pause: 'Pause recording', resume: 'Resume recording',
-      pausing: 'Pausing…', resuming: 'Resuming…', stopping: 'Stopping…', recording: 'Recording', paused: 'Paused',
+      pausing: 'Pausing…', resuming: 'Resuming…', stopping: 'Stopping…', recording: 'Recording', paused: 'Paused', duration: 'Recording duration',
       processing: 'Processing recording…', validating: 'Validating speech recognition…',
       finalizing: 'Finalizing transcription…', saving: 'Saving transcript…', copyTranscript: 'Copy transcript',
+      stopStages: {
+        stoppingAudio: 'Stopping audio capture…',
+        processingTranscripts: 'Processing remaining transcription…',
+        unloadingModel: 'Releasing the speech recognition model…',
+        finalizingAudio: 'Saving the recording…',
+        preparingSpeakers: 'Preparing speaker-label refinement…',
+        refiningSpeakers: 'Refining speaker labels ({{current}}/{{total}})…',
+        complete: 'Recording processing complete',
+      },
       transcriptLanguage: 'Transcription language', permissionsRequired: 'Permissions required',
       microphoneRequired: 'Microphone permission required', systemAudioRequired: 'System audio permission required',
       openMicrophone: 'Microphone Settings', openScreenRecording: 'Screen Recording Settings',
@@ -78,7 +87,8 @@ export const resources = {
     },
     recording: {
       ...experienceResources['zh-CN'].recording,
-      start: '开始录音', stop: '停止录音', pause: '暂停录音', resume: '继续录音', pausing: '正在暂停…', resuming: '正在继续…', stopping: '正在停止…', recording: '录音中', paused: '已暂停', processing: '正在处理录音…', validating: '正在检查语音识别…', finalizing: '正在完成转写…', saving: '正在保存转写…', copyTranscript: '复制转写', transcriptLanguage: '转写语言', permissionsRequired: '需要权限', microphoneRequired: '需要麦克风权限', systemAudioRequired: '需要系统音频权限', openMicrophone: '麦克风设置', openScreenRecording: '屏幕录制设置', micUnavailable: 'Mingtily 需要麦克风权限来录制会议，但未检测到可用麦克风。', check: '请检查：', micConnected: '麦克风已连接并开启', micPermission: '已在系统设置中授予麦克风权限', micNotBusy: '没有其他应用正在独占麦克风', systemUnavailable: '暂时无法采集系统音频。仍可录制麦克风，但无法录制电脑声音。', systemAlsoUnavailable: '暂时也无法采集系统音频。', systemSetup: '在 macOS 上启用系统音频：', installVirtualDevice: '安装虚拟音频设备（如 BlackHole 2ch）', grantScreenPermission: '为 Mingtily 授予屏幕录制权限', configureAudio: '在“音频 MIDI 设置”中配置音频路由', betaDisabled: 'Beta 功能已关闭', enableImport: '请在“设置 › Beta”中启用“导入音频并重新转写”。', dropAudio: '拖入音频文件', supportedFormats: '支持的格式：{{formats}}',
+      start: '开始录音', stop: '停止录音', pause: '暂停录音', resume: '继续录音', pausing: '正在暂停…', resuming: '正在继续…', stopping: '正在停止…', recording: '录音中', paused: '已暂停', duration: '录音时长', processing: '正在处理录音…', validating: '正在检查语音识别…', finalizing: '正在完成转写…', saving: '正在保存转写…', copyTranscript: '复制转写', transcriptLanguage: '转写语言', permissionsRequired: '需要权限', microphoneRequired: '需要麦克风权限', systemAudioRequired: '需要系统音频权限', openMicrophone: '麦克风设置', openScreenRecording: '屏幕录制设置', micUnavailable: 'Mingtily 需要麦克风权限来录制会议，但未检测到可用麦克风。', check: '请检查：', micConnected: '麦克风已连接并开启', micPermission: '已在系统设置中授予麦克风权限', micNotBusy: '没有其他应用正在独占麦克风', systemUnavailable: '暂时无法采集系统音频。仍可录制麦克风，但无法录制电脑声音。', systemAlsoUnavailable: '暂时也无法采集系统音频。', systemSetup: '在 macOS 上启用系统音频：', installVirtualDevice: '安装虚拟音频设备（如 BlackHole 2ch）', grantScreenPermission: '为 Mingtily 授予屏幕录制权限', configureAudio: '在“音频 MIDI 设置”中配置音频路由', betaDisabled: 'Beta 功能已关闭', enableImport: '请在“设置 › Beta”中启用“导入音频并重新转写”。', dropAudio: '拖入音频文件', supportedFormats: '支持的格式：{{formats}}',
+      stopStages: { stoppingAudio: '正在停止音频采集…', processingTranscripts: '正在处理剩余转写…', unloadingModel: '正在释放语音识别模型…', finalizingAudio: '正在保存录音…', preparingSpeakers: '正在准备说话人校正…', refiningSpeakers: '正在校正说话人（{{current}}/{{total}}）…', complete: '录音处理完成' },
     },
     meeting: {
       ...experienceResources['zh-CN'].meeting,

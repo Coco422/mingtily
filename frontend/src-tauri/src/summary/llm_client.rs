@@ -1,5 +1,8 @@
-use reqwest::{header, Client};
+use crate::summary::SummaryTextStreamCallback;
+use futures_util::StreamExt;
+use reqwest::{header, Client, Response};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -25,6 +28,8 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
 }
 
 // Generic structure for OpenAI-compatible API chat responses
@@ -50,6 +55,8 @@ pub struct ClaudeRequest {
     pub max_tokens: u32,
     pub system: String,
     pub messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
 }
 
 // Claude-specific response structure
@@ -125,6 +132,42 @@ pub async fn generate_summary(
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String, String> {
+    generate_summary_with_callback(
+        client,
+        provider,
+        model_name,
+        api_key,
+        system_prompt,
+        user_prompt,
+        ollama_endpoint,
+        custom_openai_endpoint,
+        max_tokens,
+        temperature,
+        top_p,
+        app_data_dir,
+        cancellation_token,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn generate_summary_with_callback(
+    client: &Client,
+    provider: &LLMProvider,
+    model_name: &str,
+    api_key: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    ollama_endpoint: Option<&str>,
+    custom_openai_endpoint: Option<&str>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    app_data_dir: Option<&PathBuf>,
+    cancellation_token: Option<&CancellationToken>,
+    stream_callback: Option<&SummaryTextStreamCallback>,
+) -> Result<String, String> {
     // Check if cancelled before starting
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
@@ -137,12 +180,13 @@ pub async fn generate_summary(
         let app_data_dir = app_data_dir
             .ok_or_else(|| "app_data_dir is required for BuiltInAI provider".to_string())?;
 
-        return crate::summary::summary_engine::generate_with_builtin(
+        return crate::summary::summary_engine::generate_with_builtin_streaming(
             app_data_dir,
             model_name,
             system_prompt,
             user_prompt,
             cancellation_token,
+            stream_callback,
         )
         .await
         .map_err(|e| e.to_string());
@@ -244,6 +288,7 @@ pub async fn generate_summary(
             max_tokens: max_tokens_val,
             temperature: temperature_val,
             top_p: top_p_val,
+            stream: stream_callback.map(|_| true),
         })
     } else {
         serde_json::json!(ClaudeRequest {
@@ -253,7 +298,8 @@ pub async fn generate_summary(
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: user_prompt.to_string(),
-            }]
+            }],
+            stream: stream_callback.map(|_| true),
         })
     };
 
@@ -277,7 +323,10 @@ pub async fn generate_summary(
             result = request_future => {
                 result.map_err(|e| {
                     if e.is_timeout() {
-                        format!("LLM request timed out after 60 seconds")
+                        format!(
+                            "LLM request timed out after {} seconds",
+                            REQUEST_TIMEOUT_DURATION.as_secs()
+                        )
                     } else {
                         format!("Failed to send request to LLM: {}", e)
                     }
@@ -290,7 +339,10 @@ pub async fn generate_summary(
     } else {
         request_future.await.map_err(|e| {
             if e.is_timeout() {
-                format!("LLM request timed out after 60 seconds")
+                format!(
+                    "LLM request timed out after {} seconds",
+                    REQUEST_TIMEOUT_DURATION.as_secs()
+                )
             } else {
                 format!("Failed to send request to LLM: {}", e)
             }
@@ -303,6 +355,10 @@ pub async fn generate_summary(
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         return Err(format!("LLM API request failed: {}", error_body));
+    }
+
+    if let Some(callback) = stream_callback {
+        return parse_streaming_response(response, provider, callback, cancellation_token).await;
     }
 
     // Parse response based on provider
@@ -337,6 +393,226 @@ pub async fn generate_summary(
             .content
             .trim();
         Ok(content.to_string())
+    }
+}
+
+async fn parse_streaming_response(
+    response: Response,
+    provider: &LLMProvider,
+    callback: &SummaryTextStreamCallback,
+    cancellation_token: Option<&CancellationToken>,
+) -> Result<String, String> {
+    let mut byte_stream = response.bytes_stream();
+    let mut pending = Vec::new();
+    let mut raw_body = Vec::new();
+    let mut accumulated = String::new();
+
+    loop {
+        let next_chunk = if let Some(token) = cancellation_token {
+            tokio::select! {
+                chunk = byte_stream.next() => chunk,
+                _ = token.cancelled() => {
+                    return Err("Summary generation was cancelled".to_string());
+                }
+            }
+        } else {
+            byte_stream.next().await
+        };
+
+        let Some(chunk_result) = next_chunk else {
+            break;
+        };
+        let chunk = chunk_result.map_err(|e| format!("Failed to read LLM stream: {e}"))?;
+        raw_body.extend_from_slice(&chunk);
+        pending.extend_from_slice(&chunk);
+
+        while let Some(newline_index) = pending.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = pending.drain(..=newline_index).collect();
+            append_stream_line(&line, provider, &mut accumulated, callback)?;
+        }
+    }
+
+    if !pending.is_empty() {
+        append_stream_line(&pending, provider, &mut accumulated, callback)?;
+    }
+
+    if accumulated.trim().is_empty() {
+        let raw_text = String::from_utf8(raw_body)
+            .map_err(|e| format!("LLM response was not valid UTF-8: {e}"))?;
+        let complete = parse_complete_response(&raw_text, provider)?;
+        if !complete.is_empty() {
+            callback(complete.clone());
+        }
+        return Ok(complete);
+    }
+
+    Ok(accumulated.trim().to_string())
+}
+
+fn append_stream_line(
+    line: &[u8],
+    provider: &LLMProvider,
+    accumulated: &mut String,
+    callback: &SummaryTextStreamCallback,
+) -> Result<(), String> {
+    let line = std::str::from_utf8(line)
+        .map_err(|e| format!("LLM stream contained invalid UTF-8: {e}"))?
+        .trim();
+
+    if line.is_empty()
+        || line.starts_with(':')
+        || line.starts_with("event:")
+        || line.starts_with("id:")
+    {
+        return Ok(());
+    }
+
+    let payload = line.strip_prefix("data:").map(str::trim).unwrap_or(line);
+    if payload.is_empty() || payload == "[DONE]" {
+        return Ok(());
+    }
+
+    let Ok(value) = serde_json::from_str::<Value>(payload) else {
+        // Some OpenAI-compatible endpoints ignore `stream: true` and return a
+        // pretty-printed JSON body. The complete body is parsed after EOF.
+        return Ok(());
+    };
+
+    if let Some(error) = value.get("error") {
+        return Err(format!("LLM stream returned an error: {error}"));
+    }
+
+    if let Some(delta) = extract_stream_delta(&value, provider) {
+        if !delta.is_empty() {
+            accumulated.push_str(delta);
+            callback(accumulated.clone());
+        }
+    }
+
+    Ok(())
+}
+
+fn extract_stream_delta<'a>(value: &'a Value, provider: &LLMProvider) -> Option<&'a str> {
+    if provider == &LLMProvider::Claude {
+        return value
+            .get("delta")
+            .and_then(|delta| delta.get("text"))
+            .and_then(Value::as_str)
+            .or_else(|| {
+                value
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .and_then(|content| content.first())
+                    .and_then(|item| item.get("text"))
+                    .and_then(Value::as_str)
+            });
+    }
+
+    value
+        .pointer("/choices/0/delta/content")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            value
+                .pointer("/choices/0/message/content")
+                .and_then(Value::as_str)
+        })
+        .or_else(|| value.pointer("/choices/0/text").and_then(Value::as_str))
+        .or_else(|| value.pointer("/message/content").and_then(Value::as_str))
+        .or_else(|| value.get("response").and_then(Value::as_str))
+}
+
+fn parse_complete_response(body: &str, provider: &LLMProvider) -> Result<String, String> {
+    if provider == &LLMProvider::Claude {
+        let response = serde_json::from_str::<ClaudeChatResponse>(body)
+            .map_err(|e| format!("Failed to parse Claude response: {e}"))?;
+        return response
+            .content
+            .first()
+            .map(|content| content.text.trim().to_string())
+            .ok_or_else(|| "No content in LLM response".to_string());
+    }
+
+    if let Ok(response) = serde_json::from_str::<ChatResponse>(body) {
+        return response
+            .choices
+            .first()
+            .map(|choice| choice.message.content.trim().to_string())
+            .ok_or_else(|| "No content in LLM response".to_string());
+    }
+
+    let value = serde_json::from_str::<Value>(body)
+        .map_err(|e| format!("Failed to parse LLM response: {e}"))?;
+    extract_stream_delta(&value, provider)
+        .map(|content| content.trim().to_string())
+        .ok_or_else(|| "No content in LLM response".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn extracts_openai_stream_delta() {
+        let value: Value =
+            serde_json::from_str(r#"{"choices":[{"delta":{"content":"Hello"}}]}"#).unwrap();
+        assert_eq!(
+            extract_stream_delta(&value, &LLMProvider::OpenAI),
+            Some("Hello")
+        );
+    }
+
+    #[test]
+    fn extracts_claude_stream_delta() {
+        let value: Value = serde_json::from_str(
+            r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"你好"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            extract_stream_delta(&value, &LLMProvider::Claude),
+            Some("你好")
+        );
+    }
+
+    #[test]
+    fn extracts_ollama_ndjson_delta() {
+        let value: Value =
+            serde_json::from_str(r#"{"message":{"content":"world"},"done":false}"#).unwrap();
+        assert_eq!(
+            extract_stream_delta(&value, &LLMProvider::Ollama),
+            Some("world")
+        );
+    }
+
+    #[test]
+    fn streaming_lines_emit_complete_snapshots() {
+        let snapshots = Arc::new(Mutex::new(Vec::new()));
+        let captured = snapshots.clone();
+        let callback: SummaryTextStreamCallback = Arc::new(move |snapshot| {
+            captured.lock().unwrap().push(snapshot);
+        });
+        let mut accumulated = String::new();
+
+        append_stream_line(
+            br#"data: {"choices":[{"delta":{"content":"Hello"}}]}"#,
+            &LLMProvider::OpenAI,
+            &mut accumulated,
+            &callback,
+        )
+        .unwrap();
+        append_stream_line(
+            br#"data: {"choices":[{"delta":{"content":" world"}}]}"#,
+            &LLMProvider::OpenAI,
+            &mut accumulated,
+            &callback,
+        )
+        .unwrap();
+
+        assert_eq!(accumulated, "Hello world");
+        assert_eq!(
+            *snapshots.lock().unwrap(),
+            vec!["Hello".to_string(), "Hello world".to_string()]
+        );
     }
 }
 

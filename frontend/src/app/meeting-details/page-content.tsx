@@ -207,6 +207,9 @@ export default function PageContent({
           onOpenFolder={meetingOperations.handleOpenMeetingFolder}
           aiSummary={meetingData.aiSummary}
           summaryStatus={summaryGeneration.summaryStatus}
+          streamingSummary={summaryGeneration.streamingSummary}
+          streamingThinking={summaryGeneration.streamingThinking}
+          streamingThinkingComplete={summaryGeneration.streamingThinkingComplete}
           transcripts={meetingData.transcripts}
           modelConfig={modelConfig}
           setModelConfig={setModelConfig}

@@ -21,6 +21,11 @@ pub enum StreamManagerType {
     Standard(AudioStreamManager),
 }
 
+pub struct RecordingReceivers {
+    pub segmented: mpsc::UnboundedReceiver<AudioChunk>,
+    pub streaming: Option<mpsc::UnboundedReceiver<AudioChunk>>,
+}
+
 /// Simplified recording manager that coordinates all audio components
 pub struct RecordingManager {
     state: Arc<RecordingState>,
@@ -65,12 +70,19 @@ impl RecordingManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         auto_save: bool,
-    ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
+        enable_streaming_asr: bool,
+    ) -> Result<RecordingReceivers> {
         info!("Starting recording manager (auto_save: {})", auto_save);
 
         // Set up transcription channel
         let (transcription_sender, transcription_receiver) =
             mpsc::unbounded_channel::<AudioChunk>();
+        let (streaming_sender, streaming_receiver) = if enable_streaming_asr {
+            let (sender, receiver) = mpsc::unbounded_channel::<AudioChunk>();
+            (Some(sender), Some(receiver))
+        } else {
+            (None, None)
+        };
 
         // CRITICAL FIX: Create recording sender for pre-mixed audio from pipeline
         // Pipeline will mix mic + system audio professionally and send to this channel
@@ -121,6 +133,7 @@ impl RecordingManager {
             0,                      // Ignored - using dynamic sizing internally
             48000,                  // 48kHz sample rate
             Some(recording_sender), // CRITICAL: Pass recording sender to receive pre-mixed audio
+            streaming_sender,
             mic_name,
             mic_kind,
             sys_name,
@@ -151,7 +164,10 @@ impl RecordingManager {
             self.stream_manager.active_stream_count()
         );
 
-        Ok(transcription_receiver)
+        Ok(RecordingReceivers {
+            segmented: transcription_receiver,
+            streaming: streaming_receiver,
+        })
     }
 
     /// Start recording with default devices and auto_save setting
@@ -183,7 +199,8 @@ impl RecordingManager {
     pub async fn start_recording_with_defaults_and_auto_save(
         &mut self,
         auto_save: bool,
-    ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
+        enable_streaming_asr: bool,
+    ) -> Result<RecordingReceivers> {
         #[cfg(target_os = "macos")]
         {
             info!("🎙️ [macOS] Starting recording with smart device selection (Bluetooth override enabled)");
@@ -204,8 +221,13 @@ impl RecordingManager {
             }
 
             // Start recording with selected devices and auto_save setting
-            self.start_recording(microphone_device, system_device, auto_save)
-                .await
+            self.start_recording(
+                microphone_device,
+                system_device,
+                auto_save,
+                enable_streaming_asr,
+            )
+            .await
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -240,8 +262,13 @@ impl RecordingManager {
                 return Err(anyhow::anyhow!("No microphone device available"));
             }
 
-            self.start_recording(microphone_device, system_device, auto_save)
-                .await
+            self.start_recording(
+                microphone_device,
+                system_device,
+                auto_save,
+                enable_streaming_asr,
+            )
+            .await
         }
     }
 

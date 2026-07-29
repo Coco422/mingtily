@@ -13,7 +13,11 @@ import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { WhisperAPI } from '@/lib/whisper';
 import { ParakeetAPI } from '@/lib/parakeet';
-import { SherpaAsrAPI, SherpaAsrModelStatus } from '@/lib/sherpa-asr';
+import {
+  isStreamingRecognitionModel,
+  SherpaAsrAPI,
+  SherpaAsrModelStatus,
+} from '@/lib/sherpa-asr';
 import { capabilityConfigService } from '@/services/capabilityConfigService';
 import {
   DEFAULT_SPEAKER_DIARIZATION_CONFIG,
@@ -233,6 +237,11 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
             model={transcriptModel}
           />
         </div>
+        {isStreamingRecognitionModel(transcriptProvider, transcriptModel) && (
+          <div className="mt-4 rounded-md border border-purple-200 bg-purple-50/50 px-3 py-2 text-xs leading-5 text-purple-800">
+            {t('settings:services.transcription.streamingNotice')}
+          </div>
+        )}
         <div className="mt-5 flex justify-end">
           <Button onClick={saveTranscription} disabled={savingTranscript || !installedTranscriptModels.includes(transcriptModel)}>
             {savingTranscript ? t('settings:actions.saving') : t('settings:actions.save')}

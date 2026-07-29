@@ -1,7 +1,10 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { recordingService } from '@/services/recordingService';
+import {
+  recordingService,
+  type RecordingShutdownProgressPayload,
+} from '@/services/recordingService';
 
 /**
  * Recording state synchronized with backend
@@ -34,6 +37,7 @@ interface RecordingState {
   // NEW: Lifecycle status
   status: RecordingStatus;
   statusMessage?: string;  // Optional message for current status
+  shutdownProgress: RecordingShutdownProgressPayload | null;
 }
 
 interface RecordingStateContextType extends RecordingState {
@@ -65,6 +69,7 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
     activeDuration: null,
     status: RecordingStatus.IDLE,  // NEW: Initialize with IDLE status
     statusMessage: undefined,       // NEW: No message initially
+    shutdownProgress: null,
   });
 
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -77,6 +82,9 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
       ...prev,
       status,
       statusMessage: message,
+      shutdownProgress: status === RecordingStatus.STOPPING
+        ? prev.shutdownProgress
+        : null,
     }));
   }, [state.status, state.isRecording, state.isPaused]);
 
@@ -98,9 +106,11 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
       }));
 
       console.log('[RecordingStateContext] Synced with backend:', backendState);
+      return backendState;
     } catch (error) {
       console.error('[RecordingStateContext] Failed to sync with backend:', error);
       // Don't update state on error - keep current state
+      return null;
     }
   };
 
@@ -145,10 +155,22 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
             isPaused: false,
             isActive: true,
             status: RecordingStatus.RECORDING,  // NEW: Set status to RECORDING
+            shutdownProgress: null,
           }));
           startPolling();
         });
         unsubscribers.push(unlistenStarted);
+
+        const unlistenShutdownProgress = await recordingService.onRecordingShutdownProgress((payload) => {
+          console.log('[RecordingStateContext] Recording shutdown progress:', payload);
+          setState(prev => ({
+            ...prev,
+            status: RecordingStatus.STOPPING,
+            statusMessage: payload.message,
+            shutdownProgress: payload,
+          }));
+        });
+        unsubscribers.push(unlistenShutdownProgress);
 
         // Recording stopped
         const unlistenStopped = await recordingService.onRecordingStopped((payload) => {
@@ -173,6 +195,11 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
               isActive: false,
               recordingDuration: null,
               activeDuration: null,
+              shutdownProgress: {
+                stage: 'complete',
+                message: 'Recording stopped successfully',
+                progress: 100,
+              },
             };
           });
           stopPolling();
@@ -222,7 +249,17 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
    */
   useEffect(() => {
     console.log('[RecordingStateContext] Initial mount - syncing with backend');
-    syncWithBackend();
+    let isCancelled = false;
+
+    void syncWithBackend().then((backendState) => {
+      if (!isCancelled && backendState?.is_recording) {
+        startPolling();
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   // NEW: Computed helpers from status

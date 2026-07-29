@@ -11,7 +11,7 @@ export interface SherpaAsrModelStatus {
   installed_size: number;
   languages: string[];
   language_hint: 'auto-only' | 'auto-or-fixed';
-  streaming_mode: 'vad-segmented';
+  streaming_mode: 'vad-segmented' | 'continuous';
   license: string;
   recommended: boolean;
   beta: boolean;
@@ -32,6 +32,7 @@ export interface SherpaAsrDownloadProgress {
 export const SHERPA_ASR_PROVIDER_ID = 'sherpa-onnx' as const;
 export const SENSEVOICE_MODEL_ID = 'sensevoice-small-int8';
 export const PARAFORMER_SMALL_MODEL_ID = 'paraformer-zh-small-int8';
+export const PARAFORMER_ONLINE_MODEL_ID = 'paraformer-online-zh-en-int8';
 export const QWEN3_ASR_MODEL_ID = 'qwen3-asr-0.6b-int8';
 
 export const SherpaAsrAPI = {
@@ -58,6 +59,7 @@ export function supportedLanguageCodes(
     case QWEN3_ASR_MODEL_ID:
       return ['auto', 'zh', 'yue', 'en', 'ja', 'ko', 'de', 'fr', 'es', 'pt', 'ru'];
     case PARAFORMER_SMALL_MODEL_ID:
+    case PARAFORMER_ONLINE_MODEL_ID:
     default:
       return ['auto'];
   }
@@ -78,4 +80,11 @@ export function isAutomaticLanguageOnly(
 ): boolean {
   const supported = supportedLanguageCodes(provider, model);
   return supported?.length === 1 && supported[0] === 'auto';
+}
+
+export function isStreamingRecognitionModel(
+  provider: string | undefined,
+  model: string | undefined
+): boolean {
+  return provider === SHERPA_ASR_PROVIDER_ID && model === PARAFORMER_ONLINE_MODEL_ID;
 }

@@ -233,7 +233,7 @@ export function LanguageSelection({
           <p className="text-gray-600">
             <strong>{t('services.transcription.currentLanguage')}</strong> {selectedLanguageName}
           </p>
-          {selectedLanguage === 'auto' && (
+          {selectedLanguage === 'auto' && !automaticOnly && (
             <div className="p-2 bg-yellow-50 border border-yellow-200 rounded text-yellow-800">
               <p className="font-medium">⚠️ {t('services.transcription.autoDetectWarning')}</p>
               <p className="mt-1">{t('services.transcription.autoDetectHint')}</p>

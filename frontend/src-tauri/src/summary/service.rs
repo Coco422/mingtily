@@ -9,6 +9,7 @@ use crate::summary::processor::{
     extract_meeting_name_from_markdown, generate_meeting_summary, language_name_from_code,
 };
 use crate::summary::templates::{self, Template};
+use crate::summary::{SummaryStreamCallback, SummaryStreamUpdate};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -16,7 +17,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -27,6 +28,15 @@ static METADATA_CACHE: Lazy<ModelMetadataCache> =
 // Global registry for cancellation tokens (thread-safe)
 static CANCELLATION_REGISTRY: Lazy<Arc<Mutex<HashMap<String, CancellationToken>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+#[derive(Clone, Serialize)]
+struct SummaryGenerationStreamPayload {
+    meeting_id: String,
+    markdown: String,
+    thinking: Option<String>,
+    thinking_complete: bool,
+    phase: String,
+}
 
 /// Strips the first `#` heading line; returns "" if no `#` is found.
 fn strip_leading_title(markdown: &str) -> String {
@@ -297,7 +307,7 @@ impl SummaryService {
     /// * `custom_prompt` - Optional user-provided context
     /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
     pub async fn process_transcript_background<R: tauri::Runtime>(
-        _app: AppHandle<R>,
+        app: AppHandle<R>,
         pool: SqlitePool,
         meeting_id: String,
         text: String,
@@ -454,7 +464,7 @@ impl SummaryService {
         };
 
         // Get app data directory for BuiltInAI provider
-        let app_data_dir = _app.path().app_data_dir().ok();
+        let app_data_dir = app.path().app_data_dir().ok();
 
         if let Some(code) = &summary_language {
             info!("📝 Summary language preference: {}", code);
@@ -521,6 +531,35 @@ impl SummaryService {
         };
 
         let client = reqwest::Client::new();
+        let stream_app = app.clone();
+        let stream_meeting_id = meeting_id.clone();
+        let last_streamed_update = Arc::new(Mutex::new(None::<SummaryStreamUpdate>));
+        let stream_callback: SummaryStreamCallback = Arc::new(move |update| {
+            if update.markdown.trim().is_empty() && update.thinking.is_none() {
+                return;
+            }
+
+            let should_emit = match last_streamed_update.lock() {
+                Ok(mut last) if last.as_ref() != Some(&update) => {
+                    *last = Some(update.clone());
+                    true
+                }
+                _ => false,
+            };
+
+            if should_emit {
+                let _ = stream_app.emit(
+                    "summary-generation-stream",
+                    SummaryGenerationStreamPayload {
+                        meeting_id: stream_meeting_id.clone(),
+                        markdown: update.markdown,
+                        thinking: update.thinking,
+                        thinking_complete: update.thinking_complete,
+                        phase: "final".to_string(),
+                    },
+                );
+            }
+        });
         let result = generate_meeting_summary(
             &client,
             &provider,
@@ -541,6 +580,7 @@ impl SummaryService {
             summary_language.as_deref(),
             detected_summary_language.as_deref(),
             cached_english.as_deref(),
+            Some(&stream_callback),
         )
         .await;
 

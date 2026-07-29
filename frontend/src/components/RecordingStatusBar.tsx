@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
-import { useEffect, useState } from 'react';
+import { formatRecordingDuration } from '@/lib/recordingDuration';
 import { useTranslation } from 'react-i18next';
 
 interface RecordingStatusBarProps {
@@ -13,24 +13,8 @@ export const RecordingStatusBar: React.FC<RecordingStatusBarProps> = ({ isPaused
   const { t } = useTranslation('recording');
   // Get recording duration from backend-synced context (in seconds)
   // Backend polls every 500ms, providing smooth updates
-  const { activeDuration, isRecording } = useRecordingState();
-
-  // Display state synced from backend
-  const [displaySeconds, setDisplaySeconds] = useState(0);
-
-  // Sync with backend duration when it changes (handles refresh/navigation)
-  useEffect(() => {
-    if (activeDuration !== null) {
-      // Round to nearest second to avoid decimal issues
-      setDisplaySeconds(Math.floor(activeDuration));
-    }
-  }, [activeDuration]);
-
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
+  const { activeDuration } = useRecordingState();
+  const recordingDuration = formatRecordingDuration(activeDuration);
 
   return (
     <motion.div
@@ -41,8 +25,12 @@ export const RecordingStatusBar: React.FC<RecordingStatusBarProps> = ({ isPaused
       className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg mb-2"
     >
       <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-red-500 animate-pulse'}`} />
-      <span className={`text-sm ${isPaused ? 'text-orange-700' : 'text-gray-700'}`}>
-        {isPaused ? t('paused') : t('recording')} • {formatDuration(displaySeconds)}
+      <span
+        role="timer"
+        aria-label={`${t('duration')}: ${recordingDuration}`}
+        className={`text-sm ${isPaused ? 'text-orange-700' : 'text-gray-700'}`}
+      >
+        {isPaused ? t('paused') : t('recording')} • <span className="font-mono tabular-nums">{recordingDuration}</span>
       </span>
     </motion.div>
   );
