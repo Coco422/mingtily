@@ -38,12 +38,14 @@ export interface SpeakerDiarizationConfig {
   enabled: boolean;
   provider: SpeakerProviderId;
   model: 'sherpa-v1';
+  speakerCount: number | null;
 }
 
 export const DEFAULT_SPEAKER_DIARIZATION_CONFIG: SpeakerDiarizationConfig = {
   enabled: true,
   provider: 'sherpa-onnx',
   model: 'sherpa-v1',
+  speakerCount: null,
 };
 
 export const PROVIDERS: ProviderDescriptor[] = [

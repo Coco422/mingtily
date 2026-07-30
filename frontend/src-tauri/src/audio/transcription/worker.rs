@@ -5,7 +5,7 @@
 use super::provider::{TranscriptionError, TranscriptionProvider};
 use crate::audio::AudioChunk;
 use crate::speaker_diarization::{
-    installed_model_paths, is_enabled as speaker_diarization_is_enabled, RealtimeSpeakerSession,
+    installed_model_paths, RealtimeSpeakerSession, SpeakerDiarizationConfig,
 };
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -85,7 +85,18 @@ pub fn start_transcription_task<R: Runtime>(
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
-        let speaker_model_paths = if speaker_diarization_is_enabled(&app) {
+        let speaker_config = match crate::speaker_diarization::configuration::load_config(&app) {
+            Ok(config) => config,
+            Err(error) => {
+                warn!(
+                    "Unable to read speaker diarization settings; using compatible defaults: {}",
+                    error
+                );
+                SpeakerDiarizationConfig::default()
+            }
+        };
+        let speaker_count = speaker_config.speaker_count;
+        let speaker_model_paths = if speaker_config.enabled {
             let paths = installed_model_paths(&app).ok().flatten();
             if paths.is_none() {
                 let _ = app.emit(
@@ -147,7 +158,7 @@ pub fn start_transcription_task<R: Runtime>(
 
                 let mut speaker_session = match speaker_paths_clone {
                     Some(paths) => match tokio::task::spawn_blocking(move || {
-                        RealtimeSpeakerSession::new(&paths)
+                        RealtimeSpeakerSession::new(&paths, speaker_count)
                     })
                     .await
                     {

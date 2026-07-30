@@ -58,7 +58,7 @@ Audio, model, Provider, packaging, and persistence changes should also be verifi
 ## Project boundaries
 
 - Mingtily is local-first but supports user-configured external LLM providers.
-- Do not add telemetry, background updating, Meetily marketing, or implicit remote requests.
+- Do not add telemetry, Meetily marketing, or implicit remote requests. Automatic release checks must remain opt-in, disclosed, and pointed at Mingtily's public GitHub Releases.
 - New UI strings must support `en-US` and `zh-CN`.
 - New ASR and speaker models should use the shared model manifest and management architecture.
 - The Python/FastAPI code under `backend/` is an unsupported legacy archive.

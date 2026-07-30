@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Switch } from "./ui/switch"
-import { Download, FolderOpen, Loader2 } from "lucide-react"
+import { Download, FolderOpen, Loader2, RefreshCw } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
 import { useTranslation } from "react-i18next"
@@ -10,6 +10,16 @@ import { setUiLocale } from "@/i18n"
 import type { AppLocale } from "@/i18n/resources"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 import { toast } from "sonner"
+import {
+  AUTO_UPDATE_CHANGED_EVENT,
+  AUTO_UPDATE_STORAGE_KEY,
+  getCurrentUpdateState,
+  requestUpdateCheck,
+  requestUpdateInstall,
+  requestUpdateRestart,
+  UPDATE_STATE_EVENT,
+  type UpdateState,
+} from '@/components/UpdateCheckProvider'
 
 interface DiagnosticExportResult {
   path: string;
@@ -30,6 +40,17 @@ export function PreferenceSettings() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
   const [isExportingDiagnostics, setIsExportingDiagnostics] = useState(false);
+  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(false);
+  const [updateState, setUpdateState] = useState<UpdateState>(getCurrentUpdateState);
+
+  useEffect(() => {
+    setAutoUpdateEnabled(localStorage.getItem(AUTO_UPDATE_STORAGE_KEY) === 'true');
+    const handleState = (event: Event) => {
+      setUpdateState((event as CustomEvent<UpdateState>).detail);
+    };
+    window.addEventListener(UPDATE_STATE_EVENT, handleState);
+    return () => window.removeEventListener(UPDATE_STATE_EVENT, handleState);
+  }, []);
 
   // Lazy load preferences on mount (only loads if not already cached)
   useEffect(() => {
@@ -125,6 +146,22 @@ export function PreferenceSettings() {
     }
   };
 
+  const handleAutoUpdateChange = (enabled: boolean) => {
+    setAutoUpdateEnabled(enabled);
+    localStorage.setItem(AUTO_UPDATE_STORAGE_KEY, String(enabled));
+    window.dispatchEvent(new CustomEvent(AUTO_UPDATE_CHANGED_EVENT));
+  };
+
+  const handleUpdateAction = () => {
+    if (updateState.status === 'available') {
+      requestUpdateInstall();
+    } else if (updateState.status === 'ready') {
+      requestUpdateRestart();
+    } else {
+      requestUpdateCheck(true);
+    }
+  };
+
   // Show loading only if we're actually loading and don't have cached data
   if (isLoadingPreferences && !notificationSettings && !storageLocations) {
     return <div className="max-w-2xl mx-auto p-6">{t('general.loading')}</div>
@@ -169,6 +206,49 @@ export function PreferenceSettings() {
             <p className="text-sm text-gray-600">{t('general.notificationsDescription')}</p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="max-w-xl">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{t('general.updates.title')}</h3>
+            <p className="text-sm text-gray-600">{t('general.updates.description')}</p>
+            <p className="mt-2 text-xs text-gray-500">{t('general.updates.privacy')}</p>
+          </div>
+          <Switch checked={autoUpdateEnabled} onCheckedChange={handleAutoUpdateChange} />
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-3 border-t pt-4">
+          <p className="text-xs text-gray-500">
+            {updateState.status === 'available' && t('general.updates.available', { version: updateState.version })}
+            {updateState.status === 'downloading' && (
+              updateState.percentage === null
+                ? t('general.updates.downloading', { version: updateState.version })
+                : t('general.updates.downloadingProgress', { version: updateState.version, progress: updateState.percentage })
+            )}
+            {updateState.status === 'ready' && t('general.updates.ready', { version: updateState.version })}
+            {updateState.status === 'current' && t('general.updates.current')}
+            {updateState.status === 'error' && t('general.updates.checkFailed')}
+            {updateState.status === 'idle' && t('general.updates.idle')}
+            {updateState.status === 'checking' && t('general.updates.checking')}
+          </p>
+          <button
+            type="button"
+            onClick={handleUpdateAction}
+            disabled={updateState.status === 'checking' || updateState.status === 'downloading'}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {updateState.status === 'available' ? (
+              <Download className="h-4 w-4" />
+            ) : (
+              <RefreshCw className={`h-4 w-4 ${updateState.status === 'checking' ? 'animate-spin' : ''}`} />
+            )}
+            {updateState.status === 'available'
+              ? t('general.updates.download')
+              : updateState.status === 'ready'
+                ? t('general.updates.restartNow')
+                : t('general.updates.checkNow')}
+          </button>
         </div>
       </div>
 

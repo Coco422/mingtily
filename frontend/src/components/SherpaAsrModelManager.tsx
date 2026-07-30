@@ -15,6 +15,7 @@ import {
 
 interface SherpaAsrModelManagerProps {
   selectedModel?: string;
+  additionalSelectedModels?: string[];
   onOpenServices?: () => void;
   mode?: 'manage' | 'select';
   onModelSelect?: (modelId: string) => void;
@@ -27,6 +28,7 @@ function formatSize(bytes: number) {
 
 export function SherpaAsrModelManager({
   selectedModel,
+  additionalSelectedModels = [],
   onOpenServices,
   mode = 'manage',
   onModelSelect,
@@ -164,7 +166,9 @@ export function SherpaAsrModelManager({
     <div className="space-y-2">
       {models.map((model) => {
         const installed = model.status === 'available';
-        const inUse = installed && selectedModel === model.id;
+        const inUse = installed && (
+          selectedModel === model.id || additionalSelectedModels.includes(model.id)
+        );
         const busy = busyModels.has(model.id);
         const downloadProgress = progress[model.id];
         const state: ModelAssetState =

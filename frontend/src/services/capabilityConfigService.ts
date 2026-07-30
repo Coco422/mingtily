@@ -5,9 +5,15 @@ import {
   TranscriptModelConfig,
 } from '@/types/capabilities';
 import { configService, ModelConfig } from '@/services/configService';
+import {
+  SherpaAsrAPI,
+  StreamingTranscriptionConfig,
+} from '@/lib/sherpa-asr';
 
 export const SPEAKER_DIARIZATION_CONFIG_CHANGED_EVENT =
   'mingtily:speaker-diarization-config-changed';
+export const STREAMING_TRANSCRIPTION_CONFIG_CHANGED_EVENT =
+  'mingtily:streaming-transcription-config-changed';
 
 class CapabilityConfigService {
   getTranscription(): Promise<TranscriptModelConfig> {
@@ -20,6 +26,22 @@ class CapabilityConfigService {
       model: config.model,
       apiKey: config.apiKey ?? null,
     });
+  }
+
+  getStreamingTranscription(): Promise<StreamingTranscriptionConfig> {
+    return SherpaAsrAPI.getStreamingConfig();
+  }
+
+  async saveStreamingTranscription(config: StreamingTranscriptionConfig): Promise<void> {
+    await SherpaAsrAPI.saveStreamingConfig(config);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent<StreamingTranscriptionConfig>(
+          STREAMING_TRANSCRIPTION_CONFIG_CHANGED_EVENT,
+          { detail: config }
+        )
+      );
+    }
   }
 
   async getSpeakerDiarization(): Promise<SpeakerDiarizationConfig> {

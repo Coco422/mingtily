@@ -14,9 +14,11 @@ import { useConfig } from '@/contexts/ConfigContext';
 import {
   capabilityConfigService,
   SPEAKER_DIARIZATION_CONFIG_CHANGED_EVENT,
+  STREAMING_TRANSCRIPTION_CONFIG_CHANGED_EVENT,
 } from '@/services/capabilityConfigService';
 import { DEFAULT_SPEAKER_DIARIZATION_CONFIG } from '@/types/capabilities';
 import { Button } from '@/components/ui/button';
+import type { StreamingTranscriptionConfig } from '@/lib/sherpa-asr';
 
 interface ModelsSettingsProps {
   onOpenServices: () => void;
@@ -108,6 +110,9 @@ function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
   const [speakerEnabled, setSpeakerEnabled] = useState(
     DEFAULT_SPEAKER_DIARIZATION_CONFIG.enabled
   );
+  const [streamingConfig, setStreamingConfig] = useState<StreamingTranscriptionConfig | null>(
+    null
+  );
 
   useEffect(() => {
     const refreshSpeakerConfig = () => {
@@ -134,6 +139,31 @@ function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
     };
   }, []);
 
+  useEffect(() => {
+    void capabilityConfigService
+      .getStreamingTranscription()
+      .then(setStreamingConfig)
+      .catch((error) =>
+        console.warn('[ModelsSettings] Unable to load streaming transcription config', error)
+      );
+
+    const handleStreamingConfigChanged = (event: Event) => {
+      setStreamingConfig(
+        (event as CustomEvent<StreamingTranscriptionConfig>).detail
+      );
+    };
+    window.addEventListener(
+      STREAMING_TRANSCRIPTION_CONFIG_CHANGED_EVENT,
+      handleStreamingConfigChanged
+    );
+    return () => {
+      window.removeEventListener(
+        STREAMING_TRANSCRIPTION_CONFIG_CHANGED_EVENT,
+        handleStreamingConfigChanged
+      );
+    };
+  }, []);
+
   return (
     <div className="space-y-4">
       <ModelSection
@@ -147,6 +177,9 @@ function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
               transcriptModelConfig.provider === 'sherpa-onnx'
                 ? transcriptModelConfig.model
                 : undefined
+            }
+            additionalSelectedModels={
+              streamingConfig?.enabled ? [streamingConfig.model] : []
             }
             onOpenServices={onOpenServices}
           />

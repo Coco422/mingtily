@@ -8,7 +8,7 @@
 
 Mingtily is a desktop meeting assistant for people who want recordings, transcripts, speaker labels, and local models to stay on their own device. External LLM Providers remain available as an explicit choice when cloud models provide better summary quality or performance.
 
-Current version: **0.6.0**. The project is usable for development and personal testing. GitHub Actions can produce unsigned development installers; signed public releases are not yet provided.
+Current version: **0.6.1**. GitHub Actions publish tagged development releases for macOS Apple Silicon, Windows x64, and Linux x64. Installers remain unsigned at the operating-system level, while updater payloads are integrity-signed by Mingtily.
 
 ## Highlights
 
@@ -25,11 +25,12 @@ Current version: **0.6.0**. The project is usable for development and personal t
 
 ## Privacy and network boundary
 
-Mingtily has no telemetry client, usage analytics, advertising identifier, background updater, or Mingtily-hosted account service.
+Mingtily has no telemetry client, usage analytics, advertising identifier, or Mingtily-hosted account service. Update checks are optional and disabled by default.
 
 - Cold start and ordinary local use are designed not to contact non-loopback services.
 - Localhost discovery, such as checking an explicitly configured Ollama endpoint, stays on the device.
 - Model downloads start only after a user action.
+- Users can manually check GitHub Releases or explicitly enable automatic checks in Settings. Update requests contain application/platform metadata required by Tauri, but no transcript or meeting content.
 - External LLM requests occur only after the user configures or invokes that Provider. The relevant transcript content leaves the device in that case.
 - Diagnostic logs rotate locally at five files of up to 5 MB each. They are never uploaded automatically and can be exported only from Settings after an explicit user action.
 - Diagnostic exports replace the user's home-directory path and obvious credential-bearing log lines. Review an export before sharing it because filenames, device names, and error context may still be useful to diagnosis.
@@ -42,7 +43,7 @@ Large model weights are not bundled with the application. Models are downloaded 
 
 | Capability | Current choices | Notes |
 |---|---|---|
-| Speech recognition | Whisper, Parakeet TDT 0.6B v2/v3, SenseVoice Small int8, Paraformer Small int8, Paraformer Streaming zh/en int8, Qwen3-ASR 0.6B int8 | SenseVoice is the recommended Chinese choice and supports forced Mandarin or Cantonese. Offline Paraformer is lightweight; the optional streaming model adds revisable live hypotheses with an approximately 226 MiB download. Qwen3-ASR is a larger multilingual Beta option. |
+| Speech recognition | Whisper, Parakeet TDT 0.6B v2/v3, SenseVoice Small int8, Paraformer Small int8, Paraformer Streaming zh/en int8, Qwen3-ASR 0.6B int8 | SenseVoice is the recommended Chinese choice and supports forced Mandarin or Cantonese. Offline Paraformer is lightweight; Beta live enhancement pairs the optional streaming model with a separate finalized model. Qwen3-ASR is a larger multilingual Beta option. |
 | Punctuation restoration | Sherpa ONNX CT-Transformer zh/en int8 | Optional local post-processing for final SenseVoice segments; approximately 62 MiB to download and fail-open when unavailable. |
 | Speaker diarization | Sherpa ONNX `sherpa-v1` | Pyannote segmentation 3.0 int8 plus 3D-Speaker ERes2Net; approximately 47 MB to download. |
 | Built-in summaries | Qwen 3.5 2B/4B, Gemma 3 1B/4B | Optional GGUF downloads; local inference uses the bundled `llama-helper` sidecar. |
@@ -55,9 +56,9 @@ Parakeet v3 is pinned to revision `8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce` of 
 
 | Platform | Status | Current scope |
 |---|---|---|
-| macOS Apple Silicon | Primary development platform | Local development and unsigned builds; microphone, system audio, Metal Whisper, import, speaker diarization, and summaries. |
-| Windows x64 | CI/dev-test target | Unsigned MSI/NSIS build path exists; audio and installer behavior still need broader hardware testing. |
-| Linux x64 | CI/dev-test target | Pull requests build an unsigned DEB and run a cold-start loopback-network smoke test; desktop audio varies by distribution. |
+| macOS Apple Silicon | Primary development platform | Tagged unsigned DMG/app releases plus integrity-signed updater artifacts; microphone, system audio, Metal Whisper, import, speaker diarization, and summaries. |
+| Windows x64 | CI/dev-test target | Tagged unsigned MSI/NSIS releases plus updater artifacts; audio and installer behavior still need broader hardware testing. |
+| Linux x64 | CI/dev-test target | Tagged AppImage/DEB releases; pull requests also run a cold-start loopback-network smoke test. Desktop audio varies by distribution. |
 
 Code signing, Apple notarization, and production installer signing are deferred until the project has appropriate Mingtily-owned credentials and community demand.
 
@@ -66,11 +67,12 @@ Code signing, Apple notarization, and production installer signing are deferred 
 1. Open **Settings → Models** and download a local ASR model.
 2. Open **Settings → Services** and select the installed transcription model.
 3. For consistent Chinese and English punctuation with SenseVoice, optionally download the punctuation-restoration model.
-4. To see continuously revised text while speaking, optionally download **Paraformer Streaming zh/en int8**, then explicitly select it in **Settings → Services**.
-5. Optionally download and enable the speaker-diarization model.
+4. To see continuously revised text while speaking, optionally download **Paraformer Streaming zh/en int8**, choose **Beta · live enhancement** in **Settings → Services**, then select the streaming and finalized models separately.
+5. Optionally download and enable the speaker-diarization model. In **Settings → Services**, keep automatic detection or specify 1–10 speakers when the expected count is known.
 6. Choose the transcription language. For predictable Chinese output, use SenseVoice and choose Mandarin or Cantonese; Whisper remains available for broader language coverage and translation to English.
 7. Start a recording or enable the Beta import/retranscription feature.
 8. Configure Built-in AI, Ollama, or an external summary Provider only if summaries are needed.
+9. In **Settings → General**, manually check for releases or explicitly enable automatic checks.
 
 Model downloads do not silently change the active Provider or model.
 
@@ -105,7 +107,8 @@ pnpm tauri:build
 - `Validation` runs frontend, i18n, network-boundary, formatting, Rust test, and Rust check gates.
 - `Build and Test - Linux` also builds an unsigned Linux package on relevant pull requests and checks cold-start network connections under `strace`.
 - The manual `Build and Test - DevTest`, macOS, Windows, and Linux workflows produce unsigned development artifacts without repository secrets.
-- Signing, notarization, and production release automation are intentionally absent until Mingtily owns the required credentials and has a concrete distribution need.
+- Pushing a matching `vX.Y.Z` tag creates a draft, builds all supported release targets, uploads signed updater archives and `latest.json`, then publishes the GitHub Release after every platform succeeds.
+- Apple notarization and operating-system installer signing remain deferred.
 
 On Linux, install the WebKitGTK, app-indicator, ALSA, X11, and packaging dependencies shown in [`.github/workflows/build-linux.yml`](.github/workflows/build-linux.yml). See the official [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for platform setup.
 
@@ -142,18 +145,19 @@ TEST_OPUS_M4A_PATH=/path/to/audio.m4a cargo test test_opus_m4a_decode -- --ignor
 - `frontend/src-tauri/`: Rust audio, ASR, diarization, persistence, diagnostics, and Provider commands.
 - `llama-helper/`: built-in local summary sidecar.
 - `backend/`: unsupported upstream Python/FastAPI archive; do not add new Mingtily features there.
-- `.github/workflows/`: secret-free validation and manual platform build workflows.
+- `.github/workflows/`: secret-free validation/manual builds plus the tagged GitHub Release workflow.
 
 See [AGENTS.md](AGENTS.md) for durable engineering boundaries and [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ## Known limitations
 
 - Parakeet and both Paraformer choices use automatic language detection. SenseVoice, Qwen3-ASR, and Whisper accept supported fixed-language hints.
-- Paraformer Streaming shows a provisional hypothesis that can change while the user speaks. Provisional text is never persisted; the meeting stores only finalized VAD segments.
+- In Beta live enhancement, Paraformer Streaming shows a provisional hypothesis that can change while the user speaks. A separate finalized model transcribes completed VAD segments; provisional text is never persisted.
 - Live speaker labels appear after a VAD segment finishes; they are not token-level labels.
 - Overlapping speech is assigned to the dominant speaker and is not transcribed twice.
+- Automatic speaker detection is heuristic. For a known meeting size, choose 1–10 speakers to cap live identities and guide final correction.
 - Speaker names cannot yet be renamed and are not remembered across meetings.
-- Platform installers are currently unsigned development artifacts.
+- Platform installers are currently unsigned development artifacts; only Tauri updater payloads carry Mingtily integrity signatures.
 
 ## Roadmap
 

@@ -25,6 +25,7 @@ import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 import { I18nProvider } from '@/i18n/I18nProvider'
 import { useTranslation } from 'react-i18next'
+import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
 
 
 const sourceSans3 = Source_Sans_3({
@@ -247,6 +248,7 @@ export default function RootLayout({
                             <ImportDialogProvider onOpen={handleOpenImportDialog}>
                               {/* Download progress toast provider - listens for background downloads */}
                               <DownloadProgressToastProvider />
+                              <UpdateCheckProvider />
 
                               {/* Show onboarding or main app */}
                               {showOnboarding ? (

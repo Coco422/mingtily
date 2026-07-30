@@ -1,6 +1,6 @@
 # GitHub Actions workflows
 
-Mingtily's active development workflows are secret-free and unsigned. Code signing, notarization, and production release automation are intentionally absent until the project has Mingtily-owned credentials and a concrete distribution need.
+Mingtily's pull-request and development workflows remain secret-free and unsigned. Tagged releases add integrity-signed Tauri updater artifacts; operating-system code signing and Apple notarization remain deferred.
 
 ## Automatic validation
 
@@ -47,13 +47,15 @@ Reusable unsigned build implementation shared by DevTest and the standalone macO
 
 Manual semantic-version and branch summary. It does not build the application.
 
-## Deferred release automation
+## Tagged releases
 
-There is currently no production release workflow. A future implementation must start from Mingtily-owned credentials, keep pull-request builds secret-free, create a draft release first, and be verified on clean machines before publication.
+### `release.yml`
+
+Pushing a matching `vX.Y.Z` tag builds macOS Apple Silicon, Windows x64, and Linux x64 bundles. The workflow creates a draft release, uploads installers plus signed updater archives and `latest.json`, then publishes only after every platform succeeds. The repository secret `TAURI_SIGNING_PRIVATE_KEY` signs updater payloads; it is unrelated to Apple or Windows platform signing.
 
 ## Recommended workflow
 
 1. Let `ci.yml` validate every pull request.
 2. Let `build-linux.yml` validate the unsigned Linux bundle and cold-start network boundary.
 3. Use `build-devtest.yml` or a standalone platform workflow when a downloadable development artifact is needed.
-4. Record platform and hardware limitations in the pull request; unsigned CI artifacts are development builds, not production releases.
+4. Push a matching version tag only after Validation succeeds on `main`; the tag workflow publishes the GitHub Release used by the opt-in updater.

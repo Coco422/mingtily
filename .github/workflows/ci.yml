@@ -77,6 +77,12 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Build llama-helper sidecar required by the Tauri manifest
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu -p llama-helper
+          mkdir -p frontend/src-tauri/binaries
+          cp target/x86_64-unknown-linux-gnu/release/llama-helper frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+
       - name: Run Rust tests
         run: cargo test --workspace --lib --bins
 

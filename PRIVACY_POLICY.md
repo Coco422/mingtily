@@ -1,12 +1,12 @@
 # Mingtily Privacy Policy
 
-Last updated: July 24, 2026
+Last updated: July 30, 2026
 
 ## Local-first data handling
 
 Mingtily stores meeting audio, transcripts, speaker labels, summaries, recovery data, settings, templates, and downloaded local models on the user's device. Mingtily does not operate a hosted account or meeting-storage service.
 
-Mingtily does not include usage analytics, telemetry clients, advertising identifiers, or a background application updater.
+Mingtily does not include usage analytics, telemetry clients, or advertising identifiers. Update checks are disabled by default and can be enabled explicitly in Settings.
 
 ## Network activity
 
@@ -15,10 +15,13 @@ A normal application cold start is designed not to contact non-loopback services
 Non-loopback network requests occur only after a user action or configuration that requires them:
 
 - Downloading an ASR, punctuation restoration, speaker diarization, Whisper, or built-in summary model.
+- Manually checking GitHub Releases, or automatically checking after the user has enabled that preference. These requests do not include meeting audio, transcripts, speaker labels, or summaries.
 - Using an external summary provider such as OpenAI, Anthropic, Groq, OpenRouter, or a custom OpenAI-compatible endpoint.
 - Opening an external link selected by the user.
 
 Model downloads are never started automatically during onboarding or application startup.
+
+When an update is available, installation begins only after the user chooses to download it. Updater payloads are verified with Mingtily's Tauri updater public key. This integrity signature is separate from Apple or Windows operating-system code signing.
 
 ## External LLM providers
 

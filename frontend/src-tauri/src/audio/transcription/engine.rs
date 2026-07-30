@@ -20,7 +20,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(
     if selection.provider == crate::sherpa_asr::PROVIDER_ID
         && crate::sherpa_asr::is_online_model(&selection.model)
     {
-        return crate::sherpa_asr::installed_model(app, &selection.model)
+        crate::sherpa_asr::installed_model(app, &selection.model)
             .map_err(|error| error.to_string())?
             .map(|_| ())
             .ok_or_else(|| {
@@ -28,14 +28,56 @@ pub async fn validate_transcription_model_ready<R: Runtime>(
                     "Sherpa ONNX model '{}' is missing or damaged. Download or repair it in Models.",
                     selection.model
                 )
-            });
+            })?;
+    } else {
+        let provider = load_transcription_provider(app, None, None).await?;
+        if !provider.is_model_loaded().await {
+            return Err("The selected transcription model is not ready".to_string());
+        }
     }
 
-    let provider = load_transcription_provider(app, None, None).await?;
-    if provider.is_model_loaded().await {
-        Ok(())
-    } else {
-        Err("The selected transcription model is not ready".to_string())
+    resolve_configured_streaming_model(app).await?;
+    Ok(())
+}
+
+pub async fn resolve_configured_streaming_model<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Option<crate::sherpa_asr::models::InstalledSherpaModel>, String> {
+    let selection = resolve_transcription_selection(app, None, None).await;
+    match crate::sherpa_asr::streaming_config::load_config_if_present(app)
+        .map_err(|error| error.to_string())?
+    {
+        Some(config) => {
+            if !config.enabled {
+                return Ok(None);
+            }
+            if selection.provider == config.provider && selection.model == config.model {
+                return Err(
+                    "Beta live transcription requires a separate finalized model. Select an offline finalized model in Services."
+                        .to_string(),
+                );
+            }
+            crate::sherpa_asr::installed_model(app, &config.model)
+                .map_err(|error| error.to_string())?
+                .map(Some)
+                .ok_or_else(|| {
+                    format!(
+                        "Streaming transcription model '{}' is missing or damaged. Download or repair it in Models.",
+                        config.model
+                    )
+                })
+        }
+        None => {
+            // v0.6 compatibility: an Online Paraformer selected as the only ASR model
+            // keeps its previous live + finalized behavior until the new strategy is saved.
+            if selection.provider != crate::sherpa_asr::PROVIDER_ID
+                || !crate::sherpa_asr::is_online_model(&selection.model)
+            {
+                return Ok(None);
+            }
+            crate::sherpa_asr::installed_model(app, &selection.model)
+                .map_err(|error| error.to_string())
+        }
     }
 }
 

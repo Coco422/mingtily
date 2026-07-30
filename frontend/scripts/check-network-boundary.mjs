@@ -57,10 +57,15 @@ const runtimeSources = [
 ]
   .filter((entry) => typeof entry === 'string' && /\.(?:rs|ts|tsx)$/.test(entry))
   .map((entry) => entry.toLowerCase());
-for (const forbiddenName of ['posthog', 'analytics.json', 'tauri-plugin-updater']) {
+for (const forbiddenName of ['posthog', 'analytics.json']) {
   if (runtimeSources.some((entry) => entry.includes(forbiddenName))) {
     failures.push(`Runtime source tree still contains forbidden entry: ${forbiddenName}`);
   }
+}
+
+const updaterProvider = read('frontend/src/components/UpdateCheckProvider.tsx');
+if (!updaterProvider.includes("localStorage.getItem(AUTO_UPDATE_STORAGE_KEY) === 'true'")) {
+  failures.push('Updater: automatic checks must remain behind an explicit local preference');
 }
 
 if (failures.length > 0) {

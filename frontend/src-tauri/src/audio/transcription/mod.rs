@@ -10,7 +10,8 @@ pub mod worker;
 
 // Re-export commonly used types
 pub use engine::{
-    get_or_init_transcription_engine, load_transcription_provider, resolve_transcription_selection,
+    get_or_init_transcription_engine, load_transcription_provider,
+    resolve_configured_streaming_model, resolve_transcription_selection,
     validate_transcription_model_ready, TranscriptionSelection,
 };
 pub use parakeet_provider::ParakeetProvider;

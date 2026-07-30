@@ -13,8 +13,9 @@ use std::path::Path;
 
 const SAMPLE_RATE: i32 = 16_000;
 const SHORT_TURN_SECONDS: f64 = 0.5;
-const SPEAKER_MATCH_THRESHOLD: f32 = 0.5;
-const MIN_NEW_SPEAKER_SECONDS: f32 = 1.25;
+const SPEAKER_MATCH_THRESHOLD: f32 = 0.4;
+const MIN_NEW_SPEAKER_SECONDS: f32 = 2.0;
+const AUTOMATIC_CLUSTERING_DISTANCE_THRESHOLD: f32 = 0.65;
 const REALTIME_LOCAL_DIARIZATION_MIN_SECONDS: f64 = 3.0;
 const MIN_REALTIME_SEGMENT_SAMPLES: usize = 1_600;
 const MAX_REALTIME_SPEAKERS: usize = 10;
@@ -68,7 +69,7 @@ impl DiarizationEngine {
             },
             clustering: FastClusteringConfig {
                 num_clusters: num_speakers.map(|value| value as i32).unwrap_or(-1),
-                threshold: 0.5,
+                threshold: AUTOMATIC_CLUSTERING_DISTANCE_THRESHOLD,
             },
             min_duration_on: 0.3,
             min_duration_off: 0.5,
@@ -143,12 +144,28 @@ struct SpeakerCentroid {
     weight: f32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct SpeakerTracker {
     centroids: Vec<SpeakerCentroid>,
+    max_speakers: usize,
+}
+
+impl Default for SpeakerTracker {
+    fn default() -> Self {
+        Self::new(None)
+    }
 }
 
 impl SpeakerTracker {
+    fn new(max_speakers: Option<usize>) -> Self {
+        Self {
+            centroids: Vec::new(),
+            max_speakers: max_speakers
+                .unwrap_or(MAX_REALTIME_SPEAKERS)
+                .clamp(1, MAX_REALTIME_SPEAKERS),
+        }
+    }
+
     fn assign(&mut self, embedding: &[f32], weight: f32) -> String {
         let best = self
             .centroids
@@ -161,7 +178,11 @@ impl SpeakerTracker {
 
         let index = match best {
             Some((index, score)) if score >= SPEAKER_MATCH_THRESHOLD => index,
-            Some((index, _)) if self.centroids.len() >= MAX_REALTIME_SPEAKERS => index,
+            Some((index, _)) if self.centroids.len() >= self.max_speakers => {
+                // A user-supplied speaker count is a hard session cap. Reuse the
+                // closest identity without pulling its centroid toward a weak match.
+                return self.centroids[index].name.clone();
+            }
             Some((index, _)) if weight < MIN_NEW_SPEAKER_SECONDS => {
                 // Short utterances do not carry enough speaker information to
                 // justify creating a new identity. Reuse the closest existing
@@ -199,10 +220,20 @@ pub struct RealtimeSpeakerSession {
 }
 
 impl RealtimeSpeakerSession {
-    pub fn new(paths: &SpeakerModelPaths) -> Result<Self> {
+    pub fn new(paths: &SpeakerModelPaths, max_speakers: Option<usize>) -> Result<Self> {
         Ok(Self {
             engine: DiarizationEngine::new(paths, None)?,
-            tracker: SpeakerTracker::default(),
+            tracker: SpeakerTracker::new(max_speakers),
+        })
+    }
+
+    fn new_for_final_refinement(
+        paths: &SpeakerModelPaths,
+        num_speakers: Option<usize>,
+    ) -> Result<Self> {
+        Ok(Self {
+            engine: DiarizationEngine::new(paths, num_speakers)?,
+            tracker: SpeakerTracker::new(num_speakers),
         })
     }
 
@@ -315,14 +346,22 @@ pub fn diarize_audio_file_in_windows(
     audio_path: &Path,
     paths: &SpeakerModelPaths,
     transcript_ranges: &[(f64, f64)],
+    num_speakers: Option<usize>,
 ) -> Result<Vec<DiarizationTurn>> {
-    diarize_audio_file_in_windows_with_progress(audio_path, paths, transcript_ranges, |_| {})
+    diarize_audio_file_in_windows_with_progress(
+        audio_path,
+        paths,
+        transcript_ranges,
+        num_speakers,
+        |_| {},
+    )
 }
 
 pub(crate) fn diarize_audio_file_in_windows_with_progress<F>(
     audio_path: &Path,
     paths: &SpeakerModelPaths,
     transcript_ranges: &[(f64, f64)],
+    num_speakers: Option<usize>,
     mut on_progress: F,
 ) -> Result<Vec<DiarizationTurn>>
 where
@@ -346,7 +385,7 @@ where
         })
         .collect::<Vec<_>>();
     let total_windows = windows.len();
-    let mut session = RealtimeSpeakerSession::new(paths)?;
+    let mut session = RealtimeSpeakerSession::new_for_final_refinement(paths, num_speakers)?;
     let mut turns = Vec::new();
 
     for (index, window) in windows.into_iter().enumerate() {
@@ -834,6 +873,15 @@ mod tests {
             tracker.assign(&embedding, 2.0);
         }
         assert_eq!(tracker.centroids.len(), MAX_REALTIME_SPEAKERS);
+    }
+
+    #[test]
+    fn tracker_honors_configured_speaker_cap() {
+        let mut tracker = SpeakerTracker::new(Some(2));
+        tracker.assign(&[1.0, 0.0, 0.0], 3.0);
+        tracker.assign(&[0.0, 1.0, 0.0], 3.0);
+        tracker.assign(&[0.0, 0.0, 1.0], 3.0);
+        assert_eq!(tracker.centroids.len(), 2);
     }
 
     #[test]

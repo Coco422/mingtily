@@ -6,7 +6,7 @@
 
 - All DevTest artifacts are unsigned and require no repository secrets.
 - Uploading artifacts is enabled by default with 30-day retention.
-- Signing and notarization are not implemented in the current workflows and are not a 0.5.x acceptance requirement.
+- Operating-system signing and notarization are not implemented in DevTest workflows. The separate tag workflow uses only the Tauri updater integrity key.
 
 ## Outputs
 

@@ -34,6 +34,8 @@ Build the desktop bundle:
 pnpm tauri:build
 ```
 
+Normal local and development builds keep updater-artifact generation off and require no signing secret. Tagged releases overlay `src-tauri/tauri.release.conf.json`, use the repository's Tauri updater signing secret, and publish `latest.json` through GitHub Actions.
+
 The `tauri:dev` and `tauri:build` scripts use `scripts/tauri-auto.js` to select the platform build path and prepare the `llama-helper` sidecar.
 
 ## Structure
@@ -56,5 +58,6 @@ The current app does not require the archived FastAPI server under `backend/`. T
 - Validate audio, ASR, speaker, and Provider changes in the packaged or development Tauri app.
 - External summary Providers are optional; local recording and transcription must remain usable without them.
 - Diagnostic logs remain local, rotate automatically, and are exported only after a user action in Settings.
+- Automatic GitHub Release checks are disabled by default and run only after the user enables them.
 
 See the repository [README](../README.md), [Roadmap](../ROADMAP.md), and [project agent rules](../AGENTS.md) for current product and engineering boundaries.

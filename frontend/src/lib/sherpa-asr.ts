@@ -29,6 +29,12 @@ export interface SherpaAsrDownloadProgress {
   status: string;
 }
 
+export interface StreamingTranscriptionConfig {
+  enabled: boolean;
+  provider: typeof SHERPA_ASR_PROVIDER_ID;
+  model: string;
+}
+
 export const SHERPA_ASR_PROVIDER_ID = 'sherpa-onnx' as const;
 export const SENSEVOICE_MODEL_ID = 'sensevoice-small-int8';
 export const PARAFORMER_SMALL_MODEL_ID = 'paraformer-zh-small-int8';
@@ -37,6 +43,10 @@ export const QWEN3_ASR_MODEL_ID = 'qwen3-asr-0.6b-int8';
 
 export const SherpaAsrAPI = {
   listModels: () => invoke<SherpaAsrModelStatus[]>('sherpa_asr_list_models'),
+  getStreamingConfig: () =>
+    invoke<StreamingTranscriptionConfig>('sherpa_asr_get_streaming_config'),
+  saveStreamingConfig: (config: StreamingTranscriptionConfig) =>
+    invoke<void>('sherpa_asr_save_streaming_config', { config }),
   downloadModel: (modelId: string) =>
     invoke<void>('sherpa_asr_download_model', { modelId }),
   deleteModel: (modelId: string) =>

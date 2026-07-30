@@ -18,6 +18,8 @@ pub struct SpeakerDiarizationConfig {
     pub enabled: bool,
     pub provider: String,
     pub model: String,
+    #[serde(default)]
+    pub speaker_count: Option<usize>,
 }
 
 impl Default for SpeakerDiarizationConfig {
@@ -26,6 +28,7 @@ impl Default for SpeakerDiarizationConfig {
             enabled: true,
             provider: PROVIDER_ID.to_string(),
             model: MODEL_ID.to_string(),
+            speaker_count: None,
         }
     }
 }
@@ -43,6 +46,12 @@ impl SpeakerDiarizationConfig {
                 "Unsupported speaker diarization model: {}",
                 self.model
             ));
+        }
+        if self
+            .speaker_count
+            .is_some_and(|count| !(1..=10).contains(&count))
+        {
+            return Err(anyhow!("Speaker count must be between 1 and 10"));
         }
         Ok(())
     }
@@ -109,6 +118,7 @@ mod tests {
                 enabled: true,
                 provider: "sherpa-onnx".to_string(),
                 model: "sherpa-v1".to_string(),
+                speaker_count: None,
             }
         );
     }
@@ -119,6 +129,18 @@ mod tests {
         assert_eq!(value["enabled"], true);
         assert_eq!(value["provider"], "sherpa-onnx");
         assert_eq!(value["model"], "sherpa-v1");
+        assert!(value["speakerCount"].is_null());
+    }
+
+    #[test]
+    fn older_config_without_speaker_count_remains_compatible() {
+        let value = serde_json::json!({
+            "enabled": true,
+            "provider": "sherpa-onnx",
+            "model": "sherpa-v1"
+        });
+        let config: SpeakerDiarizationConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(config.speaker_count, None);
     }
 
     #[test]
@@ -129,6 +151,10 @@ mod tests {
 
         let mut config = SpeakerDiarizationConfig::default();
         config.model = "unknown".to_string();
+        assert!(config.validate().is_err());
+
+        let mut config = SpeakerDiarizationConfig::default();
+        config.speaker_count = Some(11);
         assert!(config.validate().is_err());
     }
 }

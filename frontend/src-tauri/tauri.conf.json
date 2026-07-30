@@ -1,7 +1,7 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
     "productName": "Mingtily",
-    "version": "0.6.0",
+    "version": "0.6.1",
     "identifier": "com.mingcheng.mingtily",
     "build": {
         "frontendDist": "../out",
@@ -63,6 +63,8 @@
                         "store:default",
                         "notification:default",
                         "notification:allow-is-permission-granted",
+                        "updater:default",
+                        "process:default",
                         {
                             "identifier": "fs:scope",
                             "allow": [
@@ -97,6 +99,15 @@
         "externalBin": [
             "binaries/llama-helper",
             "binaries/ffmpeg"
-        ]
+        ],
+        "createUpdaterArtifacts": false
+    },
+    "plugins": {
+        "updater": {
+            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY0NjhCRjMyRjJGQzI3ODgKUldTSUovenlNcjlvWk50RXR1S3VySlozdjM1dnlJUEFlOFBkU1R1Y1RBK1d4Q283UkpmWXlLTGMK",
+            "endpoints": [
+                "https://github.com/Coco422/mingtily/releases/latest/download/latest.json"
+            ]
+        }
     }
 }

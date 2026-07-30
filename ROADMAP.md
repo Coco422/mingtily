@@ -13,14 +13,14 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - **模型与服务分离**：Models 管理本地资产，Services 决定各项能力实际使用的 Provider 和模型。
 - **中文体验优先**：优先改善中文、粤语及中英混合场景，同时保持英文和现有模型可用。
 - **失败可降级**：说话人分离、摘要或单个 Provider 失败时，不应丢失录音和原始转写。
-- **隐私边界可验证**：不加入使用分析、广告追踪或后台更新；远程调用前明确说明数据去向。
+- **隐私边界可验证**：不加入使用分析或广告追踪；更新检查默认关闭，用户明确启用后才访问 GitHub Release；其他远程调用前明确说明数据去向。
 
-## 当前基础：0.6.0
+## 当前基础：0.6.1
 
-0.6.0 在独立 fork 与离线边界稳定化的基础上，完成了中文 ASR 扩展、统一转写 Provider、模型资产管理和长会议可靠性优化。
+0.6.1 在 0.6.0 的中文 ASR、统一 Provider 和长会议稳定化基础上，补齐实时增强、说话人数量控制、流式摘要反馈和可选更新发布链路。
 
 - Mingtily 品牌、独立 bundle identifier 和全新本地数据空间。
-- 移除遥测、后台更新、PRO/订阅及上游营销入口。
+- 移除遥测、PRO/订阅、上游营销和 Meetily 私有更新基础设施。
 - `zh-CN`、`en-US` 全应用国际化，界面语言与转写语言相互独立。
 - 设置页重构为“常规 / 录音 / 模型 / 服务 / Beta”。
 - Models 统一管理 Whisper、Parakeet、Speaker Diarization、本地摘要和 Ollama 模型资产。
@@ -37,12 +37,12 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - PR 自动执行 i18n、前端构建、网络边界静态审计、Rust fmt/test/check。
 - Linux PR 构建无签名 DEB，并对冷启动的非 loopback 连接进行运行时检查。
 - macOS Apple Silicon、Windows x64 和 Linux x64 提供不依赖 secrets 的手动无签名构建。
-- 当前工作流不包含 Apple Developer、DigiCert、notarization 或正式 Release 自动化。
+- tag 工作流会生成三平台 GitHub Release、Tauri updater 签名产物和 `latest.json`；Apple Developer、DigiCert 与 notarization 仍未启用。
 - 录音 transcript 保存、speaker 最终标签、导入格式、模型损坏和恢复状态具有直接回归测试。
 
-## 当前开发进度：0.6.x 主线
+## 0.6.1：实时反馈、说话人数与更新链路
 
-当前开发分支在 0.6.0 基础上完成了以下体验与可靠性改进；跨平台真实设备和正式发布验证仍按后续里程碑推进。
+本版本完成以下体验与可靠性改进；跨平台真实设备和操作系统签名验证仍按后续里程碑推进。
 
 - 录音界面持续显示有效录音时长；停止后按音频停止、剩余转写、模型释放、录音保存和说话人校正展示阶段与进度。
 - 修复 VAD 强制 flush 片段的时间轴换算，避免停止录音时末尾片段时间翻倍。
@@ -50,13 +50,17 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 内置 AI、OpenAI、Anthropic、Groq、OpenRouter、Ollama 和 OpenAI Compatible 摘要支持真实流式输出；`<think>` 内容实时展示、结束后折叠，且不进入最终摘要。
 - 新增可选的 Online Paraformer zh/en int8：
   - Models 仅在用户点击后下载固定 revision 与 SHA256 校验资产，下载完成不自动切换当前服务。
-  - Services 主动选择后，录音混音音频进入长期 `OnlineStream`，通过独立 revision 事件展示可修订文本。
-  - provisional hypothesis 不写入 SQLite、IndexedDB 或 transcript JSON；现有 VAD 最终片段继续负责持久化与 speaker label。
-  - 连续 session 与 VAD 最终解码共享同一 `OnlineRecognizer`，推理运行在采集热路径之外。
+  - Services 提供“稳定模式 · 单模型”和“Beta · 实时增强”；Beta 模式分别选择流式模型与最终模型。
+  - 流式模型接收连续混音音频，通过独立 revision 事件展示可修订文本；最终模型独立处理 VAD 完成后的长段。
+  - provisional hypothesis 不写入 SQLite、IndexedDB 或 transcript JSON；只有最终模型输出负责持久化与 speaker label。
+  - 流式与最终模型分别校验安装状态，不能选择同一个连续流式模型；双模型推理均运行在采集热路径之外。
+- 说话人分离支持“自动 / 指定 1–10 人”：自动模式使用更保守的聚类和短句建新身份规则；指定人数会限制实时身份数量，并用于停止后的全局校正。
+- 设置页提供手动检查更新和默认关闭的自动检查开关；启用后只访问 Mingtily GitHub Release，不发送会议数据。
+- tag 发布工作流先创建草稿，三平台成功后上传安装包、签名 updater 产物和 `latest.json`，最后再发布 Release。
 
 ## 0.6.x：后续维护项
 
-目标：在不扩大产品边界的前提下，继续提高 0.6.0 的真实设备可靠性和社区可用性。
+目标：在不扩大产品边界的前提下，继续提高 0.6.1 的真实设备可靠性和社区可用性。
 
 - 补齐录音、导入、重新转写、speaker label、摘要和数据恢复的回归测试。
 - 持续清理 i18n 遗漏、窄窗口布局和中英文文案长度问题。
@@ -97,8 +101,9 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 已完成 Online Paraformer bilingual zh/en 的首版连续流式转写、partial hypothesis 和 final revision。模型为 `csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en`，固定 revision `8e40c43232a1c5c66c82111efc5820d3accca11b`；int8 资产约 226 MiB。
 - 已完成独立 session 生命周期与 provisional/final 事件契约，不把临时假设伪装成普通持久化 transcript。
 - 已直接使用 sherpa-onnx `OnlineRecognizer` / `OnlineStream` 的 `is_ready`、`is_endpoint`、`reset` 与 `RecognizerResult.is_final`，推理与音频采集、混音热路径隔离。
+- 已完成 Beta 双线识别策略：Online Paraformer 负责连续临时文本，用户另选 SenseVoice、Offline Paraformer、Qwen3-ASR、Whisper 或 Parakeet 作为最终模型；下载模型不会自动启用该策略。
 - 已在 macOS Apple Silicon 无签名安装包中完成模型下载、显式服务切换、真实系统音频流式修订、录音时长、停止进度和 final-only 持久化 smoke test。
-- 待补充流式队列背压、长会议 soak test、不同设备的录音启动耗时、首字延迟与 revision 稳定性数据。
+- 待补充双模型峰值内存、流式队列背压、长会议 soak test、不同设备的录音启动耗时、首字延迟与 revision 稳定性数据。
 - Offline Paraformer Large int8：本地质量优先档。
 - FunASR Nano：作为实验模型评估质量、内存、包体和许可证，不作为默认下载。
 - 为不同模型记录首段延迟、实时率、峰值内存和长会议稳定性。
@@ -164,7 +169,7 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 ## 当前不做
 
 - 不加入遥测、行为分析、广告追踪或强制账户系统。
-- 不恢复后台自动更新；发布包由用户主动下载和安装。
+- 不启用默认后台更新；更新检查必须由用户手动触发或明确开启，安装和重启仍由用户确认。
 - 不强制所有 AI 推理都使用本地模型。
 - 不在近期重写 JobManager、Cancel、音频混音或现有 VAD 算法。
 - 不做说话人实名识别、声纹注册或默认的跨会议身份记忆。

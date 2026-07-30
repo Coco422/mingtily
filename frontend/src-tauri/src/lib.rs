@@ -415,6 +415,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
@@ -578,6 +580,8 @@ pub fn run() {
             sherpa_asr::commands::sherpa_asr_list_models,
             sherpa_asr::commands::sherpa_asr_download_model,
             sherpa_asr::commands::sherpa_asr_delete_model,
+            sherpa_asr::commands::sherpa_asr_get_streaming_config,
+            sherpa_asr::commands::sherpa_asr_save_streaming_config,
             // Local punctuation restoration model commands
             punctuation::commands::punctuation_get_status,
             punctuation::commands::punctuation_download_model,

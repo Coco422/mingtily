@@ -5,8 +5,7 @@
 
 use crate::speaker_diarization::engine::diarize_audio_file_in_windows_with_progress;
 use crate::speaker_diarization::{
-    installed_model_paths, is_enabled as speaker_diarization_is_enabled, refine_speaker_labels,
-    SpeakerLabelUpdate,
+    installed_model_paths, refine_speaker_labels, SpeakerDiarizationConfig, SpeakerLabelUpdate,
 };
 use anyhow::Result;
 use log::{error, info, warn};
@@ -62,19 +61,6 @@ pub struct TranscriptionStatus {
     pub chunks_in_queue: usize,
     pub is_processing: bool,
     pub last_activity_ms: u64,
-}
-
-async fn configured_streaming_model<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Result<Option<crate::sherpa_asr::models::InstalledSherpaModel>, String> {
-    let selection = transcription::resolve_transcription_selection(app, None, None).await;
-    if selection.provider != crate::sherpa_asr::PROVIDER_ID
-        || !crate::sherpa_asr::is_online_model(&selection.model)
-    {
-        return Ok(None);
-    }
-
-    crate::sherpa_asr::installed_model(app, &selection.model).map_err(|error| error.to_string())
 }
 
 fn start_recording_transcription_tasks<R: Runtime>(
@@ -139,7 +125,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
-    let streaming_model = configured_streaming_model(&app).await?;
+    let streaming_model = transcription::resolve_configured_streaming_model(&app).await?;
 
     // Async-first approach - no more blocking operations!
     info!("🚀 Starting async recording initialization");
@@ -409,7 +395,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
-    let streaming_model = configured_streaming_model(&app).await?;
+    let streaming_model = transcription::resolve_configured_streaming_model(&app).await?;
 
     // Parse devices
     let mic_device = if let Some(ref name) = mic_device_name {
@@ -935,7 +921,17 @@ async fn refine_recording_speakers<R: Runtime>(
             .collect::<Vec<_>>()
     };
 
-    if !speaker_diarization_is_enabled(app) {
+    let speaker_config = match crate::speaker_diarization::configuration::load_config(app) {
+        Ok(config) => config,
+        Err(error) => {
+            warn!(
+                "Unable to read speaker diarization settings during stop refinement; using compatible defaults: {}",
+                error
+            );
+            SpeakerDiarizationConfig::default()
+        }
+    };
+    if !speaker_config.enabled {
         info!("Speaker diarization disabled; skipping global label refinement");
         return fallback();
     }
@@ -977,6 +973,7 @@ async fn refine_recording_speakers<R: Runtime>(
             std::path::Path::new(&audio_path),
             &paths,
             &diarization_ranges,
+            speaker_config.speaker_count,
             |window| {
                 let progress =
                     speaker_refinement_progress(window.completed_windows, window.total_windows);

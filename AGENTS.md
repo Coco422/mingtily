@@ -10,12 +10,12 @@ The Python/FastAPI code under `backend/` is a legacy upstream archive. Do not ad
 
 ## Product and privacy boundaries
 
-- Do not add telemetry, usage analytics, advertising identifiers, or background update checks.
-- Cold start and ordinary local use must not initiate non-loopback requests. Explicit localhost discovery is allowed.
+- Do not add telemetry, usage analytics, or advertising identifiers. Remote update checks must be disabled by default and require explicit user opt-in.
+- Cold start and ordinary local use must not initiate non-loopback requests unless the user previously enabled a disclosed network feature such as automatic GitHub Release checks. Explicit localhost discovery is allowed.
 - Model downloads must be initiated by the user and must retain integrity verification.
 - External LLM providers are supported, but only after explicit user configuration or action. Clearly disclose when transcript content will leave the device.
 - Do not restore Meetily PRO, subscription, upstream marketing, or affiliation language. Preserve the independent-fork statement in public-facing legal/about surfaces.
-- Do not reintroduce Meetily private services, updater infrastructure, licensing endpoints, or signing secrets.
+- Do not reintroduce Meetily private services, updater endpoints, licensing infrastructure, or signing secrets. Mingtily updates must use the public Mingtily GitHub Release endpoint.
 
 ## Architecture boundaries
 
@@ -93,7 +93,8 @@ On macOS, native dependencies such as `cidre` may require a complete Xcode insta
 - Pull-request validation must never require signing credentials.
 - macOS sidecars and the Tauri bundle must be built for the same target architecture.
 - Never print credentials or credential fragments in workflow logs.
-- Current workflows are unsigned and must not reference signing secrets. Signing and notarization should be designed later using Mingtily-owned credentials and a reviewed draft-release process.
+- Pull-request and manual development workflows must stay unsigned and secret-free. Tagged releases may use the Mingtily-owned Tauri updater key, create a draft first, and publish only after all platform artifacts and `latest.json` succeed.
+- Apple Developer ID, notarization, and Windows installer signing remain deferred; updater integrity signing must not be described as operating-system code signing.
 
 ## Documentation
 
