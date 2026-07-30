@@ -172,10 +172,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[cfg_attr(
-        target_os = "linux",
-        ignore = "requires a real output device; headless ALSA can abort during native cleanup"
-    )]
     async fn test_get_output_device() {
         let result = get_active_audio_output().await;
         assert!(result.is_ok(), "Should be able to get output device");

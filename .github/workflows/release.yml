@@ -48,10 +48,6 @@ jobs:
             target: x86_64-pc-windows-msvc
             args: --target x86_64-pc-windows-msvc --config src-tauri/tauri.release.conf.json
             helper_features: ""
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            args: --target x86_64-unknown-linux-gnu --features openblas --bundles appimage,deb --config src-tauri/tauri.release.conf.json
-            helper_features: ""
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -80,12 +76,6 @@ jobs:
         with:
           workspaces: ". -> target"
           key: release-${{ matrix.target }}-v1
-
-      - name: Install Linux dependencies
-        if: contains(matrix.platform, 'ubuntu')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libopenblas-dev libx11-dev libxtst-dev libxrandr-dev fuse libfuse2
 
       - name: Install Vulkan SDK on Windows
         if: contains(matrix.platform, 'windows')
@@ -154,11 +144,10 @@ jobs:
         run: |
           assets=$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name')
           grep -qx 'latest.json' <<< "$assets"
-          test "$(grep -c '\.sig$' <<< "$assets")" -ge 3
+          test "$(grep -c '\.sig$' <<< "$assets")" -ge 2
           manifest_dir=$(mktemp -d)
           trap 'rm -rf "$manifest_dir"' EXIT
           gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --pattern latest.json --dir "$manifest_dir"
           jq -e '.platforms["darwin-aarch64"].signature | length > 0' "$manifest_dir/latest.json"
           jq -e '.platforms["windows-x86_64"].signature | length > 0' "$manifest_dir/latest.json"
-          jq -e '.platforms["linux-x86_64"].signature | length > 0' "$manifest_dir/latest.json"
           gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest

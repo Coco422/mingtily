@@ -37,7 +37,7 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - PR 自动执行 i18n、前端构建、网络边界静态审计、Rust fmt/test/check。
 - Linux PR 构建无签名 DEB，并对冷启动的非 loopback 连接进行运行时检查。
 - macOS Apple Silicon、Windows x64 和 Linux x64 提供不依赖 secrets 的手动无签名构建。
-- tag 工作流会生成三平台 GitHub Release、Tauri updater 签名产物和 `latest.json`；Apple Developer、DigiCert 与 notarization 仍未启用。
+- tag 工作流会生成 macOS Apple Silicon 与 Windows x64 GitHub Release、Tauri updater 签名产物和 `latest.json`；Linux updater 暂停到 ONNX Runtime 冲突修复并完成真实录音验证之后，Apple Developer、DigiCert 与 notarization 仍未启用。
 - 录音 transcript 保存、speaker 最终标签、导入格式、模型损坏和恢复状态具有直接回归测试。
 
 ## 0.6.1：实时反馈、说话人数与更新链路
@@ -56,7 +56,7 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
   - 流式与最终模型分别校验安装状态，不能选择同一个连续流式模型；双模型推理均运行在采集热路径之外。
 - 说话人分离支持“自动 / 指定 1–10 人”：自动模式使用更保守的聚类和短句建新身份规则；指定人数会限制实时身份数量，并用于停止后的全局校正。
 - 设置页提供手动检查更新和默认关闭的自动检查开关；启用后只访问 Mingtily GitHub Release，不发送会议数据。
-- tag 发布工作流先创建草稿，三平台成功后上传安装包、签名 updater 产物和 `latest.json`，最后再发布 Release。
+- tag 发布工作流先创建草稿，macOS Apple Silicon 与 Windows x64 成功后上传安装包、签名 updater 产物和 `latest.json`，最后再发布 Release。
 
 ## 0.6.x：后续维护项
 
@@ -70,6 +70,7 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 将构建期 FFmpeg sidecar 从当前上游二进制镜像迁移到固定版本、带 SHA256 且可复现的独立来源。
 - 清理 workspace member 中当前被 Cargo 忽略的 `[patch.crates-io]` 与 `[profile.release]` 配置，并用根 workspace 配置表达真实构建意图。
 - 验证 Windows x64 与 Linux x64 的编译、安装和基础录音功能，明确仍不支持的能力。
+- 统一 Linux 下 Silero/Parakeet 使用的 ORT 与 Sherpa-ONNX 静态运行时，恢复 VAD 原生测试、真实录音验证和 tagged updater 产物。
 - 根据 CI 和真实设备结果修复 macOS、Windows、Linux 打包差异。
 - 补充无签名安装包的安装、系统拦截提示和卸载说明。
 

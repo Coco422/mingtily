@@ -8,7 +8,7 @@
 
 Mingtily is a desktop meeting assistant for people who want recordings, transcripts, speaker labels, and local models to stay on their own device. External LLM Providers remain available as an explicit choice when cloud models provide better summary quality or performance.
 
-Current version: **0.6.1**. GitHub Actions publish tagged development releases for macOS Apple Silicon, Windows x64, and Linux x64. Installers remain unsigned at the operating-system level, while updater payloads are integrity-signed by Mingtily.
+Current version: **0.6.1**. GitHub Actions publish tagged development releases for macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while updater payloads are integrity-signed by Mingtily. Linux remains available as an unsigned development-build target while its ONNX runtime integration is being unified.
 
 ## Highlights
 
@@ -58,7 +58,7 @@ Parakeet v3 is pinned to revision `8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce` of 
 |---|---|---|
 | macOS Apple Silicon | Primary development platform | Tagged unsigned DMG/app releases plus integrity-signed updater artifacts; microphone, system audio, Metal Whisper, import, speaker diarization, and summaries. |
 | Windows x64 | CI/dev-test target | Tagged unsigned MSI/NSIS releases plus updater artifacts; audio and installer behavior still need broader hardware testing. |
-| Linux x64 | CI/dev-test target | Tagged AppImage/DEB releases; pull requests also run a cold-start loopback-network smoke test. Desktop audio varies by distribution. |
+| Linux x64 | CI/dev-test target | Unsigned manual AppImage/DEB builds and pull-request cold-start network checks. Tagged updater releases are paused until the Silero/ORT and static Sherpa-ONNX runtime conflict is resolved and recording is revalidated. |
 
 Code signing, Apple notarization, and production installer signing are deferred until the project has appropriate Mingtily-owned credentials and community demand.
 
@@ -107,7 +107,7 @@ pnpm tauri:build
 - `Validation` runs frontend, i18n, network-boundary, formatting, Rust test, and Rust check gates.
 - `Build and Test - Linux` also builds an unsigned Linux package on relevant pull requests and checks cold-start network connections under `strace`.
 - The manual `Build and Test - DevTest`, macOS, Windows, and Linux workflows produce unsigned development artifacts without repository secrets.
-- Pushing a matching `vX.Y.Z` tag creates a draft, builds all supported release targets, uploads signed updater archives and `latest.json`, then publishes the GitHub Release after every platform succeeds.
+- Pushing a matching `vX.Y.Z` tag creates a draft, builds the macOS Apple Silicon and Windows x64 release targets, uploads signed updater archives and `latest.json`, then publishes after both platforms succeed. Linux remains a separate unsigned development-build target for now.
 - Apple notarization and operating-system installer signing remain deferred.
 
 On Linux, install the WebKitGTK, app-indicator, ALSA, X11, and packaging dependencies shown in [`.github/workflows/build-linux.yml`](.github/workflows/build-linux.yml). See the official [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for platform setup.
