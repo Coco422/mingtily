@@ -280,8 +280,16 @@ export function getRecommendedModel(systemSpecs?: { ram: number; cores: number }
 import { invoke } from '@tauri-apps/api/core';
 
 export class WhisperAPI {
-  static async init(): Promise<void> {
-    await invoke('whisper_init');
+  private static initPromise: Promise<void> | null = null;
+
+  static init(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = invoke<void>('whisper_init').catch((error) => {
+        this.initPromise = null;
+        throw error;
+      });
+    }
+    return this.initPromise;
   }
 
   static async getAvailableModels(): Promise<ModelInfo[]> {

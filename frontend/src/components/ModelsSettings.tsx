@@ -1,12 +1,13 @@
 'use client';
 
 import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react';
-import { AlertTriangle, AudioLines, Bot, MessageSquareText, Users } from 'lucide-react';
+import { AlertTriangle, AudioLines, Bot, ChevronDown, FileCog, MessageSquareText, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ModelManager } from '@/components/WhisperModelManager';
 import { ParakeetModelManager } from '@/components/ParakeetModelManager';
 import { SherpaAsrModelManager } from '@/components/SherpaAsrModelManager';
 import { PunctuationModelManager } from '@/components/PunctuationModelManager';
+import { HomophoneReplacerManager } from '@/components/HomophoneReplacerManager';
 import { SpeakerDiarizationModelManager } from '@/components/SpeakerDiarizationModelManager';
 import { BuiltInModelManager } from '@/components/BuiltInModelManager';
 import { OllamaModelManager } from '@/components/OllamaModelManager';
@@ -81,26 +82,72 @@ function ModelSection({
   icon: Icon,
   title,
   description,
+  defaultOpen = false,
   children,
 }: {
   icon: typeof Bot;
   title: string;
   description: string;
+  defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
+
   return (
     <section className="overflow-hidden rounded-lg border border-black/[0.08] bg-white">
-      <div className="flex items-start gap-3 border-b border-black/[0.08] bg-gray-50/60 px-5 py-4">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-start gap-3 bg-gray-50/60 px-5 py-4 text-left transition-colors hover:bg-gray-100/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-inset"
+      >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-purple-100 bg-purple-50 text-purple-700">
           <Icon className="h-4 w-4" />
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h2 className="text-base font-semibold leading-6 text-gray-900">{title}</h2>
           <p className="mt-0.5 text-xs leading-5 text-gray-600">{description}</p>
         </div>
-      </div>
-      <div className="p-4">{children}</div>
+        <ChevronDown
+          className={`mt-1 h-4 w-4 shrink-0 text-gray-500 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open && <div className="border-t border-black/[0.08] p-4">{children}</div>}
     </section>
+  );
+}
+
+function ModelProviderGroup({
+  title,
+  description,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  description: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="rounded-md border border-black/[0.08] bg-white">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-inset"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-gray-900">{title}</div>
+          <div className="mt-0.5 text-xs leading-5 text-gray-500">{description}</div>
+        </div>
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-gray-500 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open && <div className="border-t border-black/[0.08] p-3">{children}</div>}
+    </div>
   );
 }
 
@@ -170,27 +217,45 @@ function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
         icon={AudioLines}
         title={t('sections.transcription')}
         description={t('sections.transcriptionDescription')}
+        defaultOpen
       >
-        <div className="space-y-2">
-          <SherpaAsrModelManager
-            selectedModel={
-              transcriptModelConfig.provider === 'sherpa-onnx'
-                ? transcriptModelConfig.model
-                : undefined
-            }
-            additionalSelectedModels={
-              streamingConfig?.enabled ? [streamingConfig.model] : []
-            }
-            onOpenServices={onOpenServices}
-          />
-          <ModelManager
-            mode="manage"
-            selectedModel={transcriptModelConfig.provider === 'localWhisper' ? transcriptModelConfig.model : undefined}
-          />
-          <ParakeetModelManager
-            mode="manage"
-            selectedModel={transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : undefined}
-          />
+        <div className="space-y-3">
+          <ModelProviderGroup
+            title={t('sections.providerGroups.sherpa')}
+            description={t('sections.providerGroups.sherpaDescription')}
+            defaultOpen
+          >
+            <SherpaAsrModelManager
+              selectedModel={
+                transcriptModelConfig.provider === 'sherpa-onnx'
+                  ? transcriptModelConfig.model
+                  : undefined
+              }
+              additionalSelectedModels={
+                streamingConfig?.enabled ? [streamingConfig.model] : []
+              }
+              onOpenServices={onOpenServices}
+            />
+          </ModelProviderGroup>
+          <ModelProviderGroup
+            title={t('sections.providerGroups.whisper')}
+            description={t('sections.providerGroups.whisperDescription')}
+            defaultOpen
+          >
+            <ModelManager
+              mode="manage"
+              selectedModel={transcriptModelConfig.provider === 'localWhisper' ? transcriptModelConfig.model : undefined}
+            />
+          </ModelProviderGroup>
+          <ModelProviderGroup
+            title={t('sections.providerGroups.parakeet')}
+            description={t('sections.providerGroups.parakeetDescription')}
+          >
+            <ParakeetModelManager
+              mode="manage"
+              selectedModel={transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : undefined}
+            />
+          </ModelProviderGroup>
         </div>
       </ModelSection>
 
@@ -200,6 +265,14 @@ function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
         description={t('sections.punctuationDescription')}
       >
         <PunctuationModelManager />
+      </ModelSection>
+
+      <ModelSection
+        icon={FileCog}
+        title={t('sections.terminology')}
+        description={t('sections.terminologyDescription')}
+      >
+        <HomophoneReplacerManager />
       </ModelSection>
 
       <ModelSection

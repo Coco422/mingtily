@@ -22,7 +22,7 @@ assignees: ''
 
 ## Environment
 - OS and version: [e.g., macOS 15, Windows 11, Ubuntu 24.04]
-- Mingtily version: [e.g., 0.6.1]
+- Mingtily version: [e.g., 0.6.2]
 - Installation: [local dev build, GitHub Actions artifact, release package]
 - Hardware: [CPU, RAM, GPU if relevant]
 - Transcription Provider/model and language: [if relevant]

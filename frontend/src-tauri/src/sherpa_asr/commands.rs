@@ -1,6 +1,8 @@
 use super::models::{self, SherpaAsrModelStatus, PROVIDER_ID};
 use super::streaming_config::{self, StreamingTranscriptionConfig};
+use super::{enhancement, SherpaAsrEnhancementConfig};
 use tauri::{AppHandle, Manager, Runtime};
+use tauri_plugin_dialog::DialogExt;
 
 #[tauri::command]
 pub async fn sherpa_asr_get_streaming_config<R: Runtime>(
@@ -32,6 +34,81 @@ pub fn sherpa_asr_save_streaming_config<R: Runtime>(
     config: StreamingTranscriptionConfig,
 ) -> Result<(), String> {
     streaming_config::save_config(&app, &config).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn sherpa_asr_get_enhancement_config<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<SherpaAsrEnhancementConfig, String> {
+    enhancement::load_config(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn sherpa_asr_save_enhancement_config<R: Runtime>(
+    app: AppHandle<R>,
+    config: SherpaAsrEnhancementConfig,
+) -> Result<SherpaAsrEnhancementConfig, String> {
+    enhancement::save_config(&app, config).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn sherpa_asr_get_homophone_status<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<enhancement::HomophoneReplacerStatus, String> {
+    enhancement::status(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn sherpa_asr_download_homophone_lexicon<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<(), String> {
+    enhancement::download_lexicon(&app)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn sherpa_asr_delete_homophone_lexicon<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<(), String> {
+    enhancement::delete_lexicon(&app)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn sherpa_asr_import_homophone_rules<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Vec<enhancement::HomophoneRuleStatus>, String> {
+    let app_for_dialog = app.clone();
+    let selected = tokio::task::spawn_blocking(move || {
+        app_for_dialog
+            .dialog()
+            .file()
+            .add_filter("Sherpa homophone rule", &["fst"])
+            .blocking_pick_files()
+    })
+    .await
+    .map_err(|error| format!("Homophone rule dialog failed: {error}"))?;
+
+    let Some(selected) = selected else {
+        return enhancement::status(&app)
+            .map(|status| status.rules)
+            .map_err(|error| error.to_string());
+    };
+    let paths = selected
+        .into_iter()
+        .map(|path| path.into_path().map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    enhancement::import_rule_files(&app, paths).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn sherpa_asr_delete_homophone_rule<R: Runtime>(
+    app: AppHandle<R>,
+    rule_id: String,
+) -> Result<Vec<enhancement::HomophoneRuleStatus>, String> {
+    enhancement::delete_rule(&app, &rule_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

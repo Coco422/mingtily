@@ -8,13 +8,13 @@
 
 Mingtily is a desktop meeting assistant for people who want recordings, transcripts, speaker labels, and local models to stay on their own device. External LLM Providers remain available as an explicit choice when cloud models provide better summary quality or performance.
 
-Current version: **0.6.1**. GitHub Actions publish tagged development releases for macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while updater payloads are integrity-signed by Mingtily. Linux remains available as an unsigned development-build target while its ONNX runtime integration is being unified.
+Current version: **0.6.2**. GitHub Actions publish tagged development releases for macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while updater payloads are integrity-signed by Mingtily. Linux remains available as an unsigned development-build target while its ONNX runtime integration is being unified.
 
 ## Highlights
 
 - Record microphone and system audio in one meeting timeline.
 - Import common audio formats, including Opus audio inside M4A/MP4 containers.
-- Transcribe locally with Whisper, NVIDIA Parakeet, SenseVoice, offline or streaming Paraformer, and Qwen3-ASR.
+- Transcribe locally with Whisper, NVIDIA Parakeet, SenseVoice, offline or streaming Paraformer, Qwen3-ASR, and FunASR Nano.
 - Add speaker labels with Sherpa ONNX, Pyannote segmentation, and 3D-Speaker ERes2Net embeddings.
 - Refine provisional live speaker labels after recording stops without running ASR again.
 - Generate summaries with an optional built-in model, Ollama, or a user-configured external Provider.
@@ -43,14 +43,14 @@ Large model weights are not bundled with the application. Models are downloaded 
 
 | Capability | Current choices | Notes |
 |---|---|---|
-| Speech recognition | Whisper, Parakeet TDT 0.6B v2/v3, SenseVoice Small int8, Paraformer Small int8, Paraformer Streaming zh/en int8, Qwen3-ASR 0.6B int8 | SenseVoice is the recommended Chinese choice and supports forced Mandarin or Cantonese. Offline Paraformer is lightweight; Beta live enhancement pairs the optional streaming model with a separate finalized model. Qwen3-ASR is a larger multilingual Beta option. |
+| Speech recognition | Whisper, Parakeet TDT 0.6B v2/v3, SenseVoice Small int8, Paraformer Small int8, Paraformer Streaming zh/en int8, Qwen3-ASR 0.6B int8, FunASR Nano int8 | SenseVoice is the recommended Chinese choice and supports forced Mandarin or Cantonese. Parakeet is English-only and does not support Chinese. Offline Paraformer is lightweight; Beta live enhancement pairs the optional streaming model with a separate finalized model. Qwen3-ASR and FunASR Nano are larger multilingual Beta options with dynamic hotwords. |
 | Punctuation restoration | Sherpa ONNX CT-Transformer zh/en int8 | Optional local post-processing for final SenseVoice segments; approximately 62 MiB to download and fail-open when unavailable. |
 | Speaker diarization | Sherpa ONNX `sherpa-v1` | Pyannote segmentation 3.0 int8 plus 3D-Speaker ERes2Net; approximately 47 MB to download. |
 | Built-in summaries | Qwen 3.5 2B/4B, Gemma 3 1B/4B | Optional GGUF downloads; local inference uses the bundled `llama-helper` sidecar. |
 | Local service summaries | Ollama | Defaults to a loopback endpoint and can use models already managed by Ollama. |
 | External summaries | OpenAI, Anthropic, Groq, OpenRouter, OpenAI Compatible | Transcript content is sent directly to the configured endpoint. |
 
-Parakeet v3 is pinned to revision `8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce` of [`istupakov/parakeet-tdt-0.6b-v3-onnx`](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) and verified with built-in SHA256 values.
+Parakeet models are English-only. Parakeet v3 is pinned to revision `8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce` of [`istupakov/parakeet-tdt-0.6b-v3-onnx`](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) and verified with built-in SHA256 values.
 
 ## Platform status
 
@@ -67,12 +67,13 @@ Code signing, Apple notarization, and production installer signing are deferred 
 1. Open **Settings → Models** and download a local ASR model.
 2. Open **Settings → Services** and select the installed transcription model.
 3. For consistent Chinese and English punctuation with SenseVoice, optionally download the punctuation-restoration model.
-4. To see continuously revised text while speaking, optionally download **Paraformer Streaming zh/en int8**, choose **Beta · live enhancement** in **Settings → Services**, then select the streaming and finalized models separately.
-5. Optionally download and enable the speaker-diarization model. In **Settings → Services**, keep automatic detection or specify 1–10 speakers when the expected count is known.
-6. Choose the transcription language. For predictable Chinese output, use SenseVoice and choose Mandarin or Cantonese; Whisper remains available for broader language coverage and translation to English.
-7. Start a recording or enable the Beta import/retranscription feature.
-8. Configure Built-in AI, Ollama, or an external summary Provider only if summaries are needed.
-9. In **Settings → General**, manually check for releases or explicitly enable automatic checks.
+4. Configure finalized dynamic hotwords in **Settings → Services**. They are saved even before a supported model is selected and take effect with Qwen3-ASR or FunASR Nano. Chinese homophone replacement additionally requires the lexicon and pre-generated `.fst` rules in **Models**, then explicit selection in **Services**.
+5. To see continuously revised text while speaking, optionally download **Paraformer Streaming zh/en int8**, choose **Beta · live enhancement** in **Settings → Services**, then select the streaming and finalized models separately.
+6. Optionally download and enable the speaker-diarization model. In **Settings → Services**, keep automatic detection or specify 1–10 speakers when the expected count is known.
+7. Choose the transcription language. For predictable Chinese output, use SenseVoice and choose Mandarin or Cantonese; Whisper remains available for broader language coverage and translation to English.
+8. Start a recording or enable the Beta import/retranscription feature.
+9. Configure Built-in AI, Ollama, or an external summary Provider only if summaries are needed.
+10. In **Settings → General**, manually check for releases or explicitly enable automatic checks.
 
 Model downloads do not silently change the active Provider or model.
 
@@ -151,7 +152,8 @@ See [AGENTS.md](AGENTS.md) for durable engineering boundaries and [CONTRIBUTING.
 
 ## Known limitations
 
-- Parakeet and both Paraformer choices use automatic language detection. SenseVoice, Qwen3-ASR, and Whisper accept supported fixed-language hints.
+- Parakeet is English-only and does not support Chinese. FunASR Nano and both Paraformer choices use automatic language detection. SenseVoice, Qwen3-ASR, and Whisper accept supported fixed-language hints.
+- Qwen3-ASR and FunASR Nano accept optional dynamic hotwords for finalized segments. Sherpa finalized models can also use the optional Chinese homophone lexicon with imported pre-generated `.fst` rules; these resources are local, user-managed Beta features and fail open when unavailable.
 - In Beta live enhancement, Paraformer Streaming shows a provisional hypothesis that can change while the user speaks. A separate finalized model transcribes completed VAD segments; provisional text is never persisted.
 - Live speaker labels appear after a VAD segment finishes; they are not token-level labels.
 - Overlapping speech is assigned to the dominant speaker and is not transcribed twice.

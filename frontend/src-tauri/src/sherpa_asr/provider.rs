@@ -1,10 +1,11 @@
 use super::models::{InstalledSherpaModel, SherpaAsrBackend};
+use super::RuntimeEnhancements;
 use crate::audio::transcription::{TranscriptResult, TranscriptionError, TranscriptionProvider};
 use async_trait::async_trait;
 use log::warn;
 use sherpa_onnx::{
-    OfflineParaformerModelConfig, OfflineQwen3ASRModelConfig, OfflineRecognizer,
-    OfflineRecognizerConfig, OfflineSenseVoiceModelConfig,
+    OfflineFunASRNanoModelConfig, OfflineParaformerModelConfig, OfflineQwen3ASRModelConfig,
+    OfflineRecognizer, OfflineRecognizerConfig, OfflineSenseVoiceModelConfig,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -20,31 +21,38 @@ struct CachedRecognizer {
 #[derive(Clone)]
 pub struct SherpaOfflineAsrProvider {
     model: InstalledSherpaModel,
+    enhancements: RuntimeEnhancements,
     recognizer: Arc<Mutex<Option<CachedRecognizer>>>,
 }
 
 impl SherpaOfflineAsrProvider {
-    pub fn new(model: InstalledSherpaModel) -> Self {
+    pub fn new(model: InstalledSherpaModel, enhancements: RuntimeEnhancements) -> Self {
         Self {
             model,
+            enhancements,
             recognizer: Arc::new(Mutex::new(None)),
         }
     }
 
     fn transcribe_blocking(
         model: &InstalledSherpaModel,
+        enhancements: &RuntimeEnhancements,
         cache: &Mutex<Option<CachedRecognizer>>,
         audio: &[f32],
         language: Option<&str>,
     ) -> Result<String, TranscriptionError> {
         let normalized_language = normalize_language(model.backend, language)?;
-        let cache_key = recognizer_cache_key(model.backend, &normalized_language);
+        let cache_key = recognizer_cache_key(
+            model.backend,
+            &normalized_language,
+            enhancements.cache_signature(),
+        );
         let mut guard = cache
             .lock()
             .map_err(|_| TranscriptionError::EngineFailed("Sherpa ASR lock poisoned".into()))?;
 
         if guard.as_ref().is_none_or(|cached| cached.key != cache_key) {
-            let recognizer = create_recognizer(model, &normalized_language)?;
+            let recognizer = create_recognizer(model, &normalized_language, enhancements)?;
             *guard = Some(CachedRecognizer {
                 key: cache_key,
                 recognizer,
@@ -91,9 +99,16 @@ impl TranscriptionProvider for SherpaOfflineAsrProvider {
         }
 
         let model = self.model.clone();
+        let enhancements = self.enhancements.clone();
         let recognizer = self.recognizer.clone();
         let result = tokio::task::spawn_blocking(move || {
-            Self::transcribe_blocking(&model, &recognizer, &audio, language.as_deref())
+            Self::transcribe_blocking(
+                &model,
+                &enhancements,
+                &recognizer,
+                &audio,
+                language.as_deref(),
+            )
         })
         .await
         .map_err(|error| {
@@ -123,7 +138,22 @@ impl TranscriptionProvider for SherpaOfflineAsrProvider {
 fn create_recognizer(
     model: &InstalledSherpaModel,
     language: &str,
+    enhancements: &RuntimeEnhancements,
 ) -> Result<OfflineRecognizer, TranscriptionError> {
+    let config = build_recognizer_config(model, language, enhancements)?;
+    OfflineRecognizer::create(&config).ok_or_else(|| {
+        TranscriptionError::EngineFailed(format!(
+            "Unable to initialize Sherpa ONNX model '{}'",
+            model.id
+        ))
+    })
+}
+
+fn build_recognizer_config(
+    model: &InstalledSherpaModel,
+    language: &str,
+    enhancements: &RuntimeEnhancements,
+) -> Result<OfflineRecognizerConfig, TranscriptionError> {
     let mut config = OfflineRecognizerConfig::default();
     config.model_config.num_threads = 2;
     config.model_config.provider = Some("cpu".to_string());
@@ -150,7 +180,26 @@ fn create_recognizer(
                 encoder: Some(path_string(&model.root.join("encoder.int8.onnx"))?),
                 decoder: Some(path_string(&model.root.join("decoder.int8.onnx"))?),
                 tokenizer: Some(path_string(&model.root.join("tokenizer"))?),
+                max_new_tokens: 512,
+                hotwords: enhancements.hotwords.clone(),
                 ..Default::default()
+            };
+        }
+        SherpaAsrBackend::FunAsrNano => {
+            config.model_config.funasr_nano = OfflineFunASRNanoModelConfig {
+                encoder_adaptor: Some(path_string(&model.root.join("encoder_adaptor.int8.onnx"))?),
+                llm: Some(path_string(&model.root.join("llm.int8.onnx"))?),
+                embedding: Some(path_string(&model.root.join("embedding.int8.onnx"))?),
+                tokenizer: Some(path_string(&model.root.join("Qwen3-0.6B"))?),
+                system_prompt: Some("You are a helpful assistant.".to_string()),
+                user_prompt: Some("语音转写:".to_string()),
+                max_new_tokens: 512,
+                temperature: 1e-6,
+                top_p: 0.8,
+                seed: 42,
+                language: None,
+                itn: 1,
+                hotwords: enhancements.hotwords.clone(),
             };
         }
         SherpaAsrBackend::ParaformerOnline => {
@@ -160,12 +209,15 @@ fn create_recognizer(
         }
     }
 
-    OfflineRecognizer::create(&config).ok_or_else(|| {
-        TranscriptionError::EngineFailed(format!(
-            "Unable to initialize Sherpa ONNX model '{}'",
-            model.id
-        ))
-    })
+    if let (Some(lexicon), Some(rule_fsts)) = (
+        enhancements.homophone_lexicon.clone(),
+        enhancements.homophone_rule_fsts.clone(),
+    ) {
+        config.hr.lexicon = Some(lexicon);
+        config.hr.rule_fsts = Some(rule_fsts);
+    }
+
+    Ok(config)
 }
 
 fn path_string(path: &Path) -> Result<String, TranscriptionError> {
@@ -177,13 +229,19 @@ fn path_string(path: &Path) -> Result<String, TranscriptionError> {
     })
 }
 
-fn recognizer_cache_key(backend: SherpaAsrBackend, language: &str) -> String {
-    match backend {
-        SherpaAsrBackend::SenseVoice => language.to_string(),
+fn recognizer_cache_key(
+    backend: SherpaAsrBackend,
+    language: &str,
+    enhancement_signature: &str,
+) -> String {
+    let language_key = match backend {
+        SherpaAsrBackend::SenseVoice => language,
         SherpaAsrBackend::ParaformerOffline
         | SherpaAsrBackend::ParaformerOnline
-        | SherpaAsrBackend::Qwen3Asr => "shared".to_string(),
-    }
+        | SherpaAsrBackend::Qwen3Asr
+        | SherpaAsrBackend::FunAsrNano => "shared",
+    };
+    format!("{language_key}:{enhancement_signature}")
 }
 
 fn normalize_language(
@@ -209,9 +267,9 @@ fn normalize_language(
                 unsupported.to_string(),
             )),
         },
-        SherpaAsrBackend::ParaformerOffline | SherpaAsrBackend::ParaformerOnline => {
-            Ok("auto".to_string())
-        }
+        SherpaAsrBackend::ParaformerOffline
+        | SherpaAsrBackend::ParaformerOnline
+        | SherpaAsrBackend::FunAsrNano => Ok("auto".to_string()),
         SherpaAsrBackend::Qwen3Asr => {
             if language == "auto" || qwen3_language_name(language).is_some() {
                 Ok(language.to_string())
@@ -243,6 +301,15 @@ fn qwen3_language_name(language: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn test_model(backend: SherpaAsrBackend) -> InstalledSherpaModel {
+        InstalledSherpaModel {
+            id: "test-model".to_string(),
+            backend,
+            root: PathBuf::from("/tmp/mingtily-test-model"),
+        }
+    }
 
     #[test]
     fn sense_voice_accepts_supported_language_hints() {
@@ -268,5 +335,76 @@ mod tests {
         assert_eq!(qwen3_language_name("zh"), Some("Chinese"));
         assert_eq!(qwen3_language_name("yue"), Some("Cantonese"));
         assert_eq!(qwen3_language_name("en"), Some("English"));
+    }
+
+    #[test]
+    fn enhancement_changes_recognizer_cache_key() {
+        assert_ne!(
+            recognizer_cache_key(SherpaAsrBackend::Qwen3Asr, "zh", "first"),
+            recognizer_cache_key(SherpaAsrBackend::Qwen3Asr, "zh", "second")
+        );
+    }
+
+    #[test]
+    fn qwen3_receives_dynamic_hotwords() {
+        let enhancements =
+            RuntimeEnhancements::from_parts(Some("Mingtily,SenseVoice".to_string()), None, None);
+        let config = build_recognizer_config(
+            &test_model(SherpaAsrBackend::Qwen3Asr),
+            "auto",
+            &enhancements,
+        )
+        .unwrap();
+        assert_eq!(
+            config.model_config.qwen3_asr.hotwords.as_deref(),
+            Some("Mingtily,SenseVoice")
+        );
+        assert_eq!(config.model_config.qwen3_asr.max_new_tokens, 512);
+    }
+
+    #[test]
+    fn funasr_nano_receives_dynamic_hotwords_and_itn() {
+        let enhancements =
+            RuntimeEnhancements::from_parts(Some("Mingtily,FunASR".to_string()), None, None);
+        let config = build_recognizer_config(
+            &test_model(SherpaAsrBackend::FunAsrNano),
+            "auto",
+            &enhancements,
+        )
+        .unwrap();
+        assert_eq!(
+            config.model_config.funasr_nano.hotwords.as_deref(),
+            Some("Mingtily,FunASR")
+        );
+        assert_eq!(config.model_config.funasr_nano.itn, 1);
+        assert_eq!(config.model_config.funasr_nano.max_new_tokens, 512);
+    }
+
+    #[test]
+    fn homophone_resources_are_applied_to_offline_recognizer() {
+        let enhancements = RuntimeEnhancements::from_parts(
+            None,
+            Some("/tmp/lexicon.txt".to_string()),
+            Some("/tmp/rule-a.fst,/tmp/rule-b.fst".to_string()),
+        );
+        let config = build_recognizer_config(
+            &test_model(SherpaAsrBackend::SenseVoice),
+            "zh",
+            &enhancements,
+        )
+        .unwrap();
+        assert_eq!(config.hr.lexicon.as_deref(), Some("/tmp/lexicon.txt"));
+        assert_eq!(
+            config.hr.rule_fsts.as_deref(),
+            Some("/tmp/rule-a.fst,/tmp/rule-b.fst")
+        );
+    }
+
+    #[test]
+    fn funasr_nano_uses_automatic_language_detection() {
+        assert_eq!(
+            normalize_language(SherpaAsrBackend::FunAsrNano, Some("zh")).unwrap(),
+            "auto"
+        );
     }
 }

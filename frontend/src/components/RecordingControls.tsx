@@ -8,7 +8,7 @@ import { ProcessRequest, SummaryResponse } from '@/types/summary';
 import { listen } from '@tauri-apps/api/event';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { RecordingStatus, useRecordingState } from '@/contexts/RecordingStateContext';
 import { formatRecordingDuration } from '@/lib/recordingDuration';
 import { useTranslation } from 'react-i18next';
 
@@ -16,7 +16,7 @@ interface RecordingControlsProps {
   isRecording: boolean;
   barHeights: string[];
   onRecordingStop: (callApi?: boolean) => void;
-  onRecordingStart: () => void;
+  onRecordingStart: () => void | Promise<void>;
   onTranscriptReceived: (summary: SummaryResponse) => void;
   onTranscriptionError?: (message: string) => void;
   onStopInitiated?: () => void; // Called immediately when stop button is clicked
@@ -61,6 +61,10 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const [isValidatingModel, setIsValidatingModel] = useState(false);
   const [speechDetected, setSpeechDetected] = useState(false);
   const [deviceError, setDeviceError] = useState<{ title: string, message: string } | null>(null);
+  const isStartPending =
+    isStarting ||
+    isValidatingModel ||
+    recordingState.status === RecordingStatus.STARTING;
 
   const currentTime = 0;
   const duration = 0;
@@ -87,7 +91,9 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   }, [t]);
 
   const handleStartRecording = useCallback(async () => {
-    if (isStarting || isValidatingModel) return;
+    if (isStartPending) return;
+    setIsStarting(true);
+    setDeviceError(null);
     console.log('Starting recording...');
     console.log('Selected devices:', selectedDevices);
     console.log('Meeting name:', meetingName);
@@ -137,8 +143,10 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           message: t('failedHint')
         });
       }
+    } finally {
+      setIsStarting(false);
     }
-  }, [onRecordingStart, isStarting, isValidatingModel, selectedDevices, meetingName, isRecording, t]);
+  }, [onRecordingStart, isStartPending, selectedDevices, meetingName, isRecording, t]);
 
   const stopRecordingAction = useCallback(async () => {
     console.log('Executing stop recording...');
@@ -388,11 +396,11 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                       <TooltipTrigger asChild>
                         <button
                           onClick={handleStartRecording}
-                          disabled={isStarting || isProcessing || isRecordingDisabled || isValidatingModel}
-                          className={`w-12 h-12 flex items-center justify-center ${isStarting || isProcessing || isValidatingModel ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
+                          disabled={isStartPending || isProcessing || isRecordingDisabled}
+                          className={`w-12 h-12 flex items-center justify-center ${isStartPending || isProcessing ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
                             } rounded-full text-white transition-colors relative`}
                         >
-                          {isValidatingModel ? (
+                          {isStartPending ? (
                             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
                           ) : (
                             <Mic size={20} />

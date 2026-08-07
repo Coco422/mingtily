@@ -15,17 +15,17 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - **失败可降级**：说话人分离、摘要或单个 Provider 失败时，不应丢失录音和原始转写。
 - **隐私边界可验证**：不加入使用分析或广告追踪；更新检查默认关闭，用户明确启用后才访问 GitHub Release；其他远程调用前明确说明数据去向。
 
-## 当前基础：0.6.1
+## 当前基础：0.6.2
 
-0.6.1 在 0.6.0 的中文 ASR、统一 Provider 和长会议稳定化基础上，补齐实时增强、说话人数量控制、流式摘要反馈和可选更新发布链路。
+0.6.2 在 0.6.1 的实时增强、说话人数控制和更新链路基础上，补齐最终转写术语增强、FunASR Nano、录音重复启动防护，以及更快、更清晰的模型与服务设置体验。
 
 - Mingtily 品牌、独立 bundle identifier 和全新本地数据空间。
 - 移除遥测、PRO/订阅、上游营销和 Meetily 私有更新基础设施。
 - `zh-CN`、`en-US` 全应用国际化，界面语言与转写语言相互独立。
-- 设置页重构为“常规 / 录音 / 模型 / 服务 / Beta”。
+- 设置页重构为“常规 / 录音 / 模型 / 服务 / Beta”；模型资产使用按需加载和折叠分组，Services 只初始化当前转写 Provider。
 - Models 统一管理 Whisper、Parakeet、Speaker Diarization、本地摘要和 Ollama 模型资产。
 - Services 统一选择转写、说话人分离和 AI 摘要的 Provider 与模型。
-- 本地 Whisper、Parakeet、SenseVoice、Offline Paraformer 和 Qwen3-ASR 转写，SenseVoice 作为推荐中文模型。
+- 本地 Whisper、仅英文的 Parakeet、SenseVoice、Offline Paraformer、Qwen3-ASR 和 FunASR Nano 转写，SenseVoice 作为推荐中文模型。
 - 可选的本地中英标点恢复模型，为 SenseVoice 最终转写片段补充标点；模型缺失或失败时保留原始 ASR 文本。
 - 实时录音、文件导入和重新转写统一使用 `TranscriptionProvider` 生命周期。
 - Opus-in-M4A 导入，以及 Sherpa ONNX 说话人分离。
@@ -39,6 +39,16 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - macOS Apple Silicon、Windows x64 和 Linux x64 提供不依赖 secrets 的手动无签名构建。
 - tag 工作流会生成 macOS Apple Silicon 与 Windows x64 GitHub Release、Tauri updater 签名产物和 `latest.json`；Linux updater 暂停到 ONNX Runtime 冲突修复并完成真实录音验证之后，Apple Developer、DigiCert 与 notarization 仍未启用。
 - 录音 transcript 保存、speaker 最终标签、导入格式、模型损坏和恢复状态具有直接回归测试。
+
+## 0.6.2：最终转写增强与设置页整理
+
+- 修复录音按钮、导航自动启动和侧边栏事件可能重复触发后端录音的问题；重复启动拒绝会与真实后端状态核对，不再把已经成功开始的录音显示为失败。
+- Qwen3-ASR 与 FunASR Nano 支持 finalized 动态热词；热词可以在 Services 提前配置，只作用于保存的最终转写，不进入 Online Paraformer provisional 文本。
+- 新增 FunASR Nano int8 finalized Beta 模型，保留自动语言检测、ITN、内置标点和用户显式下载、SHA256 校验边界。
+- 新增可选的 Sherpa 中文同音词替换：用户主动下载 lexicon、导入预生成 `.fst` 规则并在 Services 启用；资源缺失或运行失败时保留原始 ASR 文本。
+- Models 使用折叠分组并延迟挂载非当前区域；Whisper 默认只展开 Small，其余模型收进高级区域，Parakeet 默认折叠并明确仅支持英文、不支持中文。
+- Services 不再无条件初始化 Whisper 与 Parakeet，只在当前 Provider 被选择时加载对应模型列表；同一进程内复用初始化任务。
+- 热词入口始终可见，当前模型不支持时仍可提前保存，并明确支持范围和 finalized-only 语义。
 
 ## 0.6.1：实时反馈、说话人数与更新链路
 
@@ -60,7 +70,7 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 
 ## 0.6.x：后续维护项
 
-目标：在不扩大产品边界的前提下，继续提高 0.6.1 的真实设备可靠性和社区可用性。
+目标：在不扩大产品边界的前提下，继续提高 0.6.2 的真实设备可靠性和社区可用性。
 
 - 补齐录音、导入、重新转写、speaker label、摘要和数据恢复的回归测试。
 - 持续清理 i18n 遗漏、窄窗口布局和中英文文案长度问题。
@@ -106,7 +116,6 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 已在 macOS Apple Silicon 无签名安装包中完成模型下载、显式服务切换、真实系统音频流式修订、录音时长、停止进度和 final-only 持久化 smoke test。
 - 待补充双模型峰值内存、流式队列背压、长会议 soak test、不同设备的录音启动耗时、首字延迟与 revision 稳定性数据。
 - Offline Paraformer Large int8：本地质量优先档。
-- FunASR Nano：作为实验模型评估质量、内存、包体和许可证，不作为默认下载。
 - 为不同模型记录首段延迟、实时率、峰值内存和长会议稳定性。
 - 保持 speaker label 与流式文本的时序一致，不承诺 token 级说话人标签。
 

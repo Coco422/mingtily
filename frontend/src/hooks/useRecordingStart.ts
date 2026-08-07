@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -12,6 +12,16 @@ import { useTranslation } from 'react-i18next';
 interface UseRecordingStartReturn {
   handleRecordingStart: () => Promise<void>;
   isAutoStarting: boolean;
+}
+
+type RecordingStartSource = 'manual' | 'navigation' | 'sidebar';
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isAlreadyRecordingError(error: unknown): boolean {
+  return errorMessage(error).toLowerCase().includes('recording already in progress');
 }
 
 /**
@@ -31,6 +41,7 @@ export function useRecordingStart(
 ): UseRecordingStartReturn {
   const { t } = useTranslation(['recording', 'meeting']);
   const [isAutoStarting, setIsAutoStarting] = useState(false);
+  const startInFlightRef = useRef(false);
 
   const { clearTranscripts, setMeetingTitle } = useTranscripts();
   const { setIsMeetingActive } = useSidebar();
@@ -104,46 +115,89 @@ export function useRecordingStart(
     return false;
   }, [checkIfModelDownloading, checkTranscriptionReady, setStatus, showModal, t]);
 
-  // Handle manual recording start (from button click)
-  const handleRecordingStart = useCallback(async () => {
+  const startConfiguredRecording = useCallback(async (
+    source: RecordingStartSource,
+    rethrowError: boolean
+  ) => {
+    if (isRecording || startInFlightRef.current) {
+      console.log(`Ignoring ${source} recording start because a session is active or starting`);
+      return;
+    }
+
+    // State updates are asynchronous, so use a ref as the synchronous lock shared by
+    // the button, navigation auto-start, and sidebar event paths.
+    startInFlightRef.current = true;
+    if (source !== 'manual') setIsAutoStarting(true);
+
     try {
-      console.log('handleRecordingStart called - checking configured transcription model');
+      console.log(`${source} recording start - checking configured transcription model`);
       if (!(await ensureTranscriptionReady())) return;
 
-      console.log('Transcription model ready - setting up meeting title and state');
-
-      const randomTitle = generateMeetingTitle();
-      setMeetingTitle(randomTitle);
+      const generatedMeetingTitle = generateMeetingTitle();
 
       // Set STARTING status before initiating backend recording
       setStatus(RecordingStatus.STARTING, t('recording:initializing'));
 
-      // Start the actual backend recording
-      console.log('Starting backend recording with meeting:', randomTitle);
-      await recordingService.startRecordingWithDevices(
-        selectedDevices?.micDevice || null,
-        selectedDevices?.systemDevice || null,
-        randomTitle
-      );
-      console.log('Backend recording started successfully');
+      let startedNewSession = true;
+      try {
+        console.log('Starting backend recording with meeting:', generatedMeetingTitle);
+        await recordingService.startRecordingWithDevices(
+          selectedDevices?.micDevice || null,
+          selectedDevices?.systemDevice || null,
+          generatedMeetingTitle
+        );
+        console.log('Backend recording started successfully');
+      } catch (error) {
+        // A stale UI event can arrive just after another path successfully starts.
+        // Treat the backend's safe duplicate-start rejection as idempotent success.
+        const backendIsRecording = isAlreadyRecordingError(error)
+          ? await recordingService.isRecording().catch(() => false)
+          : false;
+        if (!backendIsRecording) throw error;
 
-      // Update state after successful backend start
-      // Note: RECORDING status will be set by RecordingStateContext event listener
-      console.log('Setting isRecordingState to true');
-      setIsRecording(true); // This will also update the sidebar via the useEffect
-      clearTranscripts(); // Clear previous transcripts when starting new recording
+        startedNewSession = false;
+        console.warn('Recording was already active; synchronizing the UI instead of showing an error');
+      }
+
+      const activeMeetingTitle = startedNewSession
+        ? generatedMeetingTitle
+        : await recordingService.getRecordingMeetingName().catch(() => null);
+      if (activeMeetingTitle) setMeetingTitle(activeMeetingTitle);
+      setIsRecording(true);
       setIsMeetingActive(true);
+      setStatus(RecordingStatus.RECORDING);
 
-      // Show recording notification if enabled
-      await showRecordingNotification();
+      if (startedNewSession) {
+        clearTranscripts();
+        await showRecordingNotification();
+      }
     } catch (error) {
       console.error('Failed to start recording:', error);
-      setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : t('recording:startFailed'));
-      setIsRecording(false); // Reset state on error
-      // Re-throw so RecordingControls can handle device-specific errors
-      throw error;
+      setStatus(RecordingStatus.ERROR, errorMessage(error) || t('recording:startFailed'));
+      setIsRecording(false);
+      if (rethrowError) throw error;
+      alert(t('recording:startFailedHint'));
+    } finally {
+      startInFlightRef.current = false;
+      if (source !== 'manual') setIsAutoStarting(false);
     }
-  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, ensureTranscriptionReady, selectedDevices, setStatus, t]);
+  }, [
+    clearTranscripts,
+    ensureTranscriptionReady,
+    generateMeetingTitle,
+    isRecording,
+    selectedDevices,
+    setIsMeetingActive,
+    setIsRecording,
+    setMeetingTitle,
+    setStatus,
+    t,
+  ]);
+
+  // Handle manual recording start (from button click)
+  const handleRecordingStart = useCallback(async () => {
+    await startConfiguredRecording('manual', true);
+  }, [startConfiguredRecording]);
 
   // Check for autoStartRecording flag and start recording automatically
   useEffect(() => {
@@ -152,46 +206,8 @@ export function useRecordingStart(
         const shouldAutoStart = sessionStorage.getItem('autoStartRecording');
         if (shouldAutoStart === 'true' && !isRecording && !isAutoStarting) {
           console.log('Auto-starting recording from navigation...');
-          setIsAutoStarting(true);
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
-
-          if (!(await ensureTranscriptionReady())) {
-            setIsAutoStarting(false);
-            return;
-          }
-
-          // Start the actual backend recording
-          try {
-            // Generate meeting title
-            const generatedMeetingTitle = generateMeetingTitle();
-
-            // Set STARTING status before initiating backend recording
-            setStatus(RecordingStatus.STARTING, t('recording:initializing'));
-
-            console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
-            const result = await recordingService.startRecordingWithDevices(
-              selectedDevices?.micDevice || null,
-              selectedDevices?.systemDevice || null,
-              generatedMeetingTitle
-            );
-            console.log('Auto-start backend recording result:', result);
-
-            // Update UI state after successful backend start
-            // Note: RECORDING status will be set by RecordingStateContext event listener
-            setMeetingTitle(generatedMeetingTitle);
-            setIsRecording(true);
-            clearTranscripts();
-            setIsMeetingActive(true);
-
-            // Show recording notification if enabled
-            await showRecordingNotification();
-          } catch (error) {
-            console.error('Failed to auto-start recording:', error);
-            setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : t('recording:startFailed'));
-            alert(t('recording:startFailedHint'));
-          } finally {
-            setIsAutoStarting(false);
-          }
+          await startConfiguredRecording('navigation', false);
         }
       }
     };
@@ -200,64 +216,18 @@ export function useRecordingStart(
   }, [
     isRecording,
     isAutoStarting,
-    selectedDevices,
-    generateMeetingTitle,
-    setMeetingTitle,
-    setIsRecording,
-    clearTranscripts,
-    setIsMeetingActive,
-    ensureTranscriptionReady,
-    setStatus,
-    t,
+    startConfiguredRecording,
   ]);
 
   // Listen for direct recording trigger from sidebar when already on home page
   useEffect(() => {
     const handleDirectStart = async () => {
-      if (isRecording || isAutoStarting) {
+      if (isRecording || isAutoStarting || startInFlightRef.current) {
         console.log('Recording already in progress, ignoring direct start event');
         return;
       }
 
-      console.log('Direct start from sidebar - checking configured transcription model');
-      setIsAutoStarting(true);
-
-      if (!(await ensureTranscriptionReady())) {
-        setIsAutoStarting(false);
-        return;
-      }
-
-      try {
-        // Generate meeting title
-        const generatedMeetingTitle = generateMeetingTitle();
-
-        // Set STARTING status before initiating backend recording
-        setStatus(RecordingStatus.STARTING, t('recording:initializing'));
-
-        console.log('Starting backend recording with meeting:', generatedMeetingTitle);
-        const result = await recordingService.startRecordingWithDevices(
-          selectedDevices?.micDevice || null,
-          selectedDevices?.systemDevice || null,
-          generatedMeetingTitle
-        );
-        console.log('Backend recording result:', result);
-
-        // Update UI state after successful backend start
-        // Note: RECORDING status will be set by RecordingStateContext event listener
-        setMeetingTitle(generatedMeetingTitle);
-        setIsRecording(true);
-        clearTranscripts();
-        setIsMeetingActive(true);
-
-        // Show recording notification if enabled
-        await showRecordingNotification();
-      } catch (error) {
-        console.error('Failed to start recording from sidebar:', error);
-        setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : t('recording:startFailed'));
-        alert(t('recording:startFailedHint'));
-      } finally {
-        setIsAutoStarting(false);
-      }
+      await startConfiguredRecording('sidebar', false);
     };
 
     window.addEventListener('start-recording-from-sidebar', handleDirectStart);
@@ -268,15 +238,7 @@ export function useRecordingStart(
   }, [
     isRecording,
     isAutoStarting,
-    selectedDevices,
-    generateMeetingTitle,
-    setMeetingTitle,
-    setIsRecording,
-    clearTranscripts,
-    setIsMeetingActive,
-    ensureTranscriptionReady,
-    setStatus,
-    t,
+    startConfiguredRecording,
   ]);
 
   return {

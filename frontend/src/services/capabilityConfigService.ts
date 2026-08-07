@@ -7,6 +7,7 @@ import {
 import { configService, ModelConfig } from '@/services/configService';
 import {
   SherpaAsrAPI,
+  SherpaAsrEnhancementConfig,
   StreamingTranscriptionConfig,
 } from '@/lib/sherpa-asr';
 
@@ -14,6 +15,8 @@ export const SPEAKER_DIARIZATION_CONFIG_CHANGED_EVENT =
   'mingtily:speaker-diarization-config-changed';
 export const STREAMING_TRANSCRIPTION_CONFIG_CHANGED_EVENT =
   'mingtily:streaming-transcription-config-changed';
+export const SHERPA_ASR_ENHANCEMENT_CONFIG_CHANGED_EVENT =
+  'mingtily:sherpa-asr-enhancement-config-changed';
 
 class CapabilityConfigService {
   getTranscription(): Promise<TranscriptModelConfig> {
@@ -42,6 +45,25 @@ class CapabilityConfigService {
         )
       );
     }
+  }
+
+  getSherpaAsrEnhancements(): Promise<SherpaAsrEnhancementConfig> {
+    return SherpaAsrAPI.getEnhancementConfig();
+  }
+
+  async saveSherpaAsrEnhancements(
+    config: SherpaAsrEnhancementConfig
+  ): Promise<SherpaAsrEnhancementConfig> {
+    const saved = await SherpaAsrAPI.saveEnhancementConfig(config);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent<SherpaAsrEnhancementConfig>(
+          SHERPA_ASR_ENHANCEMENT_CONFIG_CHANGED_EVENT,
+          { detail: saved }
+        )
+      );
+    }
+    return saved;
   }
 
   async getSpeakerDiarization(): Promise<SpeakerDiarizationConfig> {

@@ -59,6 +59,25 @@ Mingtily downloads the int8 encoder, int8 decoder, and token file only after use
 
 Mingtily treats this as a Beta model because its download and installed sizes are substantially larger than the other local ASR choices. The archive and all installed inference files are verified with built-in SHA256 values.
 
+## FunASR Nano int8
+
+- Base model: [FunAudioLLM/Fun-ASR-Nano-2512](https://huggingface.co/FunAudioLLM/Fun-ASR-Nano-2512)
+- ONNX conversion source: [Wasser1462/FunASR-nano-onnx](https://github.com/Wasser1462/FunASR-nano-onnx)
+- ONNX distribution: `sherpa-onnx-funasr-nano-int8-2025-12-30.tar.bz2` from the sherpa-onnx `asr-models` release
+- Conversion repository inspected for attribution: [zengshuishui/FunASR-nano-onnx](https://modelscope.cn/models/zengshuishui/FunASR-nano-onnx)
+- License: Apache License 2.0, according to the base model and ONNX conversion metadata
+
+Mingtily exposes this as an optional finalized Beta model with automatic language detection, ITN, built-in punctuation, and dynamic hotwords. The model is downloaded only after user action; the archive and all installed inference files are verified with built-in SHA256 values.
+
+## Sherpa Chinese homophone replacement resources
+
+- Runtime implementation: [k2-fsa/sherpa-onnx homophone replacer](https://k2-fsa.github.io/sherpa/onnx/homophone-replacer/index.html)
+- Downloaded lexicon: `lexicon.txt` from the sherpa-onnx `hr-files` release
+- Rule format: pre-generated OpenFst `.fst` files, typically produced with Pynini
+- License: Apache License 2.0 for the sherpa-onnx resource distribution
+
+Mingtily downloads the lexicon only after user action, verifies it with a built-in SHA256 value, and copies user-selected `.fst` rules into the application data directory after validating their type and size. Homophone replacement is optional and falls back to the original ASR text when its resources are unavailable.
+
 ## Pyannote segmentation 3.0 model
 
 - Distribution used by Mingtily: `sherpa-onnx-pyannote-segmentation-3-0/model.int8.onnx`

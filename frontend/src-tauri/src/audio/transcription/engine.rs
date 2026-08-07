@@ -116,11 +116,24 @@ pub async fn load_transcription_provider<R: Runtime>(
                         selection.model
                     )
                 })?;
+            let enhancements = match crate::sherpa_asr::enhancement::resolve_runtime(app) {
+                Ok(enhancements) => enhancements,
+                Err(error) => {
+                    warn!(
+                        "Unable to load Sherpa ASR enhancement settings; continuing without terminology enhancement: {}",
+                        error
+                    );
+                    crate::sherpa_asr::RuntimeEnhancements::default()
+                }
+            };
             let provider: Arc<dyn TranscriptionProvider> =
                 if crate::sherpa_asr::is_online_model(&selection.model) {
                     Arc::new(crate::sherpa_asr::SherpaOnlineAsrProvider::new(installed))
                 } else {
-                    Arc::new(crate::sherpa_asr::SherpaOfflineAsrProvider::new(installed))
+                    Arc::new(crate::sherpa_asr::SherpaOfflineAsrProvider::new(
+                        installed,
+                        enhancements,
+                    ))
                 };
             if selection.model == crate::sherpa_asr::models::SENSEVOICE_MODEL_ID {
                 Ok(crate::punctuation::wrap_if_available(app, provider))

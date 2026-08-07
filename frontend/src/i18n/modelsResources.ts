@@ -3,7 +3,7 @@ import { settingsExtraResources } from './settingsExtraResources';
 export const modelsResources = {
   'en-US': {
     ...settingsExtraResources['en-US'].models,
-    sections: { transcription: 'Speech recognition models', transcriptionDescription: 'Manage local models for Chinese and multilingual meetings. SenseVoice is recommended for Chinese; choose the active model in Services.', punctuation: 'Punctuation restoration', punctuationDescription: 'Manage the optional local model that restores punctuation after SenseVoice transcription.', speaker: 'Speaker diarization model', speakerDescription: 'Manage the local segmentation and speaker-embedding package.', localSummary: 'Built-in summary models', localSummaryDescription: 'Manage offline GGUF models used by Built-in AI.', ollama: 'Ollama models', ollamaDescription: 'Scan, pull, and remove models from the configured Ollama service.', advanced: 'More Whisper models' },
+    sections: { transcription: 'Speech recognition models', transcriptionDescription: 'Manage local models for Chinese and multilingual meetings. SenseVoice is recommended for Chinese; choose the active model in Services.', providerGroups: { sherpa: 'Sherpa ONNX', sherpaDescription: 'Chinese and multilingual finalized models, plus the optional streaming model.', whisper: 'Whisper', whisperDescription: 'Recommended default: Small, a compact model with a good speed and quality balance.', parakeet: 'Parakeet', parakeetDescription: 'English-only NVIDIA models. Chinese speech is not supported.' }, punctuation: 'Punctuation restoration', punctuationDescription: 'Manage the optional local model that restores punctuation after SenseVoice transcription.', terminology: 'Chinese terminology enhancement', terminologyDescription: 'Manage Sherpa’s optional homophone lexicon and pre-generated replacement rules. Enable them in Services.', speaker: 'Speaker diarization model', speakerDescription: 'Manage the local segmentation and speaker-embedding package.', localSummary: 'Built-in summary models', localSummaryDescription: 'Manage offline GGUF models used by Built-in AI.', ollama: 'Ollama models', ollamaDescription: 'Scan, pull, and remove models from the configured Ollama service.', advanced: 'More Whisper models' },
     actions: { download: 'Download', retry: 'Retry', repair: 'Repair', delete: 'Delete', use: 'Use model', redownload: 'Download again', cancel: 'Cancel', cancelDownload: 'Cancel download', refresh: 'Refresh' },
     status: { ready: 'Ready', installed: 'Installed', notInstalled: 'Not installed', needsRepair: 'Needs repair', inUse: 'In use', recommended: 'Recommended', streaming: 'Streaming', downloading: 'Downloading…', loading: 'Loading models…', corrupted: 'Corrupted', error: 'Error' },
     download: { readyTitle: '{{icon}} {{model}} is ready', readyDescription: 'Downloaded and ready to use.', failed: 'Could not download {{model}}', genericFailed: 'Download failed', cancelled: '{{model}} download cancelled', cancelFailed: 'Could not cancel download', starting: 'Downloading {{model}}…', mayTakeMinutes: 'This may take a few minutes.', completed: '{{model}} downloaded', progress: 'Downloading… {{progress}}%' },
@@ -28,9 +28,10 @@ export const modelsResources = {
       optimizedSuffix: ' · Optimized',
     },
     parakeet: {
-      lightning: { name: 'Lightning', tagline: 'Real time · Best for speed with great accuracy' },
-      compact: { name: 'Compact', tagline: 'Real time · Smaller download' },
-      precise: { name: 'Precise', tagline: '20× real time · Higher precision' },
+      v3Int8: { name: 'Parakeet v3 · Int8', tagline: 'English only · Chinese is not supported' },
+      v2Int8: { name: 'Parakeet v2 · Int8', tagline: 'English only · Chinese is not supported' },
+      v3Fp32: { name: 'Parakeet v3 · FP32', tagline: 'English only · Chinese is not supported' },
+      englishOnly: 'English only · Chinese is not supported',
     },
     sherpa: {
       models: {
@@ -38,6 +39,7 @@ export const modelsResources = {
         'paraformer-zh-small-int8': { description: 'Lightweight Chinese and English model. Uses automatic language detection after each VAD segment.' },
         'paraformer-online-zh-en-int8': { description: 'Optional Chinese and English streaming model. Shows revisable partial text while recording; final VAD segments remain the saved transcript.' },
         'qwen3-asr-0.6b-int8': { description: 'High-quality multilingual and dialect model. Beta because it needs substantially more memory and compute.' },
+        'funasr-nano-int8': { description: 'Finalized multilingual and Chinese dialect model with dynamic hotwords, ITN, and built-in punctuation. Beta because the installed files need about 1 GB.' },
       },
       sizeAndLicense: '{{download}} download · {{installed}} installed · {{license}}',
       downloaded: '{{model}} is ready',
@@ -45,6 +47,7 @@ export const modelsResources = {
       errors: { load: 'Could not load Sherpa ONNX models', download: 'Could not download the Sherpa ONNX model', delete: 'Could not delete the Sherpa ONNX model' },
     },
     punctuation: { title: 'Chinese and English punctuation int8', description: 'Adds punctuation locally to final SenseVoice segments. Transcription continues with raw ASR text if this optional model is unavailable.', ready: 'Punctuation restoration is ready', loadFailed: 'Could not load punctuation model status', downloadFailed: 'Could not download punctuation model', removed: 'Punctuation model removed', removeFailed: 'Could not remove punctuation model' },
+    homophone: { lexiconTitle: 'Chinese homophone lexicon', lexiconDescription: 'Shared local pinyin lexicon required by Sherpa’s Chinese homophone replacer. Replacement runs only when selected .fst rules are enabled in Services.', rulesTitle: 'Replacement rule files', rulesDescription: 'Import pre-generated Sherpa/Pynini .fst rules. Mingtily verifies and copies them into its own app-data directory.', importRules: 'Import .fst rules', noRules: 'No rule files imported. Rules must be generated ahead of time; Mingtily does not compile Pynini rules on this device.', deleteRule: 'Delete {{name}}', loadFailed: 'Could not load homophone replacement resources', lexiconReady: 'Homophone lexicon is ready', downloadFailed: 'Could not download the homophone lexicon', lexiconRemoved: 'Homophone lexicon removed', removeFailed: 'Could not remove the homophone lexicon', rulesImported: 'Homophone rules imported', importFailed: 'Could not import homophone rules', ruleRemoved: 'Homophone rule removed', ruleRemoveFailed: 'Could not remove homophone rule' },
     builtInMetadata: {
       qwen2b: { name: 'Qwen 3.5 2B (Balanced)', description: 'Balanced local summary model with strong quality and modest hardware requirements.' },
       qwen4b: { name: 'Qwen 3.5 4B (High quality)', description: 'The highest-quality local Qwen option currently available in Mingtily.' },
@@ -58,7 +61,7 @@ export const modelsResources = {
   },
   'zh-CN': {
     ...settingsExtraResources['zh-CN'].models,
-    sections: { transcription: '语音转写模型', transcriptionDescription: '统一管理中文与多语言会议使用的本地模型；中文场景推荐 SenseVoice，当前使用的模型请在“服务”中选择。', punctuation: '标点恢复模型', punctuationDescription: '管理 SenseVoice 转写后自动恢复标点的可选本地模型。', speaker: '说话人分离模型', speakerDescription: '管理本地分割与说话人向量模型包。', localSummary: '内置总结模型', localSummaryDescription: '管理内置 AI 使用的离线 GGUF 模型。', ollama: 'Ollama 模型', ollamaDescription: '扫描、拉取或删除当前 Ollama 服务中的模型。', advanced: '更多 Whisper 模型' },
+    sections: { transcription: '语音转写模型', transcriptionDescription: '统一管理中文与多语言会议使用的本地模型；中文场景推荐 SenseVoice，当前使用的模型请在“服务”中选择。', providerGroups: { sherpa: 'Sherpa ONNX', sherpaDescription: '管理中文、多语言最终模型，以及可选的流式模型。', whisper: 'Whisper', whisperDescription: '默认推荐 Small：体积较小，在速度和质量之间更均衡。', parakeet: 'Parakeet', parakeetDescription: 'NVIDIA 英文模型，仅支持英文，不支持中文。' }, punctuation: '标点恢复模型', punctuationDescription: '管理 SenseVoice 转写后自动恢复标点的可选本地模型。', terminology: '中文术语增强', terminologyDescription: '管理 Sherpa 可选的同音词词典和预生成替换规则；实际启用请前往“服务”。', speaker: '说话人分离模型', speakerDescription: '管理本地分割与说话人向量模型包。', localSummary: '内置总结模型', localSummaryDescription: '管理内置 AI 使用的离线 GGUF 模型。', ollama: 'Ollama 模型', ollamaDescription: '扫描、拉取或删除当前 Ollama 服务中的模型。', advanced: '更多 Whisper 模型' },
     actions: { download: '下载', retry: '重试', repair: '修复', delete: '删除', use: '使用此模型', redownload: '重新下载', cancel: '取消', cancelDownload: '取消下载', refresh: '刷新' },
     status: { ready: '可用', installed: '已安装', notInstalled: '未安装', needsRepair: '需要修复', inUse: '正在使用', recommended: '推荐', streaming: '流式', downloading: '正在下载…', loading: '正在加载模型…', corrupted: '文件损坏', error: '错误' },
     download: { readyTitle: '{{icon}} {{model}} 已可用', readyDescription: '模型已下载，可以开始使用。', failed: '{{model}} 下载失败', genericFailed: '下载失败', cancelled: '已取消下载 {{model}}', cancelFailed: '取消下载失败', starting: '正在下载 {{model}}…', mayTakeMinutes: '下载可能需要几分钟。', completed: '{{model}} 下载完成', progress: '正在下载… {{progress}}%' },
@@ -83,9 +86,10 @@ export const modelsResources = {
       optimizedSuffix: ' · 已优化',
     },
     parakeet: {
-      lightning: { name: '极速', tagline: '实时处理 · 速度优先且准确度良好' },
-      compact: { name: '轻巧', tagline: '实时处理 · 下载体积更小' },
-      precise: { name: '精准', tagline: '约 20 倍实时速度 · 更高精度' },
+      v3Int8: { name: 'Parakeet v3 · Int8', tagline: '仅支持英文 · 不支持中文' },
+      v2Int8: { name: 'Parakeet v2 · Int8', tagline: '仅支持英文 · 不支持中文' },
+      v3Fp32: { name: 'Parakeet v3 · FP32', tagline: '仅支持英文 · 不支持中文' },
+      englishOnly: '仅支持英文 · 不支持中文',
     },
     sherpa: {
       models: {
@@ -93,6 +97,7 @@ export const modelsResources = {
         'paraformer-zh-small-int8': { description: '轻量中文、英文模型；每个 VAD 语音段完成后自动判断语言。' },
         'paraformer-online-zh-en-int8': { description: '可选的中英文流式模型；录音时持续展示可修订文本，最终仍以 VAD 片段写入转写记录。' },
         'qwen3-asr-0.6b-int8': { description: '高质量多语言与方言模型；因内存和算力需求明显更高，暂列为 Beta。' },
+        'funasr-nano-int8': { description: '支持动态热词、ITN 和内置标点的最终转写模型，覆盖多语言与中文方言；安装后约占 1 GB，暂列为 Beta。' },
       },
       sizeAndLicense: '下载 {{download}} · 安装后 {{installed}} · {{license}}',
       downloaded: '{{model}} 已可用',
@@ -100,6 +105,7 @@ export const modelsResources = {
       errors: { load: 'Sherpa ONNX 模型加载失败', download: 'Sherpa ONNX 模型下载失败', delete: 'Sherpa ONNX 模型删除失败' },
     },
     punctuation: { title: '中英文标点恢复 int8', description: '在本地为 SenseVoice 的最终转写片段补充标点。该模型属于可选增强；不可用时会继续保留原始 ASR 文本。', ready: '标点恢复模型已可用', loadFailed: '标点模型状态加载失败', downloadFailed: '标点模型下载失败', removed: '标点模型已删除', removeFailed: '标点模型删除失败' },
+    homophone: { lexiconTitle: '中文同音词词典', lexiconDescription: 'Sherpa 中文同音词替换器共用的本地拼音词典；只有在“服务”中选中并启用 .fst 规则后才会执行替换。', rulesTitle: '替换规则文件', rulesDescription: '导入预生成的 Sherpa/Pynini .fst 规则；Mingtily 会校验并复制到自己的应用数据目录。', importRules: '导入 .fst 规则', noRules: '尚未导入规则。规则需要提前生成；Mingtily 不会在本机编译 Pynini 规则。', deleteRule: '删除 {{name}}', loadFailed: '同音词替换资源加载失败', lexiconReady: '同音词词典已可用', downloadFailed: '同音词词典下载失败', lexiconRemoved: '同音词词典已删除', removeFailed: '同音词词典删除失败', rulesImported: '同音词规则已导入', importFailed: '同音词规则导入失败', ruleRemoved: '同音词规则已删除', ruleRemoveFailed: '同音词规则删除失败' },
     builtInMetadata: {
       qwen2b: { name: 'Qwen 3.5 2B（均衡）', description: '本地总结质量与硬件需求较均衡，适合大多数设备。' },
       qwen4b: { name: 'Qwen 3.5 4B（高质量）', description: '当前 Mingtily 中质量最高的本地 Qwen 模型。' },

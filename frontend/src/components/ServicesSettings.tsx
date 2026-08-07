@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { AlertTriangle, Bot, FlaskConical, MessageSquareText, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { LanguageSelection } from '@/components/LanguageSelection';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -15,9 +16,13 @@ import { WhisperAPI } from '@/lib/whisper';
 import { ParakeetAPI } from '@/lib/parakeet';
 import {
   PARAFORMER_ONLINE_MODEL_ID,
+  DEFAULT_SHERPA_ASR_ENHANCEMENT_CONFIG,
   SHERPA_ASR_PROVIDER_ID,
   SherpaAsrAPI,
+  SherpaAsrEnhancementConfig,
+  HomophoneReplacerStatus,
   SherpaAsrModelStatus,
+  supportsDynamicHotwords,
 } from '@/lib/sherpa-asr';
 import { capabilityConfigService } from '@/services/capabilityConfigService';
 import {
@@ -63,6 +68,13 @@ function readProviderModelMap(): Record<string, string> {
   }
 }
 
+function parseHotwords(value: string): string[] {
+  return value
+    .split(/[\n,，]+/)
+    .map((term) => term.trim())
+    .filter(Boolean);
+}
+
 export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
   const { t } = useTranslation(['settings', 'models']);
   const {
@@ -83,55 +95,113 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
   const [sherpaModels, setSherpaModels] = useState<SherpaAsrModelStatus[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
   const [savingTranscript, setSavingTranscript] = useState(false);
+  const [enhancementConfig, setEnhancementConfig] = useState<SherpaAsrEnhancementConfig>(
+    DEFAULT_SHERPA_ASR_ENHANCEMENT_CONFIG
+  );
+  const [hotwordsText, setHotwordsText] = useState('');
+  const [homophoneStatus, setHomophoneStatus] = useState<HomophoneReplacerStatus | null>(null);
   const [speakerConfig, setSpeakerConfig] = useState<SpeakerDiarizationConfig>(
     DEFAULT_SPEAKER_DIARIZATION_CONFIG
   );
   const [speakerInstalled, setSpeakerInstalled] = useState(false);
   const [savingSpeaker, setSavingSpeaker] = useState(false);
 
-  const loadLocalModels = useCallback(async () => {
-    setLoadingModels(true);
-    try {
-      const [whisperResult, parakeetResult, sherpaResult, streamingResult, speakerResult] = await Promise.allSettled([
-        WhisperAPI.init().then(() => WhisperAPI.getAvailableModels()),
-        ParakeetAPI.init().then(() => ParakeetAPI.getAvailableModels()),
-        SherpaAsrAPI.listModels(),
-        capabilityConfigService.getStreamingTranscription(),
-        capabilityConfigService.getSpeakerDiarization(),
-      ]);
-      if (whisperResult.status === 'fulfilled') {
-        setWhisperModels(
-          whisperResult.value.filter((model) => model.status === 'Available').map((model) => model.name)
-        );
-      }
-      if (parakeetResult.status === 'fulfilled') {
-        setParakeetModels(
-          parakeetResult.value.filter((model) => model.status === 'Available').map((model) => model.name)
-        );
-      }
-      if (sherpaResult.status === 'fulfilled') {
-        setSherpaModels(sherpaResult.value);
-      }
-      if (streamingResult.status === 'fulfilled') {
-        setRecognitionMode(streamingResult.value.enabled ? 'beta-live' : 'stable');
-        setStreamingModel(streamingResult.value.model);
-      }
-      if (speakerResult.status === 'fulfilled') setSpeakerConfig(speakerResult.value);
+  const providerLoadRef = useRef<Partial<Record<TranscriptProviderId, Promise<string[]>>>>({});
 
-      try {
-        const status = await invoke<{ status: string }>('speaker_diarization_get_status');
-        setSpeakerInstalled(status.status === 'available');
-      } catch {
-        setSpeakerInstalled(false);
+  const loadProviderModels = useCallback((provider: TranscriptProviderId): Promise<string[]> => {
+    const inFlight = providerLoadRef.current[provider];
+    if (inFlight) return inFlight;
+
+    const request = (async () => {
+      if (provider === 'localWhisper') {
+        await WhisperAPI.init();
+        const models = await WhisperAPI.getAvailableModels();
+        const available = models
+          .filter((model) => model.status === 'Available')
+          .map((model) => model.name);
+        setWhisperModels(available);
+        return available;
       }
-    } finally {
-      setLoadingModels(false);
-    }
+
+      if (provider === 'parakeet') {
+        await ParakeetAPI.init();
+        const models = await ParakeetAPI.getAvailableModels();
+        const available = models
+          .filter((model) => model.status === 'Available')
+          .map((model) => model.name);
+        setParakeetModels(available);
+        return available;
+      }
+
+      const models = await SherpaAsrAPI.listModels();
+      setSherpaModels(models);
+      return models
+        .filter((model) => model.status === 'available' && model.streaming_mode !== 'continuous')
+        .map((model) => model.id);
+    })();
+
+    providerLoadRef.current[provider] = request;
+    void request
+      .finally(() => {
+        delete providerLoadRef.current[provider];
+      })
+      .catch(() => undefined);
+    return request;
   }, []);
 
+  const loadSettings = useCallback(async () => {
+    const sherpaModelsPromise = loadProviderModels('sherpa-onnx');
+    const [
+      ,
+      streamingResult,
+      enhancementResult,
+      homophoneResult,
+      speakerResult,
+      speakerInstalledResult,
+    ] = await Promise.allSettled([
+      sherpaModelsPromise,
+      capabilityConfigService.getStreamingTranscription(),
+      capabilityConfigService.getSherpaAsrEnhancements(),
+      SherpaAsrAPI.getHomophoneStatus(),
+      capabilityConfigService.getSpeakerDiarization(),
+      invoke<{ status: string }>('speaker_diarization_get_status'),
+    ]);
+
+    if (streamingResult.status === 'fulfilled') {
+      setRecognitionMode(streamingResult.value.enabled ? 'beta-live' : 'stable');
+      setStreamingModel(streamingResult.value.model);
+    }
+    if (enhancementResult.status === 'fulfilled') {
+      setEnhancementConfig(enhancementResult.value);
+      setHotwordsText(enhancementResult.value.hotwords.join('\n'));
+    }
+    if (homophoneResult.status === 'fulfilled') setHomophoneStatus(homophoneResult.value);
+    if (speakerResult.status === 'fulfilled') setSpeakerConfig(speakerResult.value);
+    if (speakerInstalledResult.status === 'fulfilled') {
+      setSpeakerInstalled(speakerInstalledResult.value.status === 'available');
+    } else {
+      setSpeakerInstalled(false);
+    }
+  }, [loadProviderModels]);
+
   useEffect(() => {
-    void loadLocalModels();
-  }, [loadLocalModels]);
+    void loadSettings();
+  }, [loadSettings]);
+
+  useEffect(() => {
+    let active = true;
+    setLoadingModels(true);
+    void loadProviderModels(transcriptProvider)
+      .catch((error) => {
+        console.warn(`[ServicesSettings] Unable to load ${transcriptProvider} models`, error);
+      })
+      .finally(() => {
+        if (active) setLoadingModels(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadProviderModels, transcriptProvider]);
 
   useEffect(() => {
     setTranscriptProvider(transcriptModelConfig.provider);
@@ -159,6 +229,23 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
       ),
     [sherpaModels]
   );
+  const dynamicHotwordsSupported = supportsDynamicHotwords(
+    transcriptProvider,
+    transcriptModel
+  );
+  const homophoneResourcesReady =
+    homophoneStatus?.status === 'available' &&
+    (homophoneStatus?.rules.length ?? 0) > 0;
+  const availableHomophoneRuleIds = new Set(
+    homophoneStatus?.rules.map((rule) => rule.id) ?? []
+  );
+  const homophoneSelectionReady =
+    !enhancementConfig.homophoneReplacerEnabled ||
+    (homophoneResourcesReady &&
+      enhancementConfig.homophoneRuleFsts.length > 0 &&
+      enhancementConfig.homophoneRuleFsts.every((ruleId) =>
+        availableHomophoneRuleIds.has(ruleId)
+      ));
 
   useEffect(() => {
     if (
@@ -172,21 +259,16 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
   const transcriptModelLabel = (modelId: string) =>
     sherpaModels.find((model) => model.id === modelId)?.name || modelId;
 
-  const changeTranscriptProvider = (provider: TranscriptProviderId) => {
+  const changeTranscriptProvider = async (provider: TranscriptProviderId) => {
     setTranscriptProvider(provider);
-    const available = provider === 'parakeet'
-      ? parakeetModels
-      : provider === 'sherpa-onnx'
-        ? sherpaModels
-            .filter(
-              (model) =>
-                model.status === 'available' &&
-                model.streaming_mode !== 'continuous'
-            )
-            .map((model) => model.id)
-        : whisperModels;
-    const remembered = readProviderModelMap()[provider];
-    setTranscriptModel(available.includes(remembered) ? remembered : (available[0] || ''));
+    try {
+      const available = await loadProviderModels(provider);
+      const remembered = readProviderModelMap()[provider];
+      setTranscriptModel(available.includes(remembered) ? remembered : (available[0] || ''));
+    } catch (error) {
+      console.warn(`[ServicesSettings] Unable to switch to ${provider}`, error);
+      setTranscriptModel('');
+    }
   };
 
   const saveTranscription = async () => {
@@ -216,6 +298,12 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
           model: streamingModel,
         });
       }
+      const savedEnhancements = await capabilityConfigService.saveSherpaAsrEnhancements({
+        ...enhancementConfig,
+        hotwords: parseHotwords(hotwordsText),
+      });
+      setEnhancementConfig(savedEnhancements);
+      setHotwordsText(savedEnhancements.hotwords.join('\n'));
       setTranscriptModelConfig(config);
       const map = readProviderModelMap();
       map[transcriptProvider] = transcriptModel;
@@ -340,7 +428,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
                 ? t('settings:services.transcription.finalizedProvider')
                 : t('settings:services.provider')}
             </label>
-            <Select value={transcriptProvider} onValueChange={(value) => changeTranscriptProvider(value as TranscriptProviderId)}>
+            <Select value={transcriptProvider} onValueChange={(value) => { void changeTranscriptProvider(value as TranscriptProviderId); }}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="parakeet">Parakeet</SelectItem>
@@ -383,6 +471,124 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
             model={transcriptModel}
           />
         </div>
+        <div className="mt-5 rounded-lg border border-purple-200 bg-purple-50/40 p-4">
+          <div className="mb-4 flex items-start gap-2">
+            <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-purple-700" />
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-purple-950">
+                {t('settings:services.transcription.terminology.title')}
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium tracking-wide text-amber-800">
+                  BETA
+                </span>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-purple-800">
+                {t('settings:services.transcription.terminology.description')}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">
+              {t('settings:services.transcription.terminology.hotwords')}
+            </label>
+            <Textarea
+              value={hotwordsText}
+              onChange={(event) => {
+                setHotwordsText(event.target.value);
+                setEnhancementConfig((current) => ({
+                  ...current,
+                  hotwords: parseHotwords(event.target.value),
+                }));
+              }}
+              rows={4}
+              placeholder={t('settings:services.transcription.terminology.hotwordsPlaceholder')}
+            />
+            <p className="text-xs leading-5 text-gray-600">
+              {dynamicHotwordsSupported
+                ? t('settings:services.transcription.terminology.hotwordsHint')
+                : t('settings:services.transcription.terminology.hotwordsUnsupported')}
+            </p>
+          </div>
+
+          {transcriptProvider === SHERPA_ASR_PROVIDER_ID ? (
+            <div className="mt-4 border-t border-purple-100 pt-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-sm font-medium text-gray-900">
+                    {t('settings:services.transcription.terminology.homophone')}
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-gray-600">
+                    {t('settings:services.transcription.terminology.homophoneHint')}
+                  </p>
+                </div>
+                <Switch
+                  checked={enhancementConfig.homophoneReplacerEnabled}
+                  disabled={
+                    !enhancementConfig.homophoneReplacerEnabled &&
+                    !homophoneResourcesReady
+                  }
+                  onCheckedChange={(homophoneReplacerEnabled) =>
+                    setEnhancementConfig((current) => ({
+                      ...current,
+                      homophoneReplacerEnabled,
+                    }))
+                  }
+                />
+              </div>
+
+              {homophoneStatus?.status !== 'available' && (
+                <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  <span>{t('settings:services.transcription.terminology.lexiconMissing')}</span>
+                  <Button variant="outline" size="sm" onClick={onOpenModels}>
+                    {t('settings:tabs.models')}
+                  </Button>
+                </div>
+              )}
+
+              {homophoneStatus?.status === 'available' && homophoneStatus.rules.length === 0 && (
+                <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  <span>{t('settings:services.transcription.terminology.rulesMissing')}</span>
+                  <Button variant="outline" size="sm" onClick={onOpenModels}>
+                    {t('settings:tabs.models')}
+                  </Button>
+                </div>
+              )}
+
+              {(homophoneStatus?.rules.length ?? 0) > 0 && (
+                <div className="mt-3 space-y-2">
+                  <div className="text-xs font-medium text-gray-700">
+                    {t('settings:services.transcription.terminology.selectRules')}
+                  </div>
+                  {homophoneStatus?.rules.map((rule) => (
+                    <label
+                      key={rule.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-md border border-purple-100 bg-white px-3 py-2 text-sm text-gray-800"
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-purple-600"
+                        checked={enhancementConfig.homophoneRuleFsts.includes(rule.id)}
+                        onChange={(event) =>
+                          setEnhancementConfig((current) => ({
+                            ...current,
+                            homophoneRuleFsts: event.target.checked
+                              ? [...current.homophoneRuleFsts, rule.id]
+                              : current.homophoneRuleFsts.filter((id) => id !== rule.id),
+                          }))
+                        }
+                      />
+                      <span className="truncate">{rule.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="mt-4 border-t border-purple-100 pt-4 text-xs leading-5 text-gray-600">
+              {t('settings:services.transcription.terminology.homophoneSherpaOnly')}
+            </div>
+          )}
+        </div>
         {recognitionMode === 'beta-live' && (
           <div className="mt-4 rounded-md border border-purple-200 bg-purple-50/50 px-3 py-2 text-xs leading-5 text-purple-800">
             {t('settings:services.transcription.streamingNotice')}
@@ -395,7 +601,8 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
               savingTranscript ||
               !installedTranscriptModels.includes(transcriptModel) ||
               (recognitionMode === 'beta-live' &&
-                !installedStreamingModels.some((model) => model.id === streamingModel))
+                !installedStreamingModels.some((model) => model.id === streamingModel)) ||
+              (transcriptProvider === SHERPA_ASR_PROVIDER_ID && !homophoneSelectionReady)
             }
           >
             {savingTranscript ? t('settings:actions.saving') : t('settings:actions.save')}

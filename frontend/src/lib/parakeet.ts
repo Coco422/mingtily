@@ -38,21 +38,21 @@ export interface ModelDisplayInfo {
 
 export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
   'parakeet-tdt-0.6b-v3-int8': {
-    friendlyName: 'Lightning',
+    friendlyName: 'Parakeet v3 · Int8',
     icon: '⚡',
-    tagline: 'Real time • Best for speed, great accuracy',
+    tagline: 'English only • Chinese is not supported',
     tier: 'fastest'
   },
   'parakeet-tdt-0.6b-v2-int8': {
-    friendlyName: 'Compact',
+    friendlyName: 'Parakeet v2 · Int8',
     icon: '📦',
-    tagline: 'Real time • Smaller size',
+    tagline: 'English only • Chinese is not supported',
     tier: 'balanced'
   },
   'parakeet-tdt-0.6b-v3-fp32': {
-    friendlyName: 'Precise',
+    friendlyName: 'Parakeet v3 · FP32',
     icon: '🎯',
-    tagline: '20x real-time • Higher accuracy',
+    tagline: 'English only • Chinese is not supported',
     tier: 'precise'
   }
 };
@@ -150,8 +150,16 @@ export function getRecommendedModel(systemSpecs?: { ram: number; cores: number }
 import { invoke } from '@tauri-apps/api/core';
 
 export class ParakeetAPI {
-  static async init(): Promise<void> {
-    await invoke('parakeet_init');
+  private static initPromise: Promise<void> | null = null;
+
+  static init(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = invoke<void>('parakeet_init').catch((error) => {
+        this.initPromise = null;
+        throw error;
+      });
+    }
+    return this.initPromise;
   }
 
   static async getAvailableModels(): Promise<ParakeetModelInfo[]> {

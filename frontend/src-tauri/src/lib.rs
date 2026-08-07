@@ -582,6 +582,13 @@ pub fn run() {
             sherpa_asr::commands::sherpa_asr_delete_model,
             sherpa_asr::commands::sherpa_asr_get_streaming_config,
             sherpa_asr::commands::sherpa_asr_save_streaming_config,
+            sherpa_asr::commands::sherpa_asr_get_enhancement_config,
+            sherpa_asr::commands::sherpa_asr_save_enhancement_config,
+            sherpa_asr::commands::sherpa_asr_get_homophone_status,
+            sherpa_asr::commands::sherpa_asr_download_homophone_lexicon,
+            sherpa_asr::commands::sherpa_asr_delete_homophone_lexicon,
+            sherpa_asr::commands::sherpa_asr_import_homophone_rules,
+            sherpa_asr::commands::sherpa_asr_delete_homophone_rule,
             // Local punctuation restoration model commands
             punctuation::commands::punctuation_get_status,
             punctuation::commands::punctuation_download_model,

@@ -450,10 +450,11 @@ export function ModelManager({
     );
   }
 
-  const basicModelNames = ["small", "medium-q5_0", "large-v3-q5_0", "large-v3-turbo", "large-v3"];
-  const basicModels = models.filter(m => basicModelNames.includes(m.name))
-    .sort((a, b) => basicModelNames.indexOf(a.name) - basicModelNames.indexOf(b.name));
-  const advancedModels = models.filter(m => !basicModelNames.includes(m.name));
+  const featuredModelName = 'small';
+  const featuredModels = models.filter((model) => model.name === featuredModelName);
+  const advancedModels = models
+    .filter((model) => model.name !== featuredModelName)
+    .sort((left, right) => left.name.localeCompare(right.name));
 
   const renderManagedModel = (model: ModelInfo) => {
     const isAvailable = model.status === 'Available';
@@ -548,7 +549,7 @@ export function ModelManager({
   if (mode === 'manage') {
     return (
       <div className={`space-y-2 ${className}`}>
-        {basicModels.map(renderManagedModel)}
+        {featuredModels.map(renderManagedModel)}
         {advancedModels.length > 0 && (
           <Accordion type="single" collapsible className="w-full">
             <AccordionItem value="advanced-whisper-models" className="border-0">
@@ -569,7 +570,7 @@ export function ModelManager({
     <div className={`space-y-3 ${className}`}>
       {/* Basic Models */}
       <div className="space-y-3">
-        {basicModels.map((model) => {
+        {featuredModels.map((model) => {
           return (
             <ModelCard
               key={model.name}

@@ -18,9 +18,9 @@ import { Button } from '@/components/ui/button';
 import { ModelAssetRow, type ModelAssetState } from '@/components/ModelAssetRow';
 
 const PARAKEET_UI_KEYS: Record<string, string> = {
-  'parakeet-tdt-0.6b-v3-int8': 'lightning',
-  'parakeet-tdt-0.6b-v2-int8': 'compact',
-  'parakeet-tdt-0.6b-v3-fp32': 'precise',
+  'parakeet-tdt-0.6b-v3-int8': 'v3Int8',
+  'parakeet-tdt-0.6b-v2-int8': 'v2Int8',
+  'parakeet-tdt-0.6b-v3-fp32': 'v3Fp32',
 };
 
 function localizedParakeetModel(t: TFunction, modelName: string) {
@@ -30,19 +30,6 @@ function localizedParakeetModel(t: TFunction, modelName: string) {
     name: key ? t(`parakeet.${key}.name`) : fallback?.friendlyName || modelName,
     tagline: key ? t(`parakeet.${key}.tagline`) : fallback?.tagline || '',
   };
-}
-
-function normalizeParakeetSpeed(
-  speed: ParakeetModelInfo['speed'] | string | undefined,
-  fallback: ParakeetModelInfo['speed']
-): ParakeetModelInfo['speed'] {
-  const normalized = speed?.trim().toLowerCase();
-  if (normalized?.startsWith('ultra fast')) return 'Ultra Fast';
-  if (normalized?.startsWith('very fast')) return 'Very Fast';
-  if (normalized?.startsWith('fast')) return 'Fast';
-  if (normalized?.startsWith('medium')) return 'Medium';
-  if (normalized?.startsWith('slow')) return 'Slow';
-  return fallback;
 }
 
 interface ParakeetModelManagerProps {
@@ -446,16 +433,8 @@ export function ParakeetModelManager({
     const localizedModel = localizedParakeetModel(t, model.name);
     const modelConfig = PARAKEET_MODEL_CONFIGS[model.name];
     const accuracy = model.accuracy ?? modelConfig?.accuracy ?? 'Good';
-    const speed = normalizeParakeetSpeed(model.speed, modelConfig?.speed ?? 'Fast');
     const quantization = model.quantization ?? modelConfig?.quantization ?? 'Int8';
     const sizeMb = model.size_mb ?? modelConfig?.size_mb ?? 0;
-    const speedKey =
-      speed === 'Very Fast'
-        ? 'veryFast'
-        : speed === 'Ultra Fast'
-          ? 'ultraFast'
-          : speed.toLowerCase();
-
     return (
       <ModelAssetRow
         key={model.name}
@@ -466,9 +445,7 @@ export function ParakeetModelManager({
           formatFileSize(sizeMb),
           quantization,
           t('specs.accuracy', { accuracy: t(`metrics.accuracy.${accuracy.toLowerCase()}`) }),
-          t('specs.processing', {
-            speed: t(`metrics.speed.${speedKey}`),
-          }),
+          t('parakeet.englishOnly'),
         ]}
         state={state}
         statusLabel={statusLabel}
