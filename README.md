@@ -8,7 +8,7 @@
 
 Mingtily is a desktop meeting assistant for people who want recordings, transcripts, speaker labels, and local models to stay on their own device. External LLM Providers remain available as an explicit choice when cloud models provide better summary quality or performance.
 
-Current version: **0.6.2**. GitHub Actions publish tagged development releases for macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while updater payloads are integrity-signed by Mingtily. Linux remains available as an unsigned development-build target while its ONNX runtime integration is being unified.
+Current version: **0.6.3**. GitHub Actions publish tagged development releases for macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while updater payloads are integrity-signed by Mingtily. Linux remains available as an unsigned development-build target while its ONNX runtime integration is being unified.
 
 ## Highlights
 
@@ -49,6 +49,8 @@ Large model weights are not bundled with the application. Models are downloaded 
 | Built-in summaries | Qwen 3.5 2B/4B, Gemma 3 1B/4B | Optional GGUF downloads; local inference uses the bundled `llama-helper` sidecar. |
 | Local service summaries | Ollama | Defaults to a loopback endpoint and can use models already managed by Ollama. |
 | External summaries | OpenAI, Anthropic, Groq, OpenRouter, OpenAI Compatible | Transcript content is sent directly to the configured endpoint. |
+
+Fresh installs use SenseVoice Small int8 as the default transcription choice. Its download is approximately 158 MiB (about 226 MiB installed), and onboarding never downloads it until the user clicks Download.
 
 Parakeet models are English-only. Parakeet v3 is pinned to revision `8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce` of [`istupakov/parakeet-tdt-0.6b-v3-onnx`](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) and verified with built-in SHA256 values.
 
@@ -152,6 +154,7 @@ See [AGENTS.md](AGENTS.md) for durable engineering boundaries and [CONTRIBUTING.
 
 ## Known limitations
 
+- On one Windows x64 test device, SenseVoice installation completed but the app exited during the post-install model-status refresh. Restarting preserved the installed model; the faulting Windows module is still under investigation.
 - Parakeet is English-only and does not support Chinese. FunASR Nano and both Paraformer choices use automatic language detection. SenseVoice, Qwen3-ASR, and Whisper accept supported fixed-language hints.
 - Qwen3-ASR and FunASR Nano accept optional dynamic hotwords for finalized segments. Sherpa finalized models can also use the optional Chinese homophone lexicon with imported pre-generated `.fst` rules; these resources are local, user-managed Beta features and fail open when unavailable.
 - In Beta live enhancement, Paraformer Streaming shows a provisional hypothesis that can change while the user speaks. A separate finalized model transcribes completed VAD segments; provisional text is never persisted.

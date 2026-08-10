@@ -50,12 +50,12 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
         error!("Failed to set default summary model config: {}", e);
     }
 
-    // Default Transcription Model: Parakeet
+    // Default Transcription Model: SenseVoice for Chinese-first multilingual use.
     if let Err(e) =
         crate::database::repositories::setting::SettingsRepository::save_transcript_config(
             pool,
-            "parakeet",
-            crate::config::DEFAULT_PARAKEET_MODEL,
+            crate::sherpa_asr::PROVIDER_ID,
+            crate::sherpa_asr::models::SENSEVOICE_MODEL_ID,
         )
         .await
     {

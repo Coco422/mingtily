@@ -17,6 +17,7 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTranslation } from 'react-i18next';
+import { SENSEVOICE_MODEL_ID, SHERPA_ASR_PROVIDER_ID } from '@/lib/sherpa-asr';
 
 import {
   Dialog,
@@ -74,8 +75,8 @@ const Sidebar: React.FC = () => {
     ollamaEndpoint: null
   });
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'parakeet',
-    model: 'parakeet-tdt-0.6b-v3-int8',
+    provider: SHERPA_ASR_PROVIDER_ID,
+    model: SENSEVOICE_MODEL_ID,
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
   const [appVersion, setAppVersion] = useState('0.5.0');

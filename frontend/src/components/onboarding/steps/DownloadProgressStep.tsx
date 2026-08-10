@@ -9,8 +9,13 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getSummaryModelSizeLabel, getSummaryModelSizeMb } from '@/lib/onboarding-summary-model';
 import { useTranslation } from 'react-i18next';
+import {
+  SherpaAsrAPI,
+  type SherpaAsrDownloadProgress,
+  SENSEVOICE_MODEL_ID,
+} from '@/lib/sherpa-asr';
 
-const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
+const SENSEVOICE_DOWNLOAD_SIZE_MIB = 165_783_878 / 1024 / 1024;
 
 type DownloadStatus = 'waiting' | 'downloading' | 'completed' | 'error';
 
@@ -29,8 +34,8 @@ export function DownloadProgressStep() {
     goNext,
     selectedSummaryModel,
     recommendedSummaryModel,
-    parakeetDownloaded,
-    setParakeetDownloaded,
+    transcriptionModelDownloaded,
+    setTranscriptionModelDownloaded,
     summaryModelDownloaded,
     setSummaryModelDownloaded,
     startBackgroundDownloads,
@@ -39,11 +44,11 @@ export function DownloadProgressStep() {
 
   const [isMac, setIsMac] = useState(false);
 
-  const [parakeetState, setParakeetState] = useState<DownloadState>({
-    status: parakeetDownloaded ? 'completed' : 'waiting',
-    progress: parakeetDownloaded ? 100 : 0,
+  const [transcriptionState, setTranscriptionState] = useState<DownloadState>({
+    status: transcriptionModelDownloaded ? 'completed' : 'waiting',
+    progress: transcriptionModelDownloaded ? 100 : 0,
     downloadedMb: 0,
-    totalMb: 670,
+    totalMb: SENSEVOICE_DOWNLOAD_SIZE_MIB,
     speedMbps: 0,
   });
 
@@ -67,11 +72,11 @@ export function DownloadProgressStep() {
       return;
     }
 
-    console.log('[DownloadProgressStep] Retrying Parakeet download');
+    console.log('[DownloadProgressStep] Retrying SenseVoice download');
     retryingRef.current = true;
 
     // Reset error state
-    setParakeetState((prev) => ({
+    setTranscriptionState((prev) => ({
       ...prev,
       status: 'waiting',
       error: undefined,
@@ -81,11 +86,11 @@ export function DownloadProgressStep() {
     }));
 
     try {
-      await invoke('parakeet_retry_download', { modelName: PARAKEET_MODEL });
+      await SherpaAsrAPI.downloadModel(SENSEVOICE_MODEL_ID);
       // Progress events will update state
     } catch (error) {
       console.error('[DownloadProgressStep] Retry failed:', error);
-      setParakeetState((prev) => ({
+      setTranscriptionState((prev) => ({
         ...prev,
         status: 'error',
         error: error instanceof Error ? error.message : t('onboarding:retryFailed'),
@@ -164,48 +169,44 @@ export function DownloadProgressStep() {
     checkPlatform();
   }, []);
 
-  // Listen to Parakeet download progress
+  // Listen to SenseVoice download progress.
   useEffect(() => {
-    const unlistenProgress = listen<{
-      modelName: string;
-      progress: number;
-      downloaded_mb?: number;
-      total_mb?: number;
-      speed_mbps?: number;
-      status?: string;
-    }>('parakeet-model-download-progress', (event) => {
-      const { modelName, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
-      if (modelName === PARAKEET_MODEL) {
-        setParakeetState((prev) => ({
-          ...prev,
-          status: status === 'completed' ? 'completed' : 'downloading',
-          progress,
-          downloadedMb: downloaded_mb ?? prev.downloadedMb,
-          totalMb: total_mb ?? prev.totalMb,
-          speedMbps: speed_mbps ?? prev.speedMbps,
-        }));
-
-        if (status === 'completed' || progress >= 100) {
-          setParakeetDownloaded(true);
-        }
-      }
-    });
-
-    const unlistenComplete = listen<{ modelName: string }>(
-      'parakeet-model-download-complete',
+    const unlistenProgress = listen<SherpaAsrDownloadProgress>(
+      'sherpa-asr-model-download-progress',
       (event) => {
-        if (event.payload.modelName === PARAKEET_MODEL) {
-          setParakeetState((prev) => ({ ...prev, status: 'completed', progress: 100 }));
-          setParakeetDownloaded(true);
+        const { model_id, progress, downloaded_mb, total_mb, status } = event.payload;
+        if (model_id === SENSEVOICE_MODEL_ID) {
+          setTranscriptionState((prev) => ({
+            ...prev,
+            status: status === 'complete' ? 'completed' : 'downloading',
+            progress,
+            downloadedMb: downloaded_mb ?? prev.downloadedMb,
+            totalMb: total_mb ?? prev.totalMb,
+            speedMbps: 0,
+          }));
+
+          if (status === 'complete' || progress >= 100) {
+            setTranscriptionModelDownloaded(true);
+          }
         }
       }
     );
 
-    const unlistenError = listen<{ modelName: string; error: string }>(
-      'parakeet-model-download-error',
+    const unlistenComplete = listen<{ model_id: string }>(
+      'sherpa-asr-model-download-complete',
       (event) => {
-        if (event.payload.modelName === PARAKEET_MODEL) {
-          setParakeetState((prev) => ({
+        if (event.payload.model_id === SENSEVOICE_MODEL_ID) {
+          setTranscriptionState((prev) => ({ ...prev, status: 'completed', progress: 100 }));
+          setTranscriptionModelDownloaded(true);
+        }
+      }
+    );
+
+    const unlistenError = listen<{ model_id: string; error: string }>(
+      'sherpa-asr-model-download-error',
+      (event) => {
+        if (event.payload.model_id === SENSEVOICE_MODEL_ID) {
+          setTranscriptionState((prev) => ({
             ...prev,
             status: 'error',
             error: event.payload.error,
@@ -219,7 +220,7 @@ export function DownloadProgressStep() {
       unlistenComplete.then((fn) => fn());
       unlistenError.then((fn) => fn());
     };
-  }, []);
+  }, [setTranscriptionModelDownloaded]);
 
   // Listen to Summary Model download progress (always downloading for builtin-ai)
   useEffect(() => {
@@ -288,7 +289,7 @@ export function DownloadProgressStep() {
           totalMb: getSummaryModelSizeMb(selectedSummaryModel),
         }));
         await startBackgroundDownloads({
-          includeParakeet: false,
+          includeTranscription: false,
           includeSummary: true,
           summaryModel: selectedSummaryModel,
         });
@@ -299,46 +300,46 @@ export function DownloadProgressStep() {
     }
   };
 
-  const startParakeetDownload = async () => {
-    if (parakeetDownloaded || parakeetState.status === 'downloading') return;
+  const startTranscriptionDownload = async () => {
+    if (transcriptionModelDownloaded || transcriptionState.status === 'downloading') return;
 
     try {
-      setParakeetState((prev) => ({ ...prev, status: 'downloading', error: undefined }));
+      setTranscriptionState((prev) => ({ ...prev, status: 'downloading', error: undefined }));
       await startBackgroundDownloads({
-        includeParakeet: true,
+        includeTranscription: true,
         includeSummary: false,
       });
     } catch (error) {
-      console.error('Failed to start Parakeet download:', error);
-      setParakeetState((prev) => ({ ...prev, status: 'error', error: String(error) }));
+      console.error('Failed to start SenseVoice download:', error);
+      setTranscriptionState((prev) => ({ ...prev, status: 'error', error: String(error) }));
     }
   };
 
   const handleContinue = async () => {
+    let transcriptionReady = transcriptionModelDownloaded;
+
     // Verify actual model availability (catches state drift)
     try {
-      await invoke('parakeet_init');
-      const actuallyAvailable = await invoke<boolean>('parakeet_has_available_models');
+      const models = await SherpaAsrAPI.listModels();
+      const actuallyAvailable = models.some(
+        (model) => model.id === SENSEVOICE_MODEL_ID && model.status === 'available'
+      );
+      transcriptionReady = actuallyAvailable;
 
-      if (actuallyAvailable && !parakeetDownloaded) {
+      if (actuallyAvailable && !transcriptionModelDownloaded) {
         console.log('[DownloadProgressStep] Model available but state not updated');
-        setParakeetDownloaded(true);
-        setParakeetState((prev) => ({
+        setTranscriptionModelDownloaded(true);
+        setTranscriptionState((prev) => ({
           ...prev,
           status: 'completed',
           progress: 100,
         }));
-      } else if (!actuallyAvailable && parakeetState.status === 'error') {
-        toast.error(t('onboarding:transcriptionRequired'), {
-          description: t('onboarding:retryBeforeContinue'),
-        });
-        return;
       }
     } catch (error) {
       console.warn('[DownloadProgressStep] Failed to verify model:', error);
     }
 
-    if (summaryState.status === 'downloading') {
+    if (transcriptionState.status === 'downloading' || summaryState.status === 'downloading') {
       toast.info(t('onboarding:downloadsContinue'), {
         description: t('onboarding:downloadsContinueHint'),
         duration: 5000,
@@ -352,7 +353,7 @@ export function DownloadProgressStep() {
       // Non-macOS: Complete onboarding immediately (downloads continue in background)
       setIsCompleting(true);
       try {
-        await completeOnboarding();
+        await completeOnboarding(transcriptionReady);
 
         // Small delay to ensure state is saved before reload
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -470,10 +471,10 @@ export function DownloadProgressStep() {
           {renderDownloadCard(
             t('onboarding:transcriptionEngine'),
             <Mic className="w-5 h-5 text-gray-600" />,
-            parakeetState,
-            '~670 MB',
-            'MB',
-            startParakeetDownload,
+            transcriptionState,
+            `SenseVoice Small int8 · ~${Math.round(SENSEVOICE_DOWNLOAD_SIZE_MIB)} MiB`,
+            'MiB',
+            startTranscriptionDownload,
             t('onboarding:downloadTranscription')
           )}
 
@@ -488,9 +489,9 @@ export function DownloadProgressStep() {
           )}
         </div>
 
-        {/* Info Message - Only show when Parakeet is downloaded */}
+        {/* Info Message - Only show when the transcription model is downloaded */}
         <AnimatePresence>
-          {parakeetDownloaded && !summaryModelDownloaded && (
+          {transcriptionModelDownloaded && !summaryModelDownloaded && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -515,11 +516,13 @@ export function DownloadProgressStep() {
         <div className="w-full max-w-xs">
           <Button
             onClick={handleContinue}
-            disabled={!parakeetDownloaded || isCompleting}
+            disabled={isCompleting}
             className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {(isCompleting || !parakeetDownloaded) ? (
+            {isCompleting ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : !transcriptionModelDownloaded ? (
+              t('onboarding:skipModelsForNow')
             ) : (
               t('onboarding:continue')
             )}

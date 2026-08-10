@@ -178,12 +178,12 @@ async fn configured_transcription_selection<R: Runtime>(
             model: config.model,
         },
         Ok(None) => {
-            info!("No transcription configuration found; using the Parakeet default");
+            info!("No transcription configuration found; using the SenseVoice default");
             default_selection()
         }
         Err(error) => {
             warn!(
-                "Unable to read transcription configuration; using the Parakeet default: {}",
+                "Unable to read transcription configuration; using the SenseVoice default: {}",
                 error
             );
             default_selection()
@@ -193,8 +193,8 @@ async fn configured_transcription_selection<R: Runtime>(
 
 fn default_selection() -> TranscriptionSelection {
     TranscriptionSelection {
-        provider: PARAKEET_PROVIDER_ID.to_string(),
-        model: DEFAULT_PARAKEET_MODEL.to_string(),
+        provider: crate::sherpa_asr::PROVIDER_ID.to_string(),
+        model: crate::sherpa_asr::models::SENSEVOICE_MODEL_ID.to_string(),
     }
 }
 
@@ -208,8 +208,9 @@ fn normalize_provider_id(provider: &str) -> String {
 fn default_model_for_provider(provider: &str) -> &'static str {
     match provider {
         WHISPER_PROVIDER_ID | "whisper" => DEFAULT_WHISPER_MODEL,
+        PARAKEET_PROVIDER_ID => DEFAULT_PARAKEET_MODEL,
         crate::sherpa_asr::PROVIDER_ID => crate::sherpa_asr::models::SENSEVOICE_MODEL_ID,
-        _ => DEFAULT_PARAKEET_MODEL,
+        _ => crate::sherpa_asr::models::SENSEVOICE_MODEL_ID,
     }
 }
 
@@ -285,6 +286,15 @@ mod tests {
     fn sherpa_defaults_to_sense_voice() {
         assert_eq!(
             default_model_for_provider(crate::sherpa_asr::PROVIDER_ID),
+            crate::sherpa_asr::models::SENSEVOICE_MODEL_ID
+        );
+    }
+
+    #[test]
+    fn app_defaults_to_sense_voice() {
+        assert_eq!(default_selection().provider, crate::sherpa_asr::PROVIDER_ID);
+        assert_eq!(
+            default_selection().model,
             crate::sherpa_asr::models::SENSEVOICE_MODEL_ID
         );
     }

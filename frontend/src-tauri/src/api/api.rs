@@ -642,8 +642,8 @@ pub async fn api_get_transcript_config<R: Runtime>(
         Ok(None) => {
             log_info!("No transcript config found, returning default.");
             Ok(Some(TranscriptConfig {
-                provider: "parakeet".to_string(),
-                model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
+                provider: crate::sherpa_asr::PROVIDER_ID.to_string(),
+                model: crate::sherpa_asr::models::SENSEVOICE_MODEL_ID.to_string(),
                 api_key: None,
             }))
         }

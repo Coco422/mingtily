@@ -18,6 +18,7 @@ pub struct OnboardingStatus {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModelStatus {
+    // Legacy key retained for compatibility; now tracks the default onboarding transcription model.
     pub parakeet: String, // "downloaded" | "not_downloaded" | "downloading"
     pub summary: String,  // Generic field for summary model (Qwen 3.5 or legacy Gemma variants)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -176,12 +177,12 @@ pub async fn complete_onboarding<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     model: Option<String>,
-    parakeet_downloaded: bool,
+    transcription_downloaded: bool,
     summary_downloaded: bool,
 ) -> Result<(), String> {
     info!(
-        "Completing onboarding (parakeet_downloaded={}, summary_downloaded={}, summary_model={:?})",
-        parakeet_downloaded, summary_downloaded, model
+        "Completing onboarding (transcription_downloaded={}, summary_downloaded={}, summary_model={:?})",
+        transcription_downloaded, summary_downloaded, model
     );
 
     // Step 1: Save model configuration to SQLite database FIRST
@@ -213,11 +214,11 @@ pub async fn complete_onboarding<R: Runtime>(
     }
 
     // Completing onboarding never starts a download or pretends a model exists.
-    if parakeet_downloaded {
+    if transcription_downloaded {
         if let Err(e) = SettingsRepository::save_transcript_config(
             pool,
-            "parakeet",
-            crate::config::DEFAULT_PARAKEET_MODEL,
+            crate::sherpa_asr::PROVIDER_ID,
+            crate::sherpa_asr::models::SENSEVOICE_MODEL_ID,
         )
         .await
         {
@@ -225,8 +226,9 @@ pub async fn complete_onboarding<R: Runtime>(
             return Err(format!("Failed to save transcription model config: {}", e));
         }
         info!(
-            "Saved transcription model config: provider=parakeet, model={}",
-            crate::config::DEFAULT_PARAKEET_MODEL
+            "Saved transcription model config: provider={}, model={}",
+            crate::sherpa_asr::PROVIDER_ID,
+            crate::sherpa_asr::models::SENSEVOICE_MODEL_ID
         );
     }
 
@@ -235,9 +237,10 @@ pub async fn complete_onboarding<R: Runtime>(
         .await
         .map_err(|e| format!("Failed to load onboarding status: {}", e))?;
 
+    // `parakeet` is a legacy onboarding-store key retained for compatibility.
     status.completed = true;
     status.current_step = 4; // Max step (4 on macOS with permissions, 3 on other platforms)
-    status.model_status.parakeet = if parakeet_downloaded {
+    status.model_status.parakeet = if transcription_downloaded {
         "downloaded"
     } else {
         "not_downloaded"

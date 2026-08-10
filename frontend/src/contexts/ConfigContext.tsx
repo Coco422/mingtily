@@ -6,6 +6,7 @@ import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
+import { SENSEVOICE_MODEL_ID, SHERPA_ASR_PROVIDER_ID } from '@/lib/sherpa-asr';
 
 export interface OllamaModel {
   name: string;
@@ -106,8 +107,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
   // Transcript model configuration state
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelConfig>({
-    provider: 'parakeet',
-    model: 'parakeet-tdt-0.6b-v3-int8',
+    provider: SHERPA_ASR_PROVIDER_ID,
+    model: SENSEVOICE_MODEL_ID,
     apiKey: null
   });
 
@@ -198,8 +199,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         if (config) {
           console.log('[ConfigContext] Loaded saved transcript config:', config);
           setTranscriptModelConfig({
-            provider: config.provider || 'parakeet',
-            model: config.model || 'parakeet-tdt-0.6b-v3-int8',
+            provider: config.provider || SHERPA_ASR_PROVIDER_ID,
+            model: config.model || SENSEVOICE_MODEL_ID,
             apiKey: config.apiKey || null
           });
         }
