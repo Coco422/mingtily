@@ -65,7 +65,9 @@ fn sha256_file(path: &Path) -> Result<String> {
     let mut file = std::fs::File::open(path)
         .map_err(|e| anyhow!("Failed to open {} for checksum: {}", path.display(), e))?;
     let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 1024 * 1024];
+    // Keep the read buffer small: this can run on the Windows main thread
+    // (sync Tauri commands) where only 1 MB of stack is available.
+    let mut buffer = [0u8; 64 * 1024];
 
     loop {
         let read = file
