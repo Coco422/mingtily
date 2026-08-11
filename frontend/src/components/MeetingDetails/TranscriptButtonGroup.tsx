@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
@@ -31,6 +31,26 @@ export function TranscriptButtonGroup({
   const { betaFeatures } = useConfig();
   const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
 
+  // The panel is a fraction of the window, so viewport breakpoints cannot tell
+  // when the labels fit. Measure the container and collapse to icon-only
+  // buttons (tooltips remain) before the group can overflow.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setCompact(entry.contentRect.width < 400);
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const labelClass = compact ? 'hidden' : 'inline';
+
   const handleRetranscribeComplete = useCallback(async () => {
     // Refetch transcripts to show the updated data
     if (onRefetchTranscripts) {
@@ -39,7 +59,7 @@ export function TranscriptButtonGroup({
   }, [onRefetchTranscripts]);
 
   return (
-    <div className="flex items-center justify-center w-full gap-2">
+    <div ref={containerRef} className="flex items-center justify-center w-full gap-2">
       <ButtonGroup>
         <Button
           variant="outline"
@@ -51,34 +71,33 @@ export function TranscriptButtonGroup({
           title={transcriptCount === 0 ? t('noTranscript') : t('recording:copyTranscript')}
         >
           <Copy />
-          <span className="hidden lg:inline">{t('common:copy')}</span>
+          <span className={labelClass}>{t('common:copy')}</span>
         </Button>
 
         <Button
           size="sm"
           variant="outline"
-          className="xl:px-4"
           onClick={() => {
             onOpenMeetingFolder();
           }}
           title={t('openFolder')}
         >
-          <FolderOpen className="xl:mr-2" size={18} />
-          <span className="hidden lg:inline">{t('openFolder')}</span>
+          <FolderOpen size={18} />
+          <span className={labelClass}>{t('openFolder')}</span>
         </Button>
 
         {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
           <Button
             size="sm"
             variant="outline"
-            className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
+            className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200"
             onClick={() => {
               setShowRetranscribeDialog(true);
             }}
             title={t('retranscribe')}
           >
-            <RefreshCw className="xl:mr-2" size={18} />
-            <span className="hidden lg:inline">{t('retranscribe')}</span>
+            <RefreshCw size={18} />
+            <span className={labelClass}>{t('retranscribe')}</span>
           </Button>
         )}
       </ButtonGroup>
