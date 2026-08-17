@@ -1,10 +1,10 @@
 # Mingtily Privacy Policy
 
-Last updated: July 30, 2026
+Last updated: August 18, 2026
 
 ## Local-first data handling
 
-Mingtily stores meeting audio, transcripts, speaker labels, summaries, recovery data, settings, templates, and downloaded local models on the user's device. Mingtily does not operate a hosted account or meeting-storage service.
+Mingtily stores meeting audio, transcripts, speaker labels, meeting-level speaker-name mappings, summaries, recovery data, global custom terminology and replacement rules, settings, templates, and downloaded local models on the user's device. Mingtily does not operate a hosted account or meeting-storage service.
 
 Mingtily does not include usage analytics, telemetry clients, or advertising identifiers. Update checks are disabled by default and can be enabled explicitly in Settings.
 
@@ -25,11 +25,13 @@ When an update is available, installation begins only after the user chooses to 
 
 ## External LLM providers
 
-External providers are optional. When a user selects an external provider and generates a summary, the relevant transcript content and prompt are sent to the configured service. That provider's privacy policy, retention rules, location, and account settings apply.
+External providers are optional. When a user selects an external provider and generates a summary, the relevant transcript content and prompt are sent to the configured service. If the user has assigned participant names in that meeting, those resolved names may be included in the summary input. That provider's privacy policy, retention rules, location, and account settings apply.
 
 Mingtily does not proxy those requests through a Mingtily-operated service. API credentials are stored locally by the application and are sent only to the configured provider endpoint when required.
 
 Use Ollama or a downloaded built-in model when transcript content must remain on the device.
+
+When summary notifications are enabled, Mingtily may send a local operating-system notification after a background summary completes or fails. The notification does not include transcript or summary text.
 
 ## User control
 

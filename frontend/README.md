@@ -50,12 +50,21 @@ frontend/
 
 The current app does not require the archived FastAPI server under `backend/`. The frontend communicates with Rust through Tauri commands and events.
 
+## State and data contracts
+
+- `src/contexts/SummaryJobsContext.tsx` owns summary polling, stream snapshots, terminal notifications, and unread state across route changes. SQLite summary-process rows remain the source of truth; unmounting meeting details must not cancel a running job.
+- `src-tauri/src/speaker_mapping.rs` and `src-tauri/migrations/20260817000000_add_meeting_speaker_maps.sql` store revisioned, meeting-local participant mappings. The resolver overlays names and colors without rewriting historical transcript JSON.
+- `src-tauri/src/audio/transcription/terminology.rs` wraps the configured finalized transcription Provider. Exact replacements apply once to finalized text; provisional streaming hypotheses are never corrected or persisted.
+- Relevant Tauri contracts are `api_get_summary` / `api_process_transcript` / `api_cancel_summary`, `api_get_meeting_speaker_map` / `api_save_meeting_speaker_map`, and `terminology_get_config` / `terminology_save_config`. Speaker-map saves require the expected revision and reject stale writes.
+- Retranscription clears a meeting's speaker mapping only in the successful database transaction. Deleting a meeting explicitly removes the corresponding mapping.
+
 ## Important checks
 
 - Run `pnpm check:i18n` whenever user-facing copy or locale resources change.
 - Run `pnpm check:network-boundary` when startup behavior or network-capable commands change.
 - Run `pnpm build` for frontend type and production-build validation.
 - Validate audio, ASR, speaker, and Provider changes in the packaged or development Tauri app.
+- Validate background-summary navigation, speaker-map revision conflicts, and terminology corrections through their affected application flows when those contracts change.
 - External summary Providers are optional; local recording and transcription must remain usable without them.
 - Diagnostic logs remain local, rotate automatically, and are exported only after a user action in Settings.
 - Automatic GitHub Release checks are disabled by default and run only after the user enables them.

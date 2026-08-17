@@ -99,9 +99,9 @@ function ModelSection({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-start gap-3 bg-gray-50/60 px-5 py-4 text-left transition-colors hover:bg-gray-100/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-inset"
+        className="flex w-full items-start gap-3 bg-gray-50/60 px-5 py-4 text-left transition-colors hover:bg-gray-100/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-inset"
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-purple-100 bg-purple-50 text-purple-700">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-sky-100 bg-sky-50 text-sky-700">
           <Icon className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">
@@ -136,7 +136,7 @@ function ModelProviderGroup({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-inset"
+        className="flex w-full items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-inset"
       >
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-gray-900">{title}</div>

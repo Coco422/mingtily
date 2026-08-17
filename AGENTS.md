@@ -25,6 +25,9 @@ The Python/FastAPI code under `backend/` is a legacy upstream archive. Do not ad
 - Local Whisper and Parakeet engines: `frontend/src-tauri/src/whisper_engine/` and `frontend/src-tauri/src/parakeet_engine/`.
 - Speaker diarization: `frontend/src-tauri/src/speaker_diarization/`.
 - Summary providers and built-in inference: `frontend/src-tauri/src/summary/` and `llama-helper/`.
+- Cross-route summary job state: `frontend/src/contexts/SummaryJobsContext.tsx`; SQLite summary-process rows are the durable source of truth.
+- Meeting-level speaker mapping: `frontend/src-tauri/src/speaker_mapping.rs`, `frontend/src/hooks/useMeetingSpeakerMap.ts`, and `frontend/src/lib/speaker-map.ts`.
+- Finalized terminology correction: `frontend/src-tauri/src/audio/transcription/terminology.rs`; configuration commands remain under `frontend/src-tauri/src/sherpa_asr/commands.rs` for compatibility.
 - Frontend capability configuration: `frontend/src/services/capabilityConfigService.ts`.
 - UI localization: `frontend/src/i18n/`.
 - Local rotating logs and user-initiated diagnostic export: `frontend/src-tauri/src/diagnostic_logs.rs`.
@@ -46,6 +49,9 @@ Speaker diarization is optional and must fail open: ASR and recording continue w
 - Mingtily intentionally uses its own application data space and does not automatically migrate Meetily data.
 - Meeting data is stored in SQLite; recovery and transient frontend state also use local storage/IndexedDB where already implemented.
 - Preserve compatibility with existing meeting records and transcript JSON unless a task explicitly authorizes a migration.
+- Speaker names are revisioned, meeting-local overlays. Do not rewrite raw `transcripts.speaker` values or historical transcript JSON, and do not add cross-meeting identity memory implicitly.
+- Summary generation must survive route changes; page unmount may stop local listeners but must not cancel the native job.
+- Apply terminology corrections only to finalized text. Provisional streaming hypotheses remain display-only and unmodified.
 - Do not change JobManager, cancellation behavior, VAD parameters, or audio mixing as part of unrelated work.
 
 ## Internationalization
@@ -55,6 +61,12 @@ Speaker diarization is optional and must fail open: ASR and recording continue w
 - Model names, Provider IDs, stored speaker IDs such as `speaker_00`, and user transcript content are not translated.
 - Keep translations natural and short enough for narrow dialogs and controls.
 - Run `pnpm check:i18n` after changing UI copy or locale resources.
+
+## Branding
+
+- Mingtily's primary brand color is sky blue `#38BDF8`; use `#7DD3FC` for lighter accents, `#0C4A6E` for strong contrast, `#F8FAFC` for light surfaces, and `#0F172A` for dark surfaces.
+- Do not restore the upstream purple palette as Mingtily's brand identity.
+- The canonical application-icon source is `frontend/src-tauri/icons/mingtily-source.svg`. Regenerate platform icons with `pnpm tauri icon src-tauri/icons/mingtily-source.svg` from `frontend/`, then keep the browser logo and favicon copies synchronized.
 
 ## Verified commands
 

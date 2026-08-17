@@ -76,7 +76,7 @@ Mingtily exposes this as an optional finalized Beta model with automatic languag
 - Rule format: pre-generated OpenFst `.fst` files, typically produced with Pynini
 - License: Apache License 2.0 for the sherpa-onnx resource distribution
 
-Mingtily downloads the lexicon only after user action, verifies it with a built-in SHA256 value, and copies user-selected `.fst` rules into the application data directory after validating their type and size. Homophone replacement is optional and falls back to the original ASR text when its resources are unavailable.
+Mingtily downloads the lexicon only after user action, verifies it with a built-in SHA256 value, and copies user-imported `.fst` rules into the application data directory after validating their type and size. The active configuration and Sherpa ONNX runtime accept at most one FST rule; legacy multi-selection must be resolved before the feature can run. Homophone replacement is optional and falls back to the original ASR text when its resources are unavailable.
 
 ## Pyannote segmentation 3.0 model
 

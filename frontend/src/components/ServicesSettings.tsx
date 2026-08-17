@@ -51,7 +51,7 @@ function ServiceCard({ icon: Icon, title, description, children }: ServiceCardPr
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
       <div className="mb-5 flex items-start gap-3">
-        <div className="rounded-md bg-purple-50 p-2 text-purple-700"><Icon className="h-5 w-5" /></div>
+        <div className="rounded-md bg-sky-50 p-2 text-sky-700"><Icon className="h-5 w-5" /></div>
         <div>
           <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
           <p className="mt-1 text-sm text-gray-600">{description}</p>
@@ -401,8 +401,8 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
         </div>
 
         {recognitionMode === 'beta-live' && (
-          <div className="mb-5 rounded-lg border border-purple-200 bg-purple-50/50 p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-purple-900">
+          <div className="mb-5 rounded-lg border border-sky-200 bg-sky-50/50 p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-sky-900">
               <FlaskConical className="h-4 w-4" />
               {t('settings:services.transcription.streamingPath')}
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium tracking-wide text-amber-800">
@@ -508,7 +508,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
           />
         </div>
         {recognitionMode === 'beta-live' && (
-          <div className="mt-4 rounded-md border border-purple-200 bg-purple-50/50 px-3 py-2 text-xs leading-5 text-purple-800">
+          <div className="mt-4 rounded-md border border-sky-200 bg-sky-50/50 px-3 py-2 text-xs leading-5 text-sky-800">
             {t('settings:services.transcription.streamingNotice')}
           </div>
         )}
@@ -548,7 +548,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
             <span>{t('settings:services.transcription.terminology.nextSession')}</span>
           </div>
           {terminologyTermsError && <p className="text-xs text-red-600">{terminologyTermsError}</p>}
-          <p className="text-xs leading-5 text-purple-700">
+          <p className="text-xs leading-5 text-sky-700">
             {transcriptProvider === 'localWhisper'
               ? t('settings:services.transcription.terminology.whisperBehavior')
               : dynamicHotwordsSupported

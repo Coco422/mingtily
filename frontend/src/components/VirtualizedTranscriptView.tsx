@@ -130,12 +130,12 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     )}
                     {isStreaming ? (
                         <div className={isLiveHypothesis
-                            ? 'rounded-md border border-purple-200 bg-purple-50/50 px-3 py-2 transition-colors duration-150'
+                            ? 'rounded-md border border-sky-200 bg-sky-50/50 px-3 py-2 transition-colors duration-150'
                             : 'rounded-md border border-gray-200 bg-gray-100 px-3 py-2'
                         }>
                             {isLiveHypothesis && (
-                                <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-purple-700">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-purple-600 animate-pulse" />
+                                <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-sky-700">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-sky-600 animate-pulse" />
                                     {t('recording:liveRevisionHint')}
                                 </div>
                             )}

@@ -34,9 +34,9 @@ export function About() {
         </p>
       </div>
 
-      <div className="rounded-lg border border-purple-100 bg-purple-50 p-4 space-y-2">
-        <h2 className="text-sm font-semibold text-purple-950">{t('meeting:externalAiTitle')}</h2>
-        <p className="text-sm text-purple-900 leading-relaxed">
+      <div className="rounded-lg border border-sky-100 bg-sky-50 p-4 space-y-2">
+        <h2 className="text-sm font-semibold text-sky-950">{t('meeting:externalAiTitle')}</h2>
+        <p className="text-sm text-sky-900 leading-relaxed">
           {t('meeting:externalAiDescription')}
         </p>
       </div>

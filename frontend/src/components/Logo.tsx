@@ -16,15 +16,16 @@ const Logo = React.forwardRef<HTMLButtonElement, LogoProps>(({ isCollapsed }, re
     <Dialog aria-describedby={undefined}>
       {isCollapsed ? (
         <DialogTrigger asChild>
-          <button ref={ref} className="flex items-center justify-start mb-2 cursor-pointer bg-transparent border-none p-0 hover:opacity-80 transition-opacity" aria-label={t('aboutMingtily')}>
-            <Image src="/logo-collapsed.png" alt={t('appLogo')} width={40} height={32} />
+          <button ref={ref} className="mb-2 flex cursor-pointer items-center justify-start border-none bg-transparent p-0 transition-opacity hover:opacity-80" aria-label={t('aboutMingtily')}>
+            <Image src="/logo-collapsed.png" alt={t('appLogo')} width={32} height={32} />
           </button>
         </DialogTrigger>
       ) : (
         <DialogTrigger asChild>
-          <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center cursor-pointer hover:opacity-80 transition-opacity">
+          <button ref={ref} className="mb-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-lg font-semibold text-slate-700 transition-colors hover:bg-sky-100">
+            <Image src="/logo-collapsed.png" alt="" width={28} height={28} aria-hidden="true" />
             <span>Mingtily</span>
-          </span>
+          </button>
         </DialogTrigger>
       )}
       <DialogContent>

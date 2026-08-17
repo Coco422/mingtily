@@ -37,13 +37,13 @@ interface ModelAssetRowProps {
 const stateDotClass: Record<ModelAssetState, string> = {
   installed: 'bg-emerald-500',
   missing: 'bg-gray-300',
-  downloading: 'bg-purple-500',
+  downloading: 'bg-sky-500',
   corrupt: 'bg-amber-500',
   error: 'bg-red-500',
 };
 
 const badgeToneClass: Record<NonNullable<ModelAssetBadge['tone']>, string> = {
-  accent: 'border-purple-200 bg-purple-50 text-purple-700',
+  accent: 'border-sky-200 bg-sky-50 text-sky-700',
   warning: 'border-amber-200 bg-amber-50 text-amber-700',
   neutral: 'border-gray-200 bg-gray-50 text-gray-600',
 };
@@ -70,15 +70,15 @@ export function ModelAssetRow({
     <div
       className={cn(
         'rounded-md border border-black/[0.08] bg-white px-4 py-3 transition-colors duration-150',
-        interactive && 'cursor-pointer hover:border-purple-200 hover:bg-purple-50/20',
-        inUse && 'border-purple-200 bg-purple-50/25',
+        interactive && 'cursor-pointer hover:border-sky-200 hover:bg-sky-50/20',
+        inUse && 'border-sky-200 bg-sky-50/25',
         className
       )}
       onClick={onClick}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-1 gap-3">
-          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-purple-100 bg-purple-50 text-purple-700">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-sky-100 bg-sky-50 text-sky-700">
             <Icon className="h-4 w-4" />
           </div>
 
@@ -97,7 +97,7 @@ export function ModelAssetRow({
                 </span>
               ))}
               {inUse && (
-                <span className="rounded border border-purple-200 bg-purple-100/70 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-purple-700">
+                <span className="rounded border border-sky-200 bg-sky-100/70 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-sky-700">
                   {statusLabel}
                 </span>
               )}
@@ -140,7 +140,7 @@ export function ModelAssetRow({
         <div className="mt-3 space-y-1.5 pl-11">
           <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
             <div
-              className="h-full rounded-full bg-purple-600 transition-[width] duration-200"
+              className="h-full rounded-full bg-sky-600 transition-[width] duration-200"
               style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
             />
           </div>
