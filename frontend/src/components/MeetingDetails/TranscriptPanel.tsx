@@ -6,6 +6,7 @@ import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptVie
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { SpeakerParticipant } from '@/lib/speaker-map';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -29,6 +30,9 @@ interface TranscriptPanelProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+  speakerParticipants?: SpeakerParticipant[];
+  onManageSpeakers?: () => void;
+  onSpeakerClick?: (sourceSpeaker: string) => void;
 }
 
 export function TranscriptPanel({
@@ -49,6 +53,9 @@ export function TranscriptPanel({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  speakerParticipants = [],
+  onManageSpeakers,
+  onSpeakerClick,
 }: TranscriptPanelProps) {
   const { t } = useTranslation('meeting');
   // Convert transcripts to segments if pagination is not used but we want virtualization
@@ -79,6 +86,7 @@ export function TranscriptPanel({
           meetingId={meetingId}
           meetingFolderPath={meetingFolderPath}
           onRefetchTranscripts={onRefetchTranscripts}
+          onManageSpeakers={onManageSpeakers}
         />
       </div>
 
@@ -98,6 +106,8 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          speakerParticipants={speakerParticipants}
+          onSpeakerClick={onSpeakerClick}
         />
       </div>
 

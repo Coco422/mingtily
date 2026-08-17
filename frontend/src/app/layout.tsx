@@ -26,6 +26,7 @@ import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioF
 import { I18nProvider } from '@/i18n/I18nProvider'
 import { useTranslation } from 'react-i18next'
 import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
+import { SummaryJobsProvider } from '@/contexts/SummaryJobsContext'
 
 
 const sourceSans3 = Source_Sans_3({
@@ -242,6 +243,7 @@ export default function RootLayout({
               <ConfigProvider>
                 <OllamaDownloadProvider>
                   <OnboardingProvider>
+                    <SummaryJobsProvider>
                     <SidebarProvider>
                         <TooltipProvider>
                           <RecordingPostProcessingProvider>
@@ -270,6 +272,7 @@ export default function RootLayout({
                           </RecordingPostProcessingProvider>
                         </TooltipProvider>
                     </SidebarProvider>
+                    </SummaryJobsProvider>
                   </OnboardingProvider>
 
                 </OllamaDownloadProvider>

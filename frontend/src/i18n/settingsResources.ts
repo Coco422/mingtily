@@ -33,6 +33,65 @@ export const settingsResources = {
   }
 } as const;
 
+Object.assign(settingsResources['en-US'].general, {
+  summaryNotifications: 'AI summary outcomes',
+  summaryNotificationsDescription: 'Show a system notification when a background summary finishes or fails. Meeting content is never included.',
+  notificationsSaveFailed: 'Could not save notification settings',
+});
+Object.assign(settingsResources['zh-CN'].general, {
+  summaryNotifications: 'AI 摘要结果',
+  summaryNotificationsDescription: '后台摘要完成或失败时发送系统通知，通知中不会包含会议正文。',
+  notificationsSaveFailed: '无法保存通知设置',
+});
+Object.assign(settingsResources['en-US'].services.transcription.terminology, {
+  customTitle: 'Custom terminology',
+  customDescription: 'Improve names and domain terms across recording, import, and retranscription without learning ASR internals.',
+  terms: 'Terms and names',
+  termCount: '{{count}} unique terms · {{characters}} characters',
+  tooManyTerms: 'Use no more than 200 terms.',
+  termTooLong: 'Each term must be 100 characters or fewer.',
+  termsTooLong: 'Terms can contain at most 4,000 characters in total.',
+  nextSession: 'Applies to the next recording, import, or retranscription',
+  whisperBehavior: 'Whisper receives these terms as an initial prompt. Exact corrections are then applied to saved text.',
+  promptBehavior: 'The selected model receives these terms as a recognition prompt. Exact corrections are then applied to saved text.',
+  correctionOnlyBehavior: 'This model does not support recognition prompts. Exact corrections still apply to saved finalized text.',
+  replacements: 'Exact corrections',
+  replacementsHint: 'Case-sensitive literal matching. Longer sources win and replacements do not cascade.',
+  addReplacement: 'Add correction',
+  sourcePlaceholder: 'Recognized as',
+  targetPlaceholder: 'Replace with',
+  removeReplacement: 'Remove correction',
+  advancedCompatibility: 'Advanced compatibility options',
+  advancedCompatibilityHint: 'For existing Sherpa lexicon and pre-generated FST workflows. Mingtily does not generate FST files or install Pynini.',
+  manageAdvancedResources: 'Manage advanced resources in Models',
+  saved: 'Custom terminology saved',
+  saveFailed: 'Could not save custom terminology',
+});
+Object.assign(settingsResources['zh-CN'].services.transcription.terminology, {
+  customTitle: '自定义术语',
+  customDescription: '无需理解 ASR 内部格式，即可统一改善录音、导入和重新转写中的姓名与领域术语。',
+  terms: '术语与姓名',
+  termCount: '{{count}} 个去重术语 · {{characters}} 个字符',
+  tooManyTerms: '术语不能超过 200 个。',
+  termTooLong: '每个术语不能超过 100 个字符。',
+  termsTooLong: '全部术语合计不能超过 4,000 个字符。',
+  nextSession: '下次录音、导入或重新转写生效',
+  whisperBehavior: 'Whisper 会将术语作为初始提示词，并对最终保存文本应用精确纠错。',
+  promptBehavior: '当前模型会将术语作为识别提示词，并对最终保存文本应用精确纠错。',
+  correctionOnlyBehavior: '当前模型不支持识别提示词，但仍会对最终保存文本应用精确纠错。',
+  replacements: '精确纠错',
+  replacementsHint: '区分大小写的字面匹配；较长原文优先，替换结果不会再次匹配。',
+  addReplacement: '添加纠错',
+  sourcePlaceholder: '识别成',
+  targetPlaceholder: '替换为',
+  removeReplacement: '删除纠错',
+  advancedCompatibility: '高级兼容选项',
+  advancedCompatibilityHint: '仅用于已有 Sherpa 词典和预生成 FST 的工作流。Mingtily 不生成 FST，也不会安装 Pynini。',
+  manageAdvancedResources: '在“模型”中管理高级资源',
+  saved: '自定义术语已保存',
+  saveFailed: '无法保存自定义术语',
+});
+
 for (const locale of ['en-US', 'zh-CN'] as const) {
   Object.assign(
     settingsResources[locale].recordings,

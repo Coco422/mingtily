@@ -9,7 +9,7 @@ export const resources = {
       retry: 'Try again', loading: 'Loading…', processing: 'Processing…', language: 'Language',
       selectLanguage: 'Select language', auto: 'Auto', model: 'Model', speakerCount: 'Speaker count',
       autoDetect: 'Auto-detect', settings: 'Settings', recheck: 'Recheck', enabled: 'Enable', speaker: 'Speaker {{number}}', live: 'live', silence: '[Silence]',
-      openSettings: 'Open Settings', checking: 'Checking…', start: 'Start', stop: 'Stop', home: 'Home', meetingNotes: 'Meeting notes', searchMeetings: 'Search meeting content…', searching: 'Searching…', editMeeting: 'Edit meeting title', enterMeetingTitle: 'Enter a meeting title', match: 'Match:', recordingInProgress: 'Recording in progress…', about: 'About', version: 'Version {{version}}', download: 'Download', later: 'Later', done: 'Done', unknown: 'Unknown error', expandSidebar: 'Expand sidebar', collapseSidebar: 'Collapse sidebar', appLogo: 'Mingtily logo', aboutMingtily: 'About Mingtily',
+      openSettings: 'Open Settings', checking: 'Checking…', start: 'Start', stop: 'Stop', home: 'Home', meetingNotes: 'Meeting notes', searchMeetings: 'Search meeting content…', searching: 'Searching…', editMeeting: 'Edit meeting title', enterMeetingTitle: 'Enter a meeting title', match: 'Match:', recordingInProgress: 'Recording in progress…', summaryGenerating: 'Summary is generating', summaryUpdated: 'Summary status updated', about: 'About', version: 'Version {{version}}', download: 'Download', later: 'Later', done: 'Done', unknown: 'Unknown error', expandSidebar: 'Expand sidebar', collapseSidebar: 'Collapse sidebar', appLogo: 'Mingtily logo', aboutMingtily: 'About Mingtily',
     },
     recording: {
       ...experienceResources['en-US'].recording,
@@ -83,7 +83,7 @@ export const resources = {
   },
   'zh-CN': {
     common: {
-      cancel: '取消', close: '关闭', save: '保存', copy: '复制', delete: '删除', retry: '重试', loading: '加载中…', processing: '处理中…', language: '语言', selectLanguage: '选择语言', auto: '自动', model: '模型', speakerCount: '说话人数', autoDetect: '自动检测', settings: '设置', recheck: '重新检查', enabled: '启用', speaker: '说话人 {{number}}', live: '实时', silence: '[静音]', openSettings: '打开设置', checking: '检查中…', start: '开始', stop: '停止', home: '主页', meetingNotes: '会议记录', searchMeetings: '搜索会议内容…', searching: '搜索中…', editMeeting: '编辑会议标题', enterMeetingTitle: '输入会议标题', match: '匹配：', recordingInProgress: '正在录音…', about: '关于', version: '版本 {{version}}', download: '下载', later: '稍后', done: '完成', unknown: '未知错误', expandSidebar: '展开侧栏', collapseSidebar: '收起侧栏', appLogo: 'Mingtily 标志', aboutMingtily: '关于 Mingtily',
+      cancel: '取消', close: '关闭', save: '保存', copy: '复制', delete: '删除', retry: '重试', loading: '加载中…', processing: '处理中…', language: '语言', selectLanguage: '选择语言', auto: '自动', model: '模型', speakerCount: '说话人数', autoDetect: '自动检测', settings: '设置', recheck: '重新检查', enabled: '启用', speaker: '说话人 {{number}}', live: '实时', silence: '[静音]', openSettings: '打开设置', checking: '检查中…', start: '开始', stop: '停止', home: '主页', meetingNotes: '会议记录', searchMeetings: '搜索会议内容…', searching: '搜索中…', editMeeting: '编辑会议标题', enterMeetingTitle: '输入会议标题', match: '匹配：', recordingInProgress: '正在录音…', summaryGenerating: '摘要正在生成', summaryUpdated: '摘要状态已更新', about: '关于', version: '版本 {{version}}', download: '下载', later: '稍后', done: '完成', unknown: '未知错误', expandSidebar: '展开侧栏', collapseSidebar: '收起侧栏', appLogo: 'Mingtily 标志', aboutMingtily: '关于 Mingtily',
     },
     recording: {
       ...experienceResources['zh-CN'].recording,

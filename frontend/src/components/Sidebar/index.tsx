@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, Loader2 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -18,6 +18,7 @@ import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTranslation } from 'react-i18next';
 import { SENSEVOICE_MODEL_ID, SHERPA_ASR_PROVIDER_ID } from '@/lib/sherpa-asr';
+import { useSummaryJobs } from '@/contexts/SummaryJobsContext';
 
 import {
   Dialog,
@@ -64,6 +65,7 @@ const Sidebar: React.FC = () => {
   const { isRecording } = useRecordingState();
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
+  const { jobs: summaryJobs, acknowledgeJob, removeJob } = useSummaryJobs();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
@@ -335,6 +337,7 @@ const Sidebar: React.FC = () => {
       await invoke('api_delete_meeting', {
         meetingId: itemId,
       });
+      removeJob(itemId);
       console.log('Meeting deleted successfully');
       const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);
       setMeetings(updatedMeetings);
@@ -564,6 +567,8 @@ const Sidebar: React.FC = () => {
     // Check if this item has a matching transcript snippet
     const matchingResult = isMeetingItem ? findMatchingSnippet(item.id) : null;
     const hasTranscriptMatch = !!matchingResult;
+    const summaryJob = summaryJobs[item.id];
+    const summaryRunning = summaryJob?.status === 'pending' || summaryJob?.status === 'processing';
 
     if (isCollapsed) return null;
 
@@ -582,6 +587,7 @@ const Sidebar: React.FC = () => {
               toggleFolder(item.id);
             } else {
               setCurrentMeeting({ id: item.id, title: item.title });
+              acknowledgeJob(item.id);
               const basePath = item.id.startsWith('intro-call') ? '/' :
                 item.id.includes('-') ? `/meeting-details?id=${item.id}` : `/notes/${item.id}`;
               router.push(basePath);
@@ -620,6 +626,12 @@ const Sidebar: React.FC = () => {
                   </div>
                 )}
                 <span className="flex-1 break-words">{item.title}</span>
+                {summaryRunning && (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 shrink-0 animate-spin text-blue-600" aria-label={t('common:summaryGenerating')} />
+                )}
+                {!summaryRunning && summaryJob?.unread && (
+                  <span className="mr-1 h-2 w-2 shrink-0 rounded-full bg-blue-600" aria-label={t('common:summaryUpdated')} />
+                )}
                 {isMeetingItem && (
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                     <button

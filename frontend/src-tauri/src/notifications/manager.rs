@@ -175,6 +175,40 @@ impl<R: Runtime> NotificationManager<R> {
         self.show_notification(notification).await
     }
 
+    pub async fn show_summary_completed(&self, meeting_name: Option<String>) -> Result<()> {
+        if !self
+            .settings
+            .read()
+            .await
+            .notification_preferences
+            .show_summary_completed
+        {
+            return Ok(());
+        }
+        self.show_notification(Notification::summary_completed_localized(
+            meeting_name,
+            crate::localization::is_zh_cn(&self.app_handle),
+        ))
+        .await
+    }
+
+    pub async fn show_summary_failed(&self, meeting_name: Option<String>) -> Result<()> {
+        if !self
+            .settings
+            .read()
+            .await
+            .notification_preferences
+            .show_summary_failed
+        {
+            return Ok(());
+        }
+        self.show_notification(Notification::summary_failed_localized(
+            meeting_name,
+            crate::localization::is_zh_cn(&self.app_handle),
+        ))
+        .await
+    }
+
     /// Show a meeting reminder notification
     pub async fn show_meeting_reminder(
         &self,
@@ -348,6 +382,12 @@ impl<R: Runtime> NotificationManager<R> {
                 settings
                     .notification_preferences
                     .show_transcription_complete
+            }
+            NotificationType::SummaryCompleted => {
+                settings.notification_preferences.show_summary_completed
+            }
+            NotificationType::SummaryFailed => {
+                settings.notification_preferences.show_summary_failed
             }
             NotificationType::MeetingReminder(_) => {
                 settings.notification_preferences.show_meeting_reminders

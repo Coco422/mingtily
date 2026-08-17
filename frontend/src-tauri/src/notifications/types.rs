@@ -20,6 +20,8 @@ pub enum NotificationType {
     RecordingPaused,
     RecordingResumed,
     TranscriptionComplete,
+    SummaryCompleted,
+    SummaryFailed,
     MeetingReminder(u64), // Duration in minutes
     SystemError(String),
     Test, // For testing notifications
@@ -206,6 +208,34 @@ impl Notification {
         Notification::new("Mingtily", body, NotificationType::TranscriptionComplete)
             .with_priority(NotificationPriority::Normal)
             .with_timeout(NotificationTimeout::Seconds(5))
+    }
+
+    pub fn summary_completed_localized(meeting_name: Option<String>, zh_cn: bool) -> Self {
+        let body = match (meeting_name, zh_cn) {
+            (Some(name), true) => format!("“{name}”的 AI 摘要已生成"),
+            (Some(name), false) => format!("The AI summary for “{name}” is ready"),
+            (None, true) => "AI 摘要已生成".to_string(),
+            (None, false) => "Your AI summary is ready".to_string(),
+        };
+        Notification::new("Mingtily", body, NotificationType::SummaryCompleted)
+            .with_priority(NotificationPriority::Normal)
+            .with_timeout(NotificationTimeout::Seconds(5))
+    }
+
+    pub fn summary_failed_localized(meeting_name: Option<String>, zh_cn: bool) -> Self {
+        let body = match (meeting_name, zh_cn) {
+            (Some(name), true) => format!("“{name}”的 AI 摘要生成失败，请返回应用重试"),
+            (Some(name), false) => {
+                format!("The AI summary for “{name}” failed. Return to Mingtily to retry.")
+            }
+            (None, true) => "AI 摘要生成失败，请返回应用重试".to_string(),
+            (None, false) => {
+                "AI summary generation failed. Return to Mingtily to retry.".to_string()
+            }
+        };
+        Notification::new("Mingtily", body, NotificationType::SummaryFailed)
+            .with_priority(NotificationPriority::Normal)
+            .with_timeout(NotificationTimeout::Seconds(7))
     }
 
     pub fn meeting_reminder(minutes_until: u64, meeting_title: Option<String>) -> Self {

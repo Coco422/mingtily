@@ -9,11 +9,16 @@ use std::sync::Arc;
 /// Whisper transcription provider (wraps WhisperEngine)
 pub struct WhisperProvider {
     engine: Arc<crate::whisper_engine::WhisperEngine>,
+    initial_prompt: Option<String>,
 }
 
 impl WhisperProvider {
-    pub fn new(engine: Arc<crate::whisper_engine::WhisperEngine>) -> Self {
-        Self { engine }
+    pub fn new(engine: Arc<crate::whisper_engine::WhisperEngine>, terms: Vec<String>) -> Self {
+        let initial_prompt = (!terms.is_empty()).then(|| terms.join(", "));
+        Self {
+            engine,
+            initial_prompt,
+        }
     }
 }
 
@@ -26,7 +31,11 @@ impl TranscriptionProvider for WhisperProvider {
     ) -> std::result::Result<TranscriptResult, TranscriptionError> {
         match self
             .engine
-            .transcribe_audio_with_confidence(audio, language)
+            .transcribe_audio_with_confidence_and_prompt(
+                audio,
+                language,
+                self.initial_prompt.as_deref(),
+            )
             .await
         {
             Ok((text, confidence, is_partial)) => Ok(TranscriptResult {

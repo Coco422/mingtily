@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Runtime};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NotificationSettings {
     /// Enable recording lifecycle notifications (start/stop/pause/resume)
     pub recording_notifications: bool,
@@ -36,6 +37,7 @@ pub struct NotificationSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NotificationPreferences {
     /// Show recording started notifications
     pub show_recording_started: bool,
@@ -51,6 +53,12 @@ pub struct NotificationPreferences {
 
     /// Show transcription complete notifications
     pub show_transcription_complete: bool,
+
+    /// Show notifications when an AI summary completes
+    pub show_summary_completed: bool,
+
+    /// Show notifications when an AI summary fails
+    pub show_summary_failed: bool,
 
     /// Show meeting reminder notifications
     pub show_meeting_reminders: bool,
@@ -86,6 +94,8 @@ impl Default for NotificationPreferences {
             show_recording_paused: true,
             show_recording_resumed: true,
             show_transcription_complete: true,
+            show_summary_completed: false,
+            show_summary_failed: false,
             show_meeting_reminders: true,
             show_system_errors: true,
             meeting_reminder_minutes: vec![15, 5], // 15 minutes and 5 minutes before
@@ -260,6 +270,28 @@ pub fn validate_settings(settings: &NotificationSettings) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_preferences_default_new_summary_switches() {
+        let value = serde_json::json!({
+            "show_recording_started": false,
+            "show_recording_stopped": false,
+            "show_recording_paused": true,
+            "show_recording_resumed": true,
+            "show_transcription_complete": true,
+            "show_meeting_reminders": true,
+            "show_system_errors": true,
+            "meeting_reminder_minutes": [15, 5]
+        });
+        let preferences: NotificationPreferences = serde_json::from_value(value).unwrap();
+        assert!(!preferences.show_summary_completed);
+        assert!(!preferences.show_summary_failed);
+    }
 }
 
 /// Merge settings with defaults (for handling partial updates)

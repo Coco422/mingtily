@@ -12,7 +12,7 @@ use crate::summary::service::SummaryService;
 use log::{error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SummaryResponse {
@@ -242,7 +242,7 @@ pub async fn api_get_summary<R: Runtime>(
     );
     let pool = state.db_manager.pool();
 
-    match SummaryProcessesRepository::get_summary_data_for_meeting(pool, &meeting_id).await {
+    match SummaryProcessesRepository::get_summary_data(pool, &meeting_id).await {
         Ok(Some(process)) => {
             let status = process.status.to_lowercase();
             let error = process.error;
@@ -322,6 +322,46 @@ pub async fn api_get_summary<R: Runtime>(
     }
 }
 
+/// Rehydrates only jobs that can still affect the global UI after a frontend reload.
+/// Historical completed jobs are intentionally omitted so old meetings do not regain
+/// unread badges on every launch.
+#[tauri::command]
+pub async fn api_list_recoverable_summary_jobs(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<SummaryResponse>, String> {
+    let processes = sqlx::query_as::<_, crate::database::models::SummaryProcess>(
+        "SELECT * FROM summary_processes WHERE lower(status) IN ('pending', 'processing', 'interrupted')",
+    )
+    .fetch_all(state.db_manager.pool())
+    .await
+    .map_err(|error| format!("Failed to list recoverable summary jobs: {error}"))?;
+
+    let mut responses = Vec::with_capacity(processes.len());
+    for process in processes {
+        let data = process
+            .result
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
+        let meeting_name =
+            sqlx::query_scalar::<_, String>("SELECT title FROM meetings WHERE id = ?")
+                .bind(&process.meeting_id)
+                .fetch_optional(state.db_manager.pool())
+                .await
+                .ok()
+                .flatten();
+        responses.push(SummaryResponse {
+            status: process.status.to_lowercase(),
+            meeting_name,
+            meeting_id: process.meeting_id,
+            start: process.start_time.map(|time| time.to_rfc3339()),
+            end: process.end_time.map(|time| time.to_rfc3339()),
+            data,
+            error: process.error,
+        });
+    }
+    Ok(responses)
+}
+
 /// Processes transcript and generates summary (Native SQLx implementation)
 ///
 /// Spawns a background task and returns immediately with process_id
@@ -364,9 +404,12 @@ pub async fn api_process_transcript<R: Runtime>(
     });
 
     // Create or reset the process entry in the database
-    SummaryProcessesRepository::create_or_reset_process(&pool, &m_id)
+    let started = SummaryProcessesRepository::try_start_process(&pool, &m_id)
         .await
         .map_err(|e| format!("Failed to initialize process: {}", e))?;
+    if !started {
+        return Err("A summary is already being generated for this meeting".to_string());
+    }
 
     log_info!("✓ Summary process initialized for meeting_id: {}", &m_id);
 
@@ -374,7 +417,7 @@ pub async fn api_process_transcript<R: Runtime>(
     let chunk_size = _chunk_size.unwrap_or(40000);
     let overlap = _overlap.unwrap_or(1000);
 
-    TranscriptChunksRepository::save_transcript_data(
+    if let Err(error) = TranscriptChunksRepository::save_transcript_data(
         &pool,
         &m_id,
         &text,
@@ -384,16 +427,21 @@ pub async fn api_process_transcript<R: Runtime>(
         overlap,
     )
     .await
-    .map_err(|e| format!("Failed to save transcript data: {}", e))?;
+    {
+        let message = format!("Failed to save transcript data: {error}");
+        let _ = SummaryProcessesRepository::update_process_failed(&pool, &m_id, &message).await;
+        return Err(message);
+    }
 
     log_info!("✓ Transcript chunks saved for meeting_id: {}", &m_id);
 
     // Spawn background task for actual processing
     let meeting_id_clone = m_id.clone();
     tauri::async_runtime::spawn(async move {
+        let notification_app = app.clone();
         SummaryService::process_transcript_background(
             app,
-            pool,
+            pool.clone(),
             meeting_id_clone.clone(),
             text,
             model,
@@ -403,6 +451,37 @@ pub async fn api_process_transcript<R: Runtime>(
             summary_language,
         )
         .await;
+        SummaryService::cleanup_cancellation_token(&meeting_id_clone);
+
+        let status = SummaryProcessesRepository::get_summary_data(&pool, &meeting_id_clone)
+            .await
+            .ok()
+            .flatten()
+            .map(|process| process.status.to_lowercase());
+        if matches!(status.as_deref(), Some("completed" | "failed" | "error")) {
+            let meeting_name =
+                sqlx::query_scalar::<_, String>("SELECT title FROM meetings WHERE id = ?")
+                    .bind(&meeting_id_clone)
+                    .fetch_optional(&pool)
+                    .await
+                    .ok()
+                    .flatten();
+            if let Some(manager_state) = notification_app
+                .try_state::<crate::notifications::commands::NotificationManagerState<R>>(
+            ) {
+                let manager = manager_state.read().await;
+                if let Some(manager) = manager.as_ref() {
+                    let result = if status.as_deref() == Some("completed") {
+                        manager.show_summary_completed(meeting_name).await
+                    } else {
+                        manager.show_summary_failed(meeting_name).await
+                    };
+                    if let Err(error) = result {
+                        log_warn!("Failed to show summary outcome notification: {error}");
+                    }
+                }
+            }
+        }
     });
 
     log_info!("🚀 Background task spawned for meeting_id: {}", &m_id);
@@ -425,12 +504,22 @@ pub async fn api_cancel_summary<R: Runtime>(
 ) -> Result<serde_json::Value, String> {
     log_info!("api_cancel_summary called for meeting_id: {}", meeting_id);
 
-    // Trigger cancellation via the service
-    let cancelled = SummaryService::cancel_summary(&meeting_id);
+    // Signal an already-registered worker, while also handling the short window
+    // between the database job being created and its cancellation token registering.
+    let signalled = SummaryService::cancel_summary(&meeting_id);
+    let pool = state.db_manager.pool();
+    let active_in_database = SummaryProcessesRepository::get_summary_data(pool, &meeting_id)
+        .await
+        .map_err(|error| format!("Failed to inspect summary status: {error}"))?
+        .is_some_and(|process| {
+            matches!(
+                process.status.to_ascii_lowercase().as_str(),
+                "pending" | "processing"
+            )
+        });
 
-    if cancelled {
+    if signalled || active_in_database {
         // Update database status to cancelled
-        let pool = state.db_manager.pool();
         if let Err(e) =
             SummaryProcessesRepository::update_process_cancelled(pool, &meeting_id).await
         {
@@ -441,6 +530,10 @@ pub async fn api_cancel_summary<R: Runtime>(
             );
             return Err(format!("Failed to update cancellation status: {}", e));
         }
+        // A worker may have registered after the first signal but before the
+        // database transition. Signal again; otherwise the worker's state check
+        // will observe `cancelled` and exit before inference.
+        SummaryService::cancel_summary(&meeting_id);
 
         log_info!(
             "Successfully cancelled summary generation for meeting_id: {}",

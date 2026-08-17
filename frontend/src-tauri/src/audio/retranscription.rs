@@ -540,6 +540,14 @@ async fn run_retranscription<R: Runtime>(
         .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
     }
 
+    // Source speaker labels belong to the replaced transcript set. Clearing the
+    // map in this transaction preserves it automatically if replacement fails.
+    sqlx::query("DELETE FROM meeting_speaker_maps WHERE meeting_id = ?")
+        .bind(&meeting_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to clear speaker mapping: {}", e))?;
+
     tx.commit()
         .await
         .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;

@@ -41,6 +41,18 @@ export interface SherpaAsrEnhancementConfig {
   homophoneRuleFsts: string[];
 }
 
+export interface TerminologyReplacement {
+  source: string;
+  target: string;
+}
+
+export interface TerminologyConfig {
+  terms: string[];
+  replacements: TerminologyReplacement[];
+  homophoneReplacerEnabled: boolean;
+  homophoneRuleFsts: string[];
+}
+
 export interface HomophoneRuleStatus {
   id: string;
   name: string;
@@ -72,6 +84,13 @@ export const DEFAULT_SHERPA_ASR_ENHANCEMENT_CONFIG: SherpaAsrEnhancementConfig =
   homophoneRuleFsts: [],
 };
 
+export const DEFAULT_TERMINOLOGY_CONFIG: TerminologyConfig = {
+  terms: [],
+  replacements: [],
+  homophoneReplacerEnabled: false,
+  homophoneRuleFsts: [],
+};
+
 export const SherpaAsrAPI = {
   listModels: () => invoke<SherpaAsrModelStatus[]>('sherpa_asr_list_models'),
   getStreamingConfig: () =>
@@ -82,6 +101,9 @@ export const SherpaAsrAPI = {
     invoke<SherpaAsrEnhancementConfig>('sherpa_asr_get_enhancement_config'),
   saveEnhancementConfig: (config: SherpaAsrEnhancementConfig) =>
     invoke<SherpaAsrEnhancementConfig>('sherpa_asr_save_enhancement_config', { config }),
+  getTerminologyConfig: () => invoke<TerminologyConfig>('terminology_get_config'),
+  saveTerminologyConfig: (config: TerminologyConfig) =>
+    invoke<TerminologyConfig>('terminology_save_config', { config }),
   getHomophoneStatus: () =>
     invoke<HomophoneReplacerStatus>('sherpa_asr_get_homophone_status'),
   downloadHomophoneLexicon: () =>

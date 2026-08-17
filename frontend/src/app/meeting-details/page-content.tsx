@@ -17,6 +17,8 @@ import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTranslation } from 'react-i18next';
+import { useMeetingSpeakerMap } from '@/hooks/useMeetingSpeakerMap';
+import { SpeakerManagerDialog } from '@/components/MeetingDetails/SpeakerManagerDialog';
 
 export default function PageContent({
   meeting,
@@ -58,6 +60,8 @@ export default function PageContent({
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+  const [speakerManagerOpen, setSpeakerManagerOpen] = useState(false);
+  const [focusedSpeaker, setFocusedSpeaker] = useState<string | null>(null);
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -71,6 +75,7 @@ export default function PageContent({
   // Custom hooks
   const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
   const templates = useTemplates();
+  const { speakerMap, save: saveSpeakerMap, refresh: refreshSpeakerMap } = useMeetingSpeakerMap(meeting.id);
 
   // Callback to register the modal open function
   const handleRegisterModalOpen = (openFn: () => void) => {
@@ -121,6 +126,7 @@ export default function PageContent({
     updateMeetingTitle: meetingData.updateMeetingTitle,
     setAiSummary: meetingData.setAiSummary,
     onOpenModelSettings: handleOpenModelSettings,
+    speakerParticipants: speakerMap.participants,
   });
 
   const copyOperations = useCopyOperations({
@@ -129,6 +135,7 @@ export default function PageContent({
     meetingTitle: meetingData.meetingTitle,
     aiSummary: meetingData.aiSummary,
     blockNoteSummaryRef: meetingData.blockNoteSummaryRef,
+    speakerParticipants: speakerMap.participants,
   });
 
   const meetingOperations = useMeetingOperations({
@@ -190,7 +197,19 @@ export default function PageContent({
           // Retranscription props
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
-          onRefetchTranscripts={onRefetchTranscripts}
+          onRefetchTranscripts={async () => {
+            await onRefetchTranscripts?.();
+            await refreshSpeakerMap();
+          }}
+          speakerParticipants={speakerMap.participants}
+          onManageSpeakers={() => {
+            setFocusedSpeaker(null);
+            setSpeakerManagerOpen(true);
+          }}
+          onSpeakerClick={(sourceSpeaker) => {
+            setFocusedSpeaker(sourceSpeaker);
+            setSpeakerManagerOpen(true);
+          }}
         />
         <SummaryPanel
           meeting={meeting}
@@ -231,6 +250,13 @@ export default function PageContent({
           onOpenModelSettings={handleRegisterModalOpen}
         />
       </div>
+      <SpeakerManagerDialog
+        open={speakerManagerOpen}
+        onOpenChange={setSpeakerManagerOpen}
+        speakerMap={speakerMap}
+        initialSpeaker={focusedSpeaker}
+        onSave={saveSpeakerMap}
+      />
     </motion.div>
   );
 }

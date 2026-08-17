@@ -10,6 +10,7 @@ import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
 import { formatSpeakerLabel, speakerColor } from "@/lib/speaker-label";
+import { resolveSpeaker, type SpeakerParticipant } from '@/lib/speaker-map';
 import { useTranslation } from 'react-i18next';
 
 export interface VirtualizedTranscriptViewProps {
@@ -38,6 +39,8 @@ export interface VirtualizedTranscriptViewProps {
     totalCount?: number;
     loadedCount?: number;
     onLoadMore?: () => void;
+    speakerParticipants?: SpeakerParticipant[];
+    onSpeakerClick?: (sourceSpeaker: string) => void;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -78,6 +81,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isStreaming,
     isLiveHypothesis,
     showConfidence,
+    speakerParticipants,
+    onSpeakerClick,
 }: {
     id: string;
     timestamp: number;
@@ -88,10 +93,13 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isStreaming: boolean;
     isLiveHypothesis?: boolean;
     showConfidence: boolean;
+    speakerParticipants: SpeakerParticipant[];
+    onSpeakerClick?: (sourceSpeaker: string) => void;
 }) {
     const { t } = useTranslation(['common', 'recording']);
     const displayText = cleanStopWords(text) || (text.trim() === '' ? t('silence') : text);
-    const speakerLabel = formatSpeakerLabel(speaker, t);
+    const resolvedSpeaker = resolveSpeaker(speaker, speakerParticipants, t);
+    const speakerLabel = resolvedSpeaker?.label || formatSpeakerLabel(speaker, t);
 
     return (
         <div id={`segment-${id}`} className="mb-3">
@@ -110,9 +118,15 @@ const TranscriptSegment = memo(function TranscriptSegment({
                 </Tooltip>
                 <div className="flex-1">
                     {speakerLabel && (
-                        <div className="mb-1 text-xs font-semibold" style={{ color: speakerColor(speaker) }}>
+                        <button
+                            type="button"
+                            disabled={!speaker || !onSpeakerClick}
+                            onClick={() => speaker && onSpeakerClick?.(speaker)}
+                            className="mb-1 text-left text-xs font-semibold disabled:cursor-default"
+                            style={{ color: resolvedSpeaker?.color || speakerColor(speaker) }}
+                        >
                             {speakerLabel}{speakerIsProvisional ? ` · ${t('live')}` : ''}
-                        </div>
+                        </button>
                     )}
                     {isStreaming ? (
                         <div className={isLiveHypothesis
@@ -151,6 +165,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     totalCount = 0,
     loadedCount = 0,
     onLoadMore,
+    speakerParticipants = [],
+    onSpeakerClick,
 }) => {
     const { t } = useTranslation('recording');
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
@@ -327,6 +343,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         isLiveHypothesis={false}
                                         showConfidence={showConfidence}
+                                        speakerParticipants={speakerParticipants}
+                                        onSpeakerClick={onSpeakerClick}
                                     />
                                 </div>
                             );
@@ -386,6 +404,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         isLiveHypothesis={false}
                                         showConfidence={showConfidence}
+                                        speakerParticipants={speakerParticipants}
+                                        onSpeakerClick={onSpeakerClick}
                                     />
                                 </motion.div>
                             );
@@ -440,6 +460,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                         isStreaming
                         isLiveHypothesis
                         showConfidence={false}
+                        speakerParticipants={speakerParticipants}
+                        onSpeakerClick={onSpeakerClick}
                     />
                 </motion.div>
             )}

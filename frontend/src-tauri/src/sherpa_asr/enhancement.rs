@@ -15,6 +15,7 @@ const STORE_FILE: &str = "provider-settings.json";
 const STORE_VERSION: u64 = 1;
 const STORE_VERSION_KEY: &str = "version";
 const STORE_CONFIG_KEY: &str = "sherpaAsrEnhancements";
+const TERMINOLOGY_CONFIG_KEY: &str = "terminology";
 
 pub const HOMOPHONE_LEXICON_ID: &str = "homophone-lexicon-zh";
 const HOMOPHONE_LEXICON_URL: &str =
@@ -57,6 +58,22 @@ static HOMOPHONE_LEXICON_SPEC: ModelInstallSpec = ModelInstallSpec {
 #[serde(default, rename_all = "camelCase")]
 pub struct SherpaAsrEnhancementConfig {
     pub hotwords: Vec<String>,
+    pub homophone_replacer_enabled: bool,
+    pub homophone_rule_fsts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TerminologyReplacement {
+    pub source: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TerminologyConfig {
+    pub terms: Vec<String>,
+    pub replacements: Vec<TerminologyReplacement>,
     pub homophone_replacer_enabled: bool,
     pub homophone_rule_fsts: Vec<String>,
 }
@@ -127,16 +144,44 @@ impl Default for RuntimeEnhancements {
     }
 }
 
+fn ensure_single_active_fst(rule_ids: &[String]) -> Result<()> {
+    if rule_ids.len() > 1 {
+        return Err(anyhow!(
+            "Only one homophone replacement FST can be active at a time"
+        ));
+    }
+    Ok(())
+}
+
 pub fn load_config<R: Runtime>(app: &AppHandle<R>) -> Result<SherpaAsrEnhancementConfig> {
+    let terminology = load_terminology_config(app)?;
+    Ok(SherpaAsrEnhancementConfig {
+        hotwords: terminology.terms,
+        homophone_replacer_enabled: terminology.homophone_replacer_enabled,
+        homophone_rule_fsts: terminology.homophone_rule_fsts,
+    })
+}
+
+pub fn load_terminology_config<R: Runtime>(app: &AppHandle<R>) -> Result<TerminologyConfig> {
     let store = app
         .store(STORE_FILE)
         .map_err(|error| anyhow!("Failed to access provider settings: {error}"))?;
+    if let Some(value) = store.get(TERMINOLOGY_CONFIG_KEY) {
+        let config = serde_json::from_value::<TerminologyConfig>(value.clone())
+            .map_err(|error| anyhow!("Failed to read terminology settings: {error}"))?;
+        return normalize_terminology_config(config);
+    }
     let Some(value) = store.get(STORE_CONFIG_KEY) else {
-        return Ok(SherpaAsrEnhancementConfig::default());
+        return Ok(TerminologyConfig::default());
     };
-    let config = serde_json::from_value::<SherpaAsrEnhancementConfig>(value.clone())
-        .map_err(|error| anyhow!("Failed to read Sherpa ASR enhancement settings: {error}"))?;
-    normalize_config(config)
+    let legacy = serde_json::from_value::<SherpaAsrEnhancementConfig>(value.clone())
+        .map_err(|error| anyhow!("Failed to migrate Sherpa ASR enhancement settings: {error}"))?;
+    normalize_terminology_config(TerminologyConfig {
+        terms: legacy.hotwords,
+        replacements: Vec::new(),
+        homophone_replacer_enabled: legacy.homophone_replacer_enabled,
+        homophone_rule_fsts: legacy.homophone_rule_fsts,
+    })
 }
 
 pub fn save_config<R: Runtime>(
@@ -144,6 +189,24 @@ pub fn save_config<R: Runtime>(
     config: SherpaAsrEnhancementConfig,
 ) -> Result<SherpaAsrEnhancementConfig> {
     let config = normalize_config(config)?;
+    let mut terminology = load_terminology_config(app)?;
+    terminology.terms = config.hotwords;
+    terminology.homophone_replacer_enabled = config.homophone_replacer_enabled;
+    terminology.homophone_rule_fsts = config.homophone_rule_fsts;
+    let saved = save_terminology_config(app, terminology)?;
+    Ok(SherpaAsrEnhancementConfig {
+        hotwords: saved.terms,
+        homophone_replacer_enabled: saved.homophone_replacer_enabled,
+        homophone_rule_fsts: saved.homophone_rule_fsts,
+    })
+}
+
+pub fn save_terminology_config<R: Runtime>(
+    app: &AppHandle<R>,
+    config: TerminologyConfig,
+) -> Result<TerminologyConfig> {
+    let config = normalize_terminology_config(config)?;
+    ensure_single_active_fst(&config.homophone_rule_fsts)?;
     if config.homophone_replacer_enabled {
         if installed_lexicon_path(app)?.is_none() {
             return Err(anyhow!(
@@ -175,8 +238,18 @@ pub fn save_config<R: Runtime>(
         .map_err(|error| anyhow!("Failed to access provider settings: {error}"))?;
     store.set(STORE_VERSION_KEY, serde_json::json!(STORE_VERSION));
     store.set(
-        STORE_CONFIG_KEY,
+        TERMINOLOGY_CONFIG_KEY,
         serde_json::to_value(&config)
+            .map_err(|error| anyhow!("Failed to serialize terminology settings: {error}"))?,
+    );
+    let legacy = SherpaAsrEnhancementConfig {
+        hotwords: config.terms.clone(),
+        homophone_replacer_enabled: config.homophone_replacer_enabled,
+        homophone_rule_fsts: config.homophone_rule_fsts.clone(),
+    };
+    store.set(
+        STORE_CONFIG_KEY,
+        serde_json::to_value(&legacy)
             .map_err(|error| anyhow!("Failed to serialize Sherpa ASR enhancements: {error}"))?,
     );
     store
@@ -190,28 +263,24 @@ pub fn resolve_runtime<R: Runtime>(app: &AppHandle<R>) -> Result<RuntimeEnhancem
     let hotwords = (!config.hotwords.is_empty()).then(|| config.hotwords.join(","));
 
     let (homophone_lexicon, homophone_rule_fsts) = if config.homophone_replacer_enabled {
+        ensure_single_active_fst(&config.homophone_rule_fsts)?;
         let lexicon = installed_lexicon_path(app)?;
         let rules_by_id = list_rules(app)?
             .into_iter()
             .map(|rule| (rule.id.clone(), rule))
             .collect::<std::collections::HashMap<_, _>>();
-        let selected_paths = config
+        let selected_path = config
             .homophone_rule_fsts
-            .iter()
-            .filter_map(|rule_id| rules_by_id.get(rule_id))
+            .first()
+            .and_then(|rule_id| rules_by_id.get(rule_id))
             .map(|rule| rules_root(app).map(|root| root.join(format!("{}.fst", rule.id))))
-            .collect::<Result<Vec<_>>>()?;
+            .transpose()?;
 
         let lexicon = lexicon.and_then(|path| path.to_str().map(str::to_string));
-        let selected_paths = selected_paths
-            .iter()
-            .map(|path| path.to_str())
-            .collect::<Option<Vec<_>>>();
+        let selected_path = selected_path.and_then(|path| path.to_str().map(str::to_string));
 
-        match (lexicon, selected_paths) {
-            (Some(lexicon), Some(selected_paths)) if !selected_paths.is_empty() => {
-                (Some(lexicon), Some(selected_paths.join(",")))
-            }
+        match (lexicon, selected_path) {
+            (Some(lexicon), Some(selected_path)) => (Some(lexicon), Some(selected_path)),
             _ => {
                 log::warn!(
                     "Sherpa homophone replacement is enabled but its lexicon or rules are unavailable; continuing without replacement"
@@ -383,6 +452,43 @@ fn normalize_config(mut config: SherpaAsrEnhancementConfig) -> Result<SherpaAsrE
     Ok(config)
 }
 
+fn normalize_terminology_config(mut config: TerminologyConfig) -> Result<TerminologyConfig> {
+    let normalized = normalize_config(SherpaAsrEnhancementConfig {
+        hotwords: config.terms,
+        homophone_replacer_enabled: config.homophone_replacer_enabled,
+        homophone_rule_fsts: config.homophone_rule_fsts,
+    })?;
+    config.terms = normalized.hotwords;
+    config.homophone_replacer_enabled = normalized.homophone_replacer_enabled;
+    config.homophone_rule_fsts = normalized.homophone_rule_fsts;
+
+    let mut seen = HashSet::new();
+    let mut replacements = Vec::new();
+    for replacement in config.replacements {
+        let source = replacement.source.trim().to_string();
+        let target = replacement.target.trim().to_string();
+        if source.is_empty() {
+            return Err(anyhow!("Replacement source cannot be empty"));
+        }
+        if source.chars().count() > MAX_HOTWORD_CHARS || target.chars().count() > MAX_HOTWORD_CHARS
+        {
+            return Err(anyhow!(
+                "Replacement source and target are limited to {MAX_HOTWORD_CHARS} characters"
+            ));
+        }
+        if seen.insert(source.clone()) {
+            replacements.push(TerminologyReplacement { source, target });
+        }
+    }
+    if replacements.len() > MAX_HOTWORDS {
+        return Err(anyhow!(
+            "At most {MAX_HOTWORDS} replacement rules are supported"
+        ));
+    }
+    config.replacements = replacements;
+    Ok(config)
+}
+
 fn enhancements_root<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf> {
     Ok(app
         .path()
@@ -543,6 +649,41 @@ mod tests {
             runtime.cache_signature(),
             RuntimeEnhancements::default().cache_signature()
         );
+    }
+
+    #[test]
+    fn multiple_fst_rules_are_rejected_before_runtime_resolution() {
+        let rules = vec!["a".repeat(64), "b".repeat(64)];
+        assert!(ensure_single_active_fst(&rules).is_err());
+    }
+
+    #[test]
+    fn replacement_sources_must_be_non_empty_and_are_deduplicated() {
+        let invalid = TerminologyConfig {
+            replacements: vec![TerminologyReplacement {
+                source: "  ".to_string(),
+                target: "Mingtily".to_string(),
+            }],
+            ..Default::default()
+        };
+        assert!(normalize_terminology_config(invalid).is_err());
+
+        let normalized = normalize_terminology_config(TerminologyConfig {
+            replacements: vec![
+                TerminologyReplacement {
+                    source: "明天力".to_string(),
+                    target: "Mingtily".to_string(),
+                },
+                TerminologyReplacement {
+                    source: "明天力".to_string(),
+                    target: "ignored".to_string(),
+                },
+            ],
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(normalized.replacements.len(), 1);
+        assert_eq!(normalized.replacements[0].target, "Mingtily");
     }
 
     #[test]

@@ -37,6 +37,7 @@ export function PreferenceSettings() {
   } = useConfig();
 
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
+  const [summaryNotificationsEnabled, setSummaryNotificationsEnabled] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
   const [isExportingDiagnostics, setIsExportingDiagnostics] = useState(false);
@@ -65,6 +66,10 @@ export function PreferenceSettings() {
         notificationSettings.notification_preferences.show_recording_started &&
         notificationSettings.notification_preferences.show_recording_stopped;
       setNotificationsEnabled(enabled);
+      setSummaryNotificationsEnabled(
+        notificationSettings.notification_preferences.show_summary_completed &&
+        notificationSettings.notification_preferences.show_summary_failed
+      );
       if (isInitialLoad) {
         setPreviousNotificationsEnabled(enabled);
         setIsInitialLoad(false);
@@ -126,6 +131,24 @@ export function PreferenceSettings() {
       }
     } catch (error) {
       console.error(`Failed to open ${folderType} folder:`, error);
+    }
+  };
+
+  const handleSummaryNotificationsChange = async (enabled: boolean) => {
+    if (!notificationSettings) return;
+    setSummaryNotificationsEnabled(enabled);
+    try {
+      await updateNotificationSettings({
+        ...notificationSettings,
+        notification_preferences: {
+          ...notificationSettings.notification_preferences,
+          show_summary_completed: enabled,
+          show_summary_failed: enabled,
+        },
+      });
+    } catch (error) {
+      setSummaryNotificationsEnabled(!enabled);
+      toast.error(t('general.notificationsSaveFailed'));
     }
   };
 
@@ -206,6 +229,13 @@ export function PreferenceSettings() {
             <p className="text-sm text-gray-600">{t('general.notificationsDescription')}</p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
+        </div>
+        <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-4">
+          <div>
+            <h4 className="text-sm font-medium text-gray-900">{t('general.summaryNotifications')}</h4>
+            <p className="mt-1 text-xs text-gray-600">{t('general.summaryNotificationsDescription')}</p>
+          </div>
+          <Switch checked={summaryNotificationsEnabled} onCheckedChange={handleSummaryNotificationsChange} />
         </div>
       </div>
 

@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
+import { Copy, FolderOpen, RefreshCw, Users } from 'lucide-react';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +16,7 @@ interface TranscriptButtonGroupProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+  onManageSpeakers?: () => void;
 }
 
 
@@ -26,6 +27,7 @@ export function TranscriptButtonGroup({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  onManageSpeakers,
 }: TranscriptButtonGroupProps) {
   const { t } = useTranslation('meeting');
   const { betaFeatures } = useConfig();
@@ -73,6 +75,13 @@ export function TranscriptButtonGroup({
           <Copy />
           <span className={labelClass}>{t('common:copy')}</span>
         </Button>
+
+        {onManageSpeakers && (
+          <Button size="sm" variant="outline" onClick={onManageSpeakers} title={t('manageSpeakers')}>
+            <Users size={18} />
+            <span className={labelClass}>{t('manageSpeakers')}</span>
+          </Button>
+        )}
 
         <Button
           size="sm"

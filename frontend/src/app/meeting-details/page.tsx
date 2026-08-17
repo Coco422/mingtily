@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
+import { useSummaryJobs } from '@/contexts/SummaryJobsContext';
 
 interface MeetingDetailsResponse {
   id: string;
@@ -22,7 +23,8 @@ function MeetingDetailsContent() {
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
   const source = searchParams.get('source'); // Check if navigated from recording
-  const { setCurrentMeeting, refetchMeetings, stopSummaryPolling } = useSidebar();
+  const { setCurrentMeeting, refetchMeetings } = useSidebar();
+  const { refreshJob, acknowledgeJob, getJob } = useSummaryJobs();
   const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
   const router = useRouter();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
@@ -31,6 +33,7 @@ function MeetingDetailsContent() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [shouldAutoGenerate, setShouldAutoGenerate] = useState<boolean>(false);
   const [hasCheckedAutoGen, setHasCheckedAutoGen] = useState<boolean>(false);
+  const summaryJob = meetingId ? getJob(meetingId) : undefined;
 
   // Use pagination hook for efficient transcript loading
   const {
@@ -170,16 +173,6 @@ function MeetingDetailsContent() {
     setShouldAutoGenerate(false);
   }, [meetingId]);
 
-  // Cleanup: Stop polling when navigating away from a meeting
-  useEffect(() => {
-    return () => {
-      if (meetingId) {
-        console.log('Cleaning up: Stopping summary polling for meeting:', meetingId);
-        stopSummaryPolling(meetingId);
-      }
-    };
-  }, [meetingId, stopSummaryPolling]);
-
   useEffect(() => {
     console.log('MeetingDetails useEffect triggered - meetingId:', meetingId);
 
@@ -199,99 +192,12 @@ function MeetingDetailsContent() {
 
     const fetchMeetingSummary = async () => {
       try {
-        const summary = await invoke('api_get_summary', {
-          meetingId: meetingId,
-        }) as any;
+        const summary = await refreshJob(meetingId);
+        acknowledgeJob(meetingId);
 
         console.log('FETCH SUMMARY: Raw response:', summary);
 
-        // Check if the summary request failed with 404 or error status, or if no summary exists yet (idle)
-        // Note: 'cancelled' and 'failed' statuses can still have data if backup was restored
-        if (summary.status === 'idle' || (!summary.data && summary.status === 'error')) {
-          console.warn('Meeting summary not found or no summary generated yet:', summary.error || 'idle');
-          setMeetingSummary(null);
-          return;
-        }
-
-        const summaryData = summary.data || {};
-
-        // Parse if it's a JSON string (backend may return double-encoded JSON)
-        let parsedData = summaryData;
-        if (typeof summaryData === 'string') {
-          try {
-            parsedData = JSON.parse(summaryData);
-          } catch (e) {
-            parsedData = {};
-          }
-        }
-
-        console.log('🔍 FETCH SUMMARY: Parsed data:', parsedData);
-
-        // Priority 1: BlockNote JSON format
-        if (parsedData.summary_json) {
-          setMeetingSummary(parsedData as any);
-          return;
-        }
-
-        // Priority 2: Markdown format
-        if (parsedData.markdown) {
-          setMeetingSummary(parsedData as any);
-          return;
-        }
-
-        // Legacy format - apply formatting
-        console.log('LEGACY FORMAT: Detected legacy format, applying section formatting');
-
-        const { MeetingName, _section_order, ...restSummaryData } = parsedData;
-
-        // Format the summary data with consistent styling - PRESERVE ORDER
-        const formattedSummary: Summary = {};
-
-        // Use section order if available to maintain exact order and handle duplicates
-        const sectionKeys = _section_order || Object.keys(restSummaryData);
-
-        console.log('LEGACY FORMAT: Processing sections:', sectionKeys);
-
-        for (const key of sectionKeys) {
-          try {
-            const section = restSummaryData[key];
-            // Comprehensive null checks to prevent the error
-            if (section &&
-              typeof section === 'object' &&
-              'title' in section &&
-              'blocks' in section) {
-              const typedSection = section as { title?: string; blocks?: any[] };
-
-              // Ensure blocks is an array before mapping
-              if (Array.isArray(typedSection.blocks)) {
-                formattedSummary[key] = {
-                  title: typedSection.title || key,
-                  blocks: typedSection.blocks.map((block: any) => ({
-                    ...block,
-                    // type: 'bullet',
-                    color: 'default',
-                    content: block?.content?.trim() || ''
-                  }))
-                };
-              } else {
-                // Handle case where blocks is not an array
-                console.warn(`LEGACY FORMAT: Section ${key} has invalid blocks:`, typedSection.blocks);
-                formattedSummary[key] = {
-                  title: typedSection.title || key,
-                  blocks: []
-                };
-              }
-            } else {
-              console.warn(`LEGACY FORMAT: Skipping invalid section ${key}:`, section);
-            }
-          } catch (error) {
-            console.warn(`LEGACY FORMAT: Error processing section ${key}:`, error);
-            // Continue processing other sections
-          }
-        }
-
-        console.log('LEGACY FORMAT: Formatted summary:', formattedSummary);
-        setMeetingSummary(formattedSummary);
+        setMeetingSummary(summary.data);
       } catch (error) {
         console.error('FETCH SUMMARY: Error fetching meeting summary:', error);
         // Don't set error state for summary fetch failure, set to null to show generate button
@@ -308,7 +214,7 @@ function MeetingDetailsContent() {
     };
 
     loadData();
-  }, [meetingId]);
+  }, [acknowledgeJob, meetingId, refreshJob]);
 
   // Auto-generation check: runs when meeting is loaded with no summary
   useEffect(() => {
@@ -319,8 +225,10 @@ function MeetingDetailsContent() {
       // 3. Meeting has transcripts
       // 4. Haven't checked yet
       if (
+        !isLoading &&
         meetingDetails &&
         meetingSummary === null &&
+        summaryJob?.status === 'idle' &&
         meetingDetails.transcripts &&
         meetingDetails.transcripts.length > 0 &&
         !hasCheckedAutoGen
@@ -331,7 +239,7 @@ function MeetingDetailsContent() {
     };
 
     checkAutoGen();
-  }, [meetingDetails, meetingSummary, hasCheckedAutoGen, setupAutoGeneration]);
+  }, [hasCheckedAutoGen, isLoading, meetingDetails, meetingSummary, setupAutoGeneration, summaryJob?.status]);
 
   if (error) {
     return (

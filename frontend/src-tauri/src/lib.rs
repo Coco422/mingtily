@@ -54,6 +54,7 @@ pub mod parakeet_engine;
 pub mod punctuation;
 pub mod sherpa_asr;
 pub mod speaker_diarization;
+pub mod speaker_mapping;
 pub mod state;
 pub mod summary;
 pub mod tray;
@@ -515,6 +516,22 @@ pub fn run() {
             })
             .expect("Failed to initialize database");
 
+            // First launch creates the database later through the onboarding command,
+            // so AppState is intentionally absent here and there are no old jobs to recover.
+            if let Some(app_state) = _app.try_state::<state::AppState>() {
+                match tauri::async_runtime::block_on(
+                    database::repositories::summary::SummaryProcessesRepository::mark_incomplete_processes_interrupted(
+                        app_state.db_manager.pool(),
+                    ),
+                ) {
+                    Ok(count) if count > 0 => {
+                        log::warn!("Marked {count} unfinished summary job(s) as interrupted")
+                    }
+                    Ok(_) => {}
+                    Err(error) => log::error!("Failed to recover unfinished summary jobs: {error}"),
+                }
+            }
+
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
@@ -584,6 +601,8 @@ pub fn run() {
             sherpa_asr::commands::sherpa_asr_save_streaming_config,
             sherpa_asr::commands::sherpa_asr_get_enhancement_config,
             sherpa_asr::commands::sherpa_asr_save_enhancement_config,
+            sherpa_asr::commands::terminology_get_config,
+            sherpa_asr::commands::terminology_save_config,
             sherpa_asr::commands::sherpa_asr_get_homophone_status,
             sherpa_asr::commands::sherpa_asr_download_homophone_lexicon,
             sherpa_asr::commands::sherpa_asr_delete_homophone_lexicon,
@@ -599,6 +618,8 @@ pub fn run() {
             speaker_diarization::commands::speaker_diarization_get_status,
             speaker_diarization::commands::speaker_diarization_download_model,
             speaker_diarization::commands::speaker_diarization_delete_model,
+            speaker_mapping::api_get_meeting_speaker_map,
+            speaker_mapping::api_save_meeting_speaker_map,
             // UI localization commands
             localization::get_ui_locale,
             localization::set_ui_locale,
@@ -681,6 +702,7 @@ pub fn run() {
             // Summary commands
             summary::commands::api_process_transcript,
             summary::commands::api_get_summary,
+            summary::commands::api_list_recoverable_summary_jobs,
             summary::commands::api_save_meeting_summary,
             summary::commands::api_get_meeting_summary_language,
             summary::commands::api_save_meeting_summary_language,

@@ -455,6 +455,15 @@ export function SummaryPanel({
               languageSlot={transcripts.length > 0 ? languageSlot : undefined}
             />
           </div>
+          {summaryStatus === 'error' && summaryError && (
+            <div className="mx-6 mb-4 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">
+              <p className="font-medium">{t('summary:statusError')}</p>
+              <p className="mt-1 break-words text-red-700">{summaryError}</p>
+              <Button className="mt-3" size="sm" variant="outline" onClick={() => onGenerateSummary(customPrompt)}>
+                {t('common:retry')}
+              </Button>
+            </div>
+          )}
           {/* Empty state message */}
           <EmptyStateSummary
             onGenerate={() => onGenerateSummary(customPrompt)}

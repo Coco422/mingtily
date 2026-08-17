@@ -1,6 +1,6 @@
 use super::models::{self, SherpaAsrModelStatus, PROVIDER_ID};
 use super::streaming_config::{self, StreamingTranscriptionConfig};
-use super::{enhancement, SherpaAsrEnhancementConfig};
+use super::{enhancement, SherpaAsrEnhancementConfig, TerminologyConfig};
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_dialog::DialogExt;
 
@@ -49,6 +49,19 @@ pub fn sherpa_asr_save_enhancement_config<R: Runtime>(
     config: SherpaAsrEnhancementConfig,
 ) -> Result<SherpaAsrEnhancementConfig, String> {
     enhancement::save_config(&app, config).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn terminology_get_config<R: Runtime>(app: AppHandle<R>) -> Result<TerminologyConfig, String> {
+    enhancement::load_terminology_config(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn terminology_save_config<R: Runtime>(
+    app: AppHandle<R>,
+    config: TerminologyConfig,
+) -> Result<TerminologyConfig, String> {
+    enhancement::save_terminology_config(&app, config).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

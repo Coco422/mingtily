@@ -98,14 +98,25 @@ pub async fn load_transcription_provider<R: Runtime>(
         selection.provider, selection.model
     );
 
-    match selection.provider.as_str() {
+    let terminology = crate::sherpa_asr::enhancement::load_terminology_config(app)
+        .map_err(|error| format!("Failed to load terminology settings: {error}"))?;
+    if selection.provider == crate::sherpa_asr::PROVIDER_ID
+        && terminology.homophone_replacer_enabled
+        && terminology.homophone_rule_fsts.len() > 1
+    {
+        return Err(
+            "Multiple legacy homophone FST rules are selected. Open Custom terminology and choose one rule before transcribing."
+                .to_string(),
+        );
+    }
+    let provider: Arc<dyn TranscriptionProvider> = match selection.provider.as_str() {
         WHISPER_PROVIDER_ID | "whisper" => {
             let engine = load_whisper_model(&selection.model).await?;
-            Ok(Arc::new(WhisperProvider::new(engine)))
+            Arc::new(WhisperProvider::new(engine, terminology.terms.clone()))
         }
         PARAKEET_PROVIDER_ID => {
             let engine = load_parakeet_model(&selection.model).await?;
-            Ok(Arc::new(ParakeetProvider::new(engine)))
+            Arc::new(ParakeetProvider::new(engine))
         }
         crate::sherpa_asr::PROVIDER_ID => {
             let installed = crate::sherpa_asr::installed_model(app, &selection.model)
@@ -136,15 +147,19 @@ pub async fn load_transcription_provider<R: Runtime>(
                     ))
                 };
             if selection.model == crate::sherpa_asr::models::SENSEVOICE_MODEL_ID {
-                Ok(crate::punctuation::wrap_if_available(app, provider))
+                crate::punctuation::wrap_if_available(app, provider)
             } else {
-                Ok(provider)
+                provider
             }
         }
-        other => Err(format!(
+        other => return Err(format!(
             "Provider '{other}' is not supported for local transcription. Select Whisper, Parakeet, or Sherpa ONNX."
         )),
-    }
+    };
+    Ok(super::terminology::TerminologyCorrectionProvider::wrap(
+        provider,
+        terminology.replacements,
+    ))
 }
 
 pub async fn resolve_transcription_selection<R: Runtime>(

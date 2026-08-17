@@ -229,7 +229,7 @@ impl SummaryService {
     }
 
     /// Cleans up the cancellation token after processing completes
-    fn cleanup_cancellation_token(meeting_id: &str) {
+    pub(crate) fn cleanup_cancellation_token(meeting_id: &str) {
         if let Ok(mut registry) = CANCELLATION_REGISTRY.lock() {
             if registry.remove(meeting_id).is_some() {
                 info!("Cleaned up cancellation token for meeting: {}", meeting_id);
@@ -323,8 +323,51 @@ impl SummaryService {
             meeting_id
         );
 
+        match SummaryProcessesRepository::update_process_processing(&pool, &meeting_id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                warn!(
+                    "Summary job {} was no longer pending; worker will not start",
+                    meeting_id
+                );
+                return;
+            }
+            Err(error) => {
+                Self::update_process_failed(
+                    &pool,
+                    &meeting_id,
+                    &format!("Failed to mark summary as processing: {error}"),
+                )
+                .await;
+                return;
+            }
+        }
+
         // Register cancellation token for this meeting
         let cancellation_token = Self::register_cancellation_token(&meeting_id);
+        match SummaryProcessesRepository::get_summary_data(&pool, &meeting_id).await {
+            Ok(Some(process)) if process.status.eq_ignore_ascii_case("processing") => {}
+            Ok(_) => {
+                info!(
+                    "Summary job {} changed state before its worker started; aborting",
+                    meeting_id
+                );
+                cancellation_token.cancel();
+                Self::cleanup_cancellation_token(&meeting_id);
+                return;
+            }
+            Err(error) => {
+                cancellation_token.cancel();
+                Self::cleanup_cancellation_token(&meeting_id);
+                Self::update_process_failed(
+                    &pool,
+                    &meeting_id,
+                    &format!("Failed to verify summary state: {error}"),
+                )
+                .await;
+                return;
+            }
+        }
 
         // Parse provider
         let provider = match LLMProvider::from_str(&model_provider) {

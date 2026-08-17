@@ -3,7 +3,7 @@ import { Transcript, Summary } from '@/types';
 import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { toast } from 'sonner';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
-import { prefixSpeaker } from '@/lib/speaker-label';
+import { prefixResolvedSpeaker, type SpeakerParticipant } from '@/lib/speaker-map';
 import { useTranslation } from 'react-i18next';
 
 interface UseCopyOperationsProps {
@@ -12,6 +12,7 @@ interface UseCopyOperationsProps {
   meetingTitle: string;
   aiSummary: Summary | null;
   blockNoteSummaryRef: RefObject<BlockNoteSummaryViewRef>;
+  speakerParticipants?: SpeakerParticipant[];
 }
 
 export function useCopyOperations({
@@ -20,6 +21,7 @@ export function useCopyOperations({
   meetingTitle,
   aiSummary,
   blockNoteSummaryRef,
+  speakerParticipants = [],
 }: UseCopyOperationsProps) {
   const { t, i18n } = useTranslation(['meeting', 'common']);
 
@@ -89,13 +91,13 @@ export function useCopyOperations({
     const header = `# ${t('meeting:transcriptExportTitle', { title })}\n\n`;
     const date = `## ${t('meeting:dateLabel')}: ${new Date(meeting.created_at).toLocaleDateString(i18n.language)}\n\n`;
     const fullTranscript = allTranscripts
-      .map(segment => `${formatTime(segment.audio_start_time, segment.timestamp)} ${prefixSpeaker(segment.text, segment.speaker, (key, options) => t(`common:${key}`, options))}  `)
+      .map(segment => `${formatTime(segment.audio_start_time, segment.timestamp)} ${prefixResolvedSpeaker(segment.text, segment.speaker, speakerParticipants, t)}  `)
       .join('\n');
 
     await navigator.clipboard.writeText(header + date + fullTranscript);
     toast.success(t('meeting:copyTranscriptSuccess'));
 
-  }, [meeting, meetingTitle, fetchAllTranscripts, i18n.language, t]);
+  }, [meeting, meetingTitle, fetchAllTranscripts, i18n.language, speakerParticipants, t]);
 
   // Copy summary to clipboard
   const handleCopySummary = useCallback(async () => {
