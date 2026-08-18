@@ -246,7 +246,11 @@ export function PreferenceSettings() {
             <p className="text-sm text-gray-600">{t('general.updates.description')}</p>
             <p className="mt-2 text-xs text-gray-500">{t('general.updates.privacy')}</p>
           </div>
-          <Switch checked={autoUpdateEnabled} onCheckedChange={handleAutoUpdateChange} />
+          <Switch
+            checked={updateState.status === 'disabled' ? false : autoUpdateEnabled}
+            disabled={updateState.status === 'disabled'}
+            onCheckedChange={handleAutoUpdateChange}
+          />
         </div>
         <div className="mt-4 flex items-center justify-between gap-3 border-t pt-4">
           <p className="text-xs text-gray-500">
@@ -259,13 +263,14 @@ export function PreferenceSettings() {
             {updateState.status === 'ready' && t('general.updates.ready', { version: updateState.version })}
             {updateState.status === 'current' && t('general.updates.current')}
             {updateState.status === 'error' && t('general.updates.checkFailed')}
+            {updateState.status === 'disabled' && t('general.updates.developmentDisabled')}
             {updateState.status === 'idle' && t('general.updates.idle')}
             {updateState.status === 'checking' && t('general.updates.checking')}
           </p>
           <button
             type="button"
             onClick={handleUpdateAction}
-            disabled={updateState.status === 'checking' || updateState.status === 'downloading'}
+            disabled={updateState.status === 'disabled' || updateState.status === 'checking' || updateState.status === 'downloading'}
             className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {updateState.status === 'available' ? (

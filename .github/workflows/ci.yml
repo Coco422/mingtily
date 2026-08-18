@@ -44,6 +44,10 @@ jobs:
         working-directory: frontend
         run: pnpm check:i18n
 
+      - name: Validate local and release app identities
+        working-directory: frontend
+        run: pnpm check:app-identity
+
       - name: Audit cold-start network boundary
         working-directory: frontend
         run: pnpm check:network-boundary

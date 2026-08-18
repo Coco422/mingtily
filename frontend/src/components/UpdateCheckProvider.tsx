@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
+import { getIdentifier } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +17,7 @@ export const UPDATE_STATE_EVENT = 'mingtily:update-state';
 
 export type UpdateState =
   | { status: 'idle' }
+  | { status: 'disabled' }
   | { status: 'checking' }
   | { status: 'current' }
   | { status: 'available'; version: string }
@@ -24,6 +26,14 @@ export type UpdateState =
   | { status: 'error'; message: string };
 
 let currentUpdateState: UpdateState = { status: 'idle' };
+let productionIdentityPromise: Promise<boolean> | null = null;
+
+function isProductionApp() {
+  productionIdentityPromise ??= getIdentifier().then(
+    (identifier) => identifier === 'com.mingcheng.mingtily'
+  );
+  return productionIdentityPromise;
+}
 
 export function getCurrentUpdateState() {
   return currentUpdateState;
@@ -106,6 +116,10 @@ export function UpdateCheckProvider() {
   }, [restart, t]);
 
   const checkForUpdates = useCallback(async (manual: boolean) => {
+    if (!(await isProductionApp())) {
+      emitState({ status: 'disabled' });
+      return;
+    }
     if (checkingRef.current) return;
     checkingRef.current = true;
     emitState({ status: 'checking' });
@@ -140,6 +154,10 @@ export function UpdateCheckProvider() {
   }, [install, t]);
 
   useEffect(() => {
+    void isProductionApp().then((isProduction) => {
+      if (!isProduction) emitState({ status: 'disabled' });
+    });
+
     const handleCheck = (event: Event) => {
       const detail = (event as CustomEvent<{ manual?: boolean }>).detail;
       void checkForUpdates(detail?.manual ?? true);

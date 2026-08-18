@@ -17,6 +17,7 @@ From this directory:
 
 ```bash
 pnpm install
+pnpm check:app-identity
 pnpm check:i18n
 pnpm check:network-boundary
 pnpm tauri:dev
@@ -34,7 +35,7 @@ Build the desktop bundle:
 pnpm tauri:build
 ```
 
-Normal local and development builds keep updater-artifact generation off and require no signing secret. Tagged releases overlay `src-tauri/tauri.release.conf.json`, use the repository's Tauri updater signing secret, and publish `latest.json` through GitHub Actions.
+Normal local and development builds are named **Mingtily Dev** and use `com.mingcheng.mingtily.dev`, keeping their database, models, logs, permissions, and WebView storage separate from an installed production app. They keep updater-artifact generation off and require no signing secret. Tagged releases overlay `src-tauri/tauri.release.conf.json`, restore the production `Mingtily` / `com.mingcheng.mingtily` identity, use the repository's Tauri updater signing secret, and publish `latest.json` through GitHub Actions.
 
 The `tauri:dev` and `tauri:build` scripts use `scripts/tauri-auto.js` to select the platform build path and prepare the `llama-helper` sidecar.
 
@@ -61,10 +62,12 @@ The current app does not require the archived FastAPI server under `backend/`. T
 ## Important checks
 
 - Run `pnpm check:i18n` whenever user-facing copy or locale resources change.
+- Run `pnpm check:app-identity` after changing Tauri configuration or packaging commands. Local commands must remain isolated from production data, while tagged releases must retain the canonical production identity.
 - Run `pnpm check:network-boundary` when startup behavior or network-capable commands change.
 - Run `pnpm build` for frontend type and production-build validation.
 - Validate audio, ASR, speaker, and Provider changes in the packaged or development Tauri app.
 - Validate background-summary navigation, speaker-map revision conflicts, and terminology corrections through their affected application flows when those contracts change.
+- Database migrations must retain published checksums and include an upgrade regression test from the latest public baseline. A database created by a newer app version must produce an actionable startup error instead of being reset or opened by an older schema.
 - External summary Providers are optional; local recording and transcription must remain usable without them.
 - Diagnostic logs remain local, rotate automatically, and are exported only after a user action in Settings.
 - Automatic GitHub Release checks are disabled by default and run only after the user enables them.

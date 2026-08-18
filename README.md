@@ -14,7 +14,7 @@
 
 Mingtily 是一款本地优先的桌面会议助手，面向希望将录音、转写、说话人标签和本地模型保留在自己设备上的个人、开发者与小团队。需要更高总结质量或性能时，也可以由用户主动配置并调用外部 LLM Provider。
 
-当前版本：**[0.7.1](https://github.com/Coco422/mingtily/releases/tag/v0.7.1)**。带版本标签的 GitHub Actions 会发布 macOS Apple Silicon 与 Windows x64 开发版。安装包暂未进行操作系统级签名，但 Tauri 更新包由 Mingtily 完整性签名。Linux 目前作为无签名手动开发构建目标。
+当前版本：**[0.7.2](https://github.com/Coco422/mingtily/releases/tag/v0.7.2)**。带版本标签的 GitHub Actions 会发布 macOS Apple Silicon 与 Windows x64 开发版。安装包暂未进行操作系统级签名，但 Tauri 更新包由 Mingtily 完整性签名。Linux 目前作为无签名手动开发构建目标。
 
 ### 主要能力
 
@@ -98,16 +98,20 @@ pnpm install --frozen-lockfile
 pnpm tauri:dev
 ```
 
-构建无签名桌面安装包：
+本地开发与测试默认运行 **Mingtily Dev**（`com.mingcheng.mingtily.dev`），使用独立的数据、日志、权限和 WebView 存储，不会读取或迁移已安装的正式 Mingtily 数据。
+
+构建无签名的本地测试安装包：
 
 ```bash
 cd frontend
 pnpm tauri:build
 ```
 
+该命令同样生成 Mingtily Dev。只有带版本标签的 Release 工作流会叠加生产配置，生成 `Mingtily`（`com.mingcheng.mingtily`）。
+
 ### 验证与仓库结构
 
-在 `frontend/` 中运行 `pnpm check:i18n`、`pnpm check:network-boundary` 和 `pnpm build`。在仓库根目录运行 `cargo fmt --all -- --check`、`cargo test --workspace --lib --bins`、`cargo check --workspace --all-targets` 和 `cargo build --release -p llama-helper`。
+在 `frontend/` 中运行 `pnpm check:app-identity`、`pnpm check:i18n`、`pnpm check:network-boundary` 和 `pnpm build`。在仓库根目录运行 `cargo fmt --all -- --check`、`cargo test --workspace --lib --bins`、`cargo check --workspace --all-targets` 和 `cargo build --release -p llama-helper`。
 
 - `frontend/`：受支持的 Next.js UI 与 Tauri 应用。
 - `frontend/src-tauri/`：Rust 音频、ASR、说话人分离、持久化、诊断和 Provider 命令。
@@ -144,7 +148,7 @@ Mingtily 使用 MIT License。原始 Meetily 版权声明保留在 [LICENSE.md](
 
 Mingtily is a local-first desktop meeting assistant for individuals, developers, and small teams that want recordings, transcripts, speaker labels, and local models to stay on their own devices. When better summary quality or performance is needed, users can explicitly configure and invoke an external LLM Provider.
 
-Current version: **[0.7.1](https://github.com/Coco422/mingtily/releases/tag/v0.7.1)**. Tagged GitHub Actions releases target macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while Tauri updater payloads are integrity-signed by Mingtily. Linux is currently available as an unsigned manual development-build target.
+Current version: **[0.7.2](https://github.com/Coco422/mingtily/releases/tag/v0.7.2)**. Tagged GitHub Actions releases target macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while Tauri updater payloads are integrity-signed by Mingtily. Linux is currently available as an unsigned manual development-build target.
 
 ### Highlights
 
@@ -236,16 +240,20 @@ pnpm install --frozen-lockfile
 pnpm tauri:dev
 ```
 
-Build an unsigned desktop bundle:
+Local development and testing run as **Mingtily Dev** (`com.mingcheng.mingtily.dev`) by default. It has separate app data, logs, permissions, and WebView storage, so it cannot read or migrate data from an installed production copy of Mingtily.
+
+Build an unsigned local test bundle:
 
 ```bash
 cd frontend
 pnpm tauri:build
 ```
 
+This command also produces Mingtily Dev. Only a tagged Release workflow overlays the production configuration and produces `Mingtily` (`com.mingcheng.mingtily`).
+
 ### GitHub Actions
 
-- `Validation` runs frontend, i18n, network-boundary, formatting, Rust test, and Rust check gates.
+- `Validation` runs app-identity, frontend, i18n, network-boundary, formatting, Rust test, and Rust check gates.
 - `Build and Test - Linux` also builds an unsigned Linux package on relevant pull requests and checks cold-start network connections under `strace`.
 - The manual `Build and Test - DevTest`, macOS, Windows, and Linux workflows produce unsigned development artifacts without repository secrets.
 - Pushing a matching `vX.Y.Z` tag creates a draft, builds the macOS Apple Silicon and Windows x64 release targets, uploads signed updater archives and `latest.json`, then publishes after both platforms succeed. Linux remains a separate unsigned development-build target for now.

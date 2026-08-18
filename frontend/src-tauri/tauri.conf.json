@@ -1,8 +1,8 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "Mingtily",
-    "version": "0.7.1",
-    "identifier": "com.mingcheng.mingtily",
+    "productName": "Mingtily Dev",
+    "version": "0.7.2",
+    "identifier": "com.mingcheng.mingtily.dev",
     "build": {
         "frontendDist": "../out",
         "devUrl": "http://localhost:3118",
@@ -12,7 +12,7 @@
     "app": {
         "windows": [
             {
-                "title": "Mingtily",
+                "title": "Mingtily Dev",
                 "width": 1100,
                 "height": 700,
                 "resizable": true,

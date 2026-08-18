@@ -1,4 +1,20 @@
 {
+    "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+    "productName": "Mingtily",
+    "identifier": "com.mingcheng.mingtily",
+    "app": {
+        "windows": [
+            {
+                "title": "Mingtily",
+                "width": 1100,
+                "height": 700,
+                "resizable": true,
+                "fullscreen": false,
+                "theme": "Light",
+                "decorations": true
+            }
+        ]
+    },
     "bundle": {
         "createUpdaterArtifacts": true
     }

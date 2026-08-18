@@ -19,6 +19,8 @@ pnpm install
 pnpm tauri:dev
 ```
 
+These commands run **Mingtily Dev** with the isolated identifier `com.mingcheng.mingtily.dev`. Never change local development commands to use the production `com.mingcheng.mingtily` data directory. Tagged releases apply the production identity through `frontend/src-tauri/tauri.release.conf.json`.
+
 Use a feature branch based on the repository's current default branch:
 
 ```bash
@@ -32,6 +34,7 @@ Run the checks relevant to your change. Frontend and translation changes should 
 ```bash
 cd frontend
 pnpm check:i18n
+pnpm check:app-identity
 pnpm check:network-boundary
 pnpm build
 ```

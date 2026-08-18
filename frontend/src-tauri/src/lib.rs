@@ -427,7 +427,24 @@ pub fn run() {
             tokio::sync::Mutex::new(None),
         )))
         .setup(|_app| {
+            #[cfg(debug_assertions)]
+            if _app.config().identifier == "com.mingcheng.mingtily" {
+                return Err(
+                    "debug builds must use the isolated com.mingcheng.mingtily.dev identifier"
+                        .into(),
+                );
+            }
+
             log::info!("Application setup complete");
+
+            // Validate and migrate the database before starting any subsystem that can prompt for
+            // permissions or mutate app state. An incompatible newer database must fail closed.
+            if let Err(startup_error) = tauri::async_runtime::block_on(async {
+                database::setup::initialize_database_on_startup(&_app.handle()).await
+            }) {
+                database::setup::show_database_startup_error(&_app.handle(), &startup_error);
+                return Ok(());
+            }
 
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
@@ -509,12 +526,6 @@ pub fn run() {
             //         }
             //     });
             // }
-
-            // Initialize database (handles first launch detection and conditional setup)
-            tauri::async_runtime::block_on(async {
-                database::setup::initialize_database_on_startup(&_app.handle()).await
-            })
-            .expect("Failed to initialize database");
 
             // First launch creates the database later through the onboarding command,
             // so AppState is intentionally absent here and there are no old jobs to recover.

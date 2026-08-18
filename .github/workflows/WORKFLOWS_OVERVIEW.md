@@ -10,6 +10,7 @@ Runs on pull requests, pushes to `main` or `codex/**`, and manual dispatch.
 
 - Installs frontend dependencies with the lockfile.
 - Checks `en-US` and `zh-CN` resource parity.
+- Verifies that local builds use the isolated Mingtily Dev identity while tagged releases restore the production identity.
 - Audits cold-start source entry points for implicit remote-network calls.
 - Builds the Next.js frontend.
 - Runs `cargo fmt --check`, Rust tests, and `cargo check --all-targets` on Ubuntu 22.04. Linux VAD execution tests are temporarily skipped because the monolithic test binary links two ONNX Runtime implementations; they continue to compile and are covered on the primary macOS development platform.
@@ -52,6 +53,8 @@ Manual semantic-version and branch summary. It does not build the application.
 ### `release.yml`
 
 Pushing a matching `vX.Y.Z` tag builds macOS Apple Silicon and Windows x64 bundles. The workflow creates a draft release, uploads installers plus signed updater archives and `latest.json`, then publishes only after both platforms succeed. Linux remains available through unsigned development workflows until its Silero/ORT and static Sherpa-ONNX runtime conflict is resolved. The repository secret `TAURI_SIGNING_PRIVATE_KEY` signs updater payloads; it is unrelated to Apple or Windows platform signing.
+
+The base Tauri configuration is deliberately isolated as `Mingtily Dev` / `com.mingcheng.mingtily.dev`. `release.yml` is the only supported path that overlays `tauri.release.conf.json` to produce the production `Mingtily` / `com.mingcheng.mingtily` application.
 
 ## Recommended workflow
 

@@ -45,10 +45,12 @@ Speaker diarization is optional and must fail open: ASR and recording continue w
 
 ## Data and compatibility
 
-- Application identifier: `com.mingcheng.mingtily`.
+- Production application identifier: `com.mingcheng.mingtily`; tagged releases apply it through `frontend/src-tauri/tauri.release.conf.json`.
+- Local development and local packaged tests must use `Mingtily Dev` with `com.mingcheng.mingtily.dev`. Do not point local test commands at the production data directory.
 - Mingtily intentionally uses its own application data space and does not automatically migrate Meetily data.
 - Meeting data is stored in SQLite; recovery and transient frontend state also use local storage/IndexedDB where already implemented.
 - Preserve compatibility with existing meeting records and transcript JSON unless a task explicitly authorizes a migration.
+- Published migration files are immutable. New migrations must include an upgrade regression test from the latest public baseline, and newer-schema detection must fail safely without resetting user data.
 - Speaker names are revisioned, meeting-local overlays. Do not rewrite raw `transcripts.speaker` values or historical transcript JSON, and do not add cross-meeting identity memory implicitly.
 - Summary generation must survive route changes; page unmount may stop local listeners but must not cancel the native job.
 - Apply terminology corrections only to finalized text. Provisional streaming hypotheses remain display-only and unmodified.
@@ -74,6 +76,7 @@ Run frontend commands from `frontend/`:
 
 ```bash
 pnpm install
+pnpm check:app-identity
 pnpm check:i18n
 pnpm check:network-boundary
 pnpm build
