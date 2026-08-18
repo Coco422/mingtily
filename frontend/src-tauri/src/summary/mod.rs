@@ -16,8 +16,27 @@ pub struct SummaryStreamUpdate {
     pub thinking_complete: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SummaryProgressPhase {
+    Preparing,
+    AnalyzingChunks,
+    Combining,
+    Understanding,
+    Streaming,
+    Translating,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SummaryProgressUpdate {
+    pub phase: SummaryProgressPhase,
+    pub current: Option<usize>,
+    pub total: Option<usize>,
+}
+
 pub type SummaryStreamCallback = Arc<dyn Fn(SummaryStreamUpdate) + Send + Sync + 'static>;
 pub type SummaryTextStreamCallback = Arc<dyn Fn(String) + Send + Sync + 'static>;
+pub type SummaryProgressCallback = Arc<dyn Fn(SummaryProgressUpdate) + Send + Sync + 'static>;
 
 /// Custom OpenAI-compatible endpoint configuration
 /// Stored as JSON in the database and used for connecting to any OpenAI-compatible API server
@@ -87,3 +106,20 @@ pub use processor::{
     generate_meeting_summary, rough_token_count,
 };
 pub use service::SummaryService;
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    #[test]
+    fn progress_phases_use_stable_snake_case_event_values() {
+        assert_eq!(
+            serde_json::to_string(&SummaryProgressPhase::AnalyzingChunks).unwrap(),
+            "\"analyzing_chunks\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SummaryProgressPhase::Understanding).unwrap(),
+            "\"understanding\""
+        );
+    }
+}

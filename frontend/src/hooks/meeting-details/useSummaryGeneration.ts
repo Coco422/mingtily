@@ -93,6 +93,10 @@ export function useSummaryGeneration({
   const streamingSummary = job?.streamingSummary || '';
   const streamingThinking = job?.streamingThinking ?? null;
   const streamingThinkingComplete = job?.streamingThinkingComplete || false;
+  const summaryPhase = job?.phase ?? null;
+  const summaryCurrentStep = job?.currentStep ?? null;
+  const summaryTotalSteps = job?.totalSteps ?? null;
+  const summaryStartedAt = job?.startedAt ?? null;
   const handledCompletionRef = useRef(job?.status === 'completed');
 
   useEffect(() => {
@@ -460,6 +464,10 @@ export function useSummaryGeneration({
     streamingSummary,
     streamingThinking,
     streamingThinkingComplete,
+    summaryPhase,
+    summaryCurrentStep,
+    summaryTotalSteps,
+    summaryStartedAt,
     handleGenerateSummary,
     handleRegenerateSummary,
     handleStopGeneration,

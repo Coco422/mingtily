@@ -1,7 +1,7 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
     "productName": "Mingtily Dev",
-    "version": "0.7.4",
+    "version": "0.7.5",
     "identifier": "com.mingcheng.mingtily.dev",
     "build": {
         "frontendDist": "../out",

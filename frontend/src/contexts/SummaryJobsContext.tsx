@@ -21,6 +21,21 @@ interface SummaryGenerationStreamPayload {
   phase: 'final';
 }
 
+export type SummaryProgressPhase =
+  | 'preparing'
+  | 'analyzing_chunks'
+  | 'combining'
+  | 'understanding'
+  | 'streaming'
+  | 'translating';
+
+interface SummaryGenerationProgressPayload {
+  meeting_id: string;
+  phase: SummaryProgressPhase;
+  current?: number | null;
+  total?: number | null;
+}
+
 export interface SummaryJob {
   meetingId: string;
   status: BackendSummaryStatus;
@@ -30,6 +45,10 @@ export interface SummaryJob {
   streamingSummary: string;
   streamingThinking: string | null;
   streamingThinkingComplete: boolean;
+  phase: SummaryProgressPhase | null;
+  currentStep: number | null;
+  totalSteps: number | null;
+  startedAt: number | null;
   unread: boolean;
   updatedAt: number;
 }
@@ -49,6 +68,31 @@ const ACTIVE_STATUSES = new Set<BackendSummaryStatus>(['pending', 'processing'])
 const TERMINAL_STATUSES = new Set<BackendSummaryStatus>([
   'completed', 'failed', 'error', 'cancelled', 'interrupted',
 ]);
+
+function parseStartedAt(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function createActiveJob(meetingId: string): SummaryJob {
+  return {
+    meetingId,
+    status: 'processing',
+    data: null,
+    error: null,
+    meetingName: null,
+    streamingSummary: '',
+    streamingThinking: null,
+    streamingThinkingComplete: false,
+    phase: 'preparing',
+    currentStep: null,
+    totalSteps: null,
+    startedAt: Date.now(),
+    unread: false,
+    updatedAt: Date.now(),
+  };
+}
 
 export function SummaryJobsProvider({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation('summary');
@@ -79,17 +123,23 @@ export function SummaryJobsProvider({ children }: { children: React.ReactNode })
       ? t('interrupted')
       : raw.error || (status === 'completed' && !data ? t('emptyResult') : null);
     const effectiveStatus = status === 'completed' && !data ? 'failed' : status;
+    const isActive = ACTIVE_STATUSES.has(effectiveStatus);
+    const responseStartedAt = parseStartedAt(raw.start);
     const next: SummaryJob = {
       meetingId,
       status: effectiveStatus,
       data,
       error,
       meetingName: raw.meetingName || null,
-      streamingSummary: ACTIVE_STATUSES.has(effectiveStatus) ? previous?.streamingSummary || '' : '',
-      streamingThinking: ACTIVE_STATUSES.has(effectiveStatus) ? previous?.streamingThinking ?? null : null,
-      streamingThinkingComplete: ACTIVE_STATUSES.has(effectiveStatus)
+      streamingSummary: isActive ? previous?.streamingSummary || '' : '',
+      streamingThinking: isActive ? previous?.streamingThinking ?? null : null,
+      streamingThinkingComplete: isActive
         ? previous?.streamingThinkingComplete || false
         : false,
+      phase: isActive ? previous?.phase || 'preparing' : null,
+      currentStep: isActive ? previous?.currentStep ?? null : null,
+      totalSteps: isActive ? previous?.totalSteps ?? null : null,
+      startedAt: responseStartedAt ?? previous?.startedAt ?? (isActive ? Date.now() : null),
       unread: previous?.unread || transitionedToTerminal,
       updatedAt: Date.now(),
     };
@@ -132,7 +182,12 @@ export function SummaryJobsProvider({ children }: { children: React.ReactNode })
     notifyOnTerminalRef.current.add(meetingId);
     notifiedTerminalRef.current.delete(meetingId);
     const previous = jobsRef.current[meetingId];
-    const pending: SummaryJob = {
+    const pending: SummaryJob = previous && ACTIVE_STATUSES.has(previous.status) ? {
+      ...previous,
+      error: null,
+      unread: false,
+      updatedAt: Date.now(),
+    } : {
       meetingId,
       status: 'pending',
       data: previous?.data || null,
@@ -141,6 +196,10 @@ export function SummaryJobsProvider({ children }: { children: React.ReactNode })
       streamingSummary: '',
       streamingThinking: null,
       streamingThinkingComplete: false,
+      phase: 'preparing',
+      currentStep: null,
+      totalSteps: null,
+      startedAt: Date.now(),
       unread: false,
       updatedAt: Date.now(),
     };
@@ -173,25 +232,44 @@ export function SummaryJobsProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     let disposed = false;
-    let unlisten: UnlistenFn | undefined;
+    let unlistenStream: UnlistenFn | undefined;
+    let unlistenProgress: UnlistenFn | undefined;
     void listen<SummaryGenerationStreamPayload>('summary-generation-stream', (event) => {
       const payload = event.payload;
       if (payload.phase !== 'final') return;
-      const current = jobsRef.current[payload.meeting_id];
-      if (!current || !ACTIVE_STATUSES.has(current.status)) return;
+      const current = jobsRef.current[payload.meeting_id] || createActiveJob(payload.meeting_id);
+      if (!ACTIVE_STATUSES.has(current.status)) return;
       const next = {
         ...current,
         streamingSummary: payload.markdown,
         streamingThinking: payload.thinking,
         streamingThinkingComplete: payload.thinking_complete,
+        phase: 'streaming' as const,
+        currentStep: null,
+        totalSteps: null,
         updatedAt: Date.now(),
       };
       jobsRef.current = { ...jobsRef.current, [payload.meeting_id]: next };
       setJobs(jobsRef.current);
-    }).then((fn) => disposed ? fn() : (unlisten = fn));
+    }).then((fn) => disposed ? fn() : (unlistenStream = fn));
+    void listen<SummaryGenerationProgressPayload>('summary-generation-progress', (event) => {
+      const payload = event.payload;
+      const current = jobsRef.current[payload.meeting_id] || createActiveJob(payload.meeting_id);
+      if (!ACTIVE_STATUSES.has(current.status)) return;
+      const next: SummaryJob = {
+        ...current,
+        phase: payload.phase,
+        currentStep: payload.current ?? null,
+        totalSteps: payload.total ?? null,
+        updatedAt: Date.now(),
+      };
+      jobsRef.current = { ...jobsRef.current, [payload.meeting_id]: next };
+      setJobs(jobsRef.current);
+    }).then((fn) => disposed ? fn() : (unlistenProgress = fn));
     return () => {
       disposed = true;
-      unlisten?.();
+      unlistenStream?.();
+      unlistenProgress?.();
       pollersRef.current.forEach(clearInterval);
       pollersRef.current.clear();
     };

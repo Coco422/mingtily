@@ -229,6 +229,10 @@ export default function PageContent({
           streamingSummary={summaryGeneration.streamingSummary}
           streamingThinking={summaryGeneration.streamingThinking}
           streamingThinkingComplete={summaryGeneration.streamingThinkingComplete}
+          summaryPhase={summaryGeneration.summaryPhase}
+          summaryCurrentStep={summaryGeneration.summaryCurrentStep}
+          summaryTotalSteps={summaryGeneration.summaryTotalSteps}
+          summaryStartedAt={summaryGeneration.summaryStartedAt}
           transcripts={meetingData.transcripts}
           modelConfig={modelConfig}
           setModelConfig={setModelConfig}

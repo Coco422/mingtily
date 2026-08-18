@@ -14,7 +14,7 @@
 
 Mingtily 是一款本地优先的桌面会议助手，面向希望将录音、转写、说话人标签和本地模型保留在自己设备上的个人、开发者与小团队。需要更高总结质量或性能时，也可以由用户主动配置并调用外部 LLM Provider。
 
-当前版本：**[0.7.4](https://github.com/Coco422/mingtily/releases/tag/v0.7.4)**。带版本标签的 GitHub Actions 会发布 macOS Apple Silicon 与 Windows x64 开发版。安装包暂未进行操作系统级签名，但 Tauri 更新包由 Mingtily 完整性签名。Linux 目前作为无签名手动开发构建目标。
+当前版本：**[0.7.5](https://github.com/Coco422/mingtily/releases/tag/v0.7.5)**。带版本标签的 GitHub Actions 会发布 macOS Apple Silicon 与 Windows x64 开发版。安装包暂未进行操作系统级签名，但 Tauri 更新包由 Mingtily 完整性签名。Linux 目前作为无签名手动开发构建目标。
 
 ### 主要能力
 
@@ -26,7 +26,7 @@ Mingtily 是一款本地优先的桌面会议助手，面向希望将录音、�
 - 使用全局自定义术语、精确纠错和可选的高级 FST 兼容规则改善最终转写；临时流式文本保持原样。
 - 使用可选的内置模型、Ollama 或用户配置的外部 Provider 生成 AI 总结。
 - 摘要在应用级后台任务中继续生成；离开会议详情再返回时会恢复进度、结果或持久错误，而不是显示空白页面。
-- 流式展示 AI 总结；支持的 reasoning 标签会在生成时显示，完成后折叠且不会写入最终摘要。
+- 流式展示 AI 总结；首个 token 前显示真实处理阶段和累计耗时，支持的 reasoning 标签会在生成时显示，完成后折叠且不会写入最终摘要。
 - 展示录音时长和停止后的分阶段处理进度，避免长时间本地处理没有反馈。
 - 使用 `zh-CN` 或 `en-US` 界面；界面语言、转写语言和总结语言相互独立。
 - 在录音被意外中断后恢复音频检查点和转写状态。
@@ -148,7 +148,7 @@ Mingtily 使用 MIT License。原始 Meetily 版权声明保留在 [LICENSE.md](
 
 Mingtily is a local-first desktop meeting assistant for individuals, developers, and small teams that want recordings, transcripts, speaker labels, and local models to stay on their own devices. When better summary quality or performance is needed, users can explicitly configure and invoke an external LLM Provider.
 
-Current version: **[0.7.4](https://github.com/Coco422/mingtily/releases/tag/v0.7.4)**. Tagged GitHub Actions releases target macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while Tauri updater payloads are integrity-signed by Mingtily. Linux is currently available as an unsigned manual development-build target.
+Current version: **[0.7.5](https://github.com/Coco422/mingtily/releases/tag/v0.7.5)**. Tagged GitHub Actions releases target macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while Tauri updater payloads are integrity-signed by Mingtily. Linux is currently available as an unsigned manual development-build target.
 
 ### Highlights
 
@@ -160,7 +160,7 @@ Current version: **[0.7.4](https://github.com/Coco422/mingtily/releases/tag/v0.7
 - Improve finalized transcripts with global custom terminology, exact replacements, and optional advanced FST compatibility rules. Provisional streaming text remains unchanged.
 - Generate summaries with an optional built-in model, Ollama, or a user-configured external Provider.
 - Keep summaries running as application-level background jobs. Leaving and reopening meeting details restores progress, results, or persistent errors instead of showing a blank page.
-- Stream AI summary output as it arrives; supported reasoning tags are shown while active and folded after completion without entering the saved summary.
+- Stream AI summary output as it arrives; before the first token, show the real processing stage and elapsed time. Supported reasoning tags are shown while active and folded after completion without entering the saved summary.
 - Show recording duration and staged stop/finalization progress instead of leaving long local processing unexplained.
 - Use the interface in `zh-CN` or `en-US`; UI, transcription, and summary languages are configured independently.
 - Recover audio checkpoints and transcript state after an interrupted recording.

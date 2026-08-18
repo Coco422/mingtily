@@ -81,7 +81,7 @@ Common types include `feat`, `fix`, `docs`, `refactor`, `test`, `build`, and `ch
 After the release commit is on `main` and Validation succeeds, create the draft release with an authenticated maintainer account. Do not push the version tag first: creating the draft for a new tag also creates the tag and triggers the Release workflow.
 
 ```bash
-version=0.7.4
+version=0.7.5
 gh release create "v${version}" \
   --draft \
   --target "$(git rev-parse HEAD)" \

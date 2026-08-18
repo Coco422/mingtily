@@ -1,6 +1,9 @@
 use crate::summary::llm_client::{generate_summary, generate_summary_with_callback, LLMProvider};
 use crate::summary::templates::Template;
-use crate::summary::{SummaryStreamCallback, SummaryStreamUpdate, SummaryTextStreamCallback};
+use crate::summary::{
+    SummaryProgressCallback, SummaryProgressPhase, SummaryProgressUpdate, SummaryStreamCallback,
+    SummaryStreamUpdate, SummaryTextStreamCallback,
+};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
@@ -479,6 +482,21 @@ fn sanitized_stream_callback(callback: &SummaryStreamCallback) -> SummaryTextStr
     })
 }
 
+fn emit_progress(
+    callback: Option<&SummaryProgressCallback>,
+    phase: SummaryProgressPhase,
+    current: Option<usize>,
+    total: Option<usize>,
+) {
+    if let Some(callback) = callback {
+        callback(SummaryProgressUpdate {
+            phase,
+            current,
+            total,
+        });
+    }
+}
+
 /// Extracts meeting name from the first heading in markdown
 ///
 /// # Arguments
@@ -514,6 +532,7 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 /// * `summary_language` - Optional BCP-47 tag (e.g. "en-GB") to force summary output language
 /// * `detected_transcript_language` - Optional detected transcript language BCP-47 tag
 /// * `cached_english` - Optional previously-generated English summary to skip pass 1 when translating
+/// * `progress_callback` - Optional callback for coarse, truthful processing stages
 ///
 /// # Returns
 /// Tuple of (final_summary_markdown, english_summary_markdown, number_of_chunks_processed)
@@ -540,6 +559,7 @@ pub async fn generate_meeting_summary(
     detected_transcript_language: Option<&str>,
     cached_english: Option<&str>,
     stream_callback: Option<&SummaryStreamCallback>,
+    progress_callback: Option<&SummaryProgressCallback>,
 ) -> Result<(String, String, i64), String> {
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
@@ -549,6 +569,12 @@ pub async fn generate_meeting_summary(
     info!(
         "Starting summary generation with provider: {:?}, model: {}",
         provider, model_name
+    );
+    emit_progress(
+        progress_callback,
+        SummaryProgressPhase::Preparing,
+        None,
+        None,
     );
 
     let final_language_action =
@@ -637,6 +663,12 @@ pub async fn generate_meeting_summary(
                 }
 
                 info!("Processing chunk {}/{}", i + 1, num_chunks);
+                emit_progress(
+                    progress_callback,
+                    SummaryProgressPhase::AnalyzingChunks,
+                    Some(i + 1),
+                    Some(num_chunks),
+                );
                 let user_prompt_chunk = build_chunk_summary_user_prompt(chunk);
 
                 match generate_summary(
@@ -710,6 +742,12 @@ pub async fn generate_meeting_summary(
                                 build_combine_summary_user_prompt,
                             )
                             .await?;
+                        emit_progress(
+                            progress_callback,
+                            SummaryProgressPhase::Combining,
+                            None,
+                            Some(groups.len()),
+                        );
                         info!(
                             "Local summary reduction round {}: {} group(s)",
                             reduction_round,
@@ -717,7 +755,14 @@ pub async fn generate_meeting_summary(
                         );
 
                         let mut reduced = Vec::with_capacity(groups.len());
-                        for group in groups {
+                        let group_count = groups.len();
+                        for (group_index, group) in groups.into_iter().enumerate() {
+                            emit_progress(
+                                progress_callback,
+                                SummaryProgressPhase::Combining,
+                                Some(group_index + 1),
+                                Some(group_count),
+                            );
                             let user_prompt_combine = build_combine_summary_user_prompt(&group);
                             reduced.push(
                                 generate_summary(
@@ -745,6 +790,12 @@ pub async fn generate_meeting_summary(
                         pending = reduced;
                     }
                 } else {
+                    emit_progress(
+                        progress_callback,
+                        SummaryProgressPhase::Combining,
+                        Some(1),
+                        Some(1),
+                    );
                     let combined_text = chunk_summaries.join("\n---\n");
                     let user_prompt_combine = build_combine_summary_user_prompt(&combined_text);
                     generate_summary(
@@ -801,7 +852,14 @@ pub async fn generate_meeting_summary(
                     )
                     .await?;
                 let mut compacted = Vec::with_capacity(groups.len());
-                for group in groups {
+                let group_count = groups.len();
+                for (group_index, group) in groups.into_iter().enumerate() {
+                    emit_progress(
+                        progress_callback,
+                        SummaryProgressPhase::Combining,
+                        Some(group_index + 1),
+                        Some(group_count),
+                    );
                     let user_prompt_combine = build_combine_summary_user_prompt(&group);
                     compacted.push(
                         generate_summary(
@@ -837,6 +895,13 @@ pub async fn generate_meeting_summary(
             }
         }
 
+        emit_progress(
+            progress_callback,
+            SummaryProgressPhase::Understanding,
+            None,
+            None,
+        );
+
         let final_report_stream = if final_language_action == FinalLanguageAction::ReturnEnglish {
             stream_callback.map(sanitized_stream_callback)
         } else {
@@ -868,6 +933,12 @@ pub async fn generate_meeting_summary(
 
     let final_markdown = match final_language_action {
         FinalLanguageAction::Translate(name) => {
+            emit_progress(
+                progress_callback,
+                SummaryProgressPhase::Translating,
+                None,
+                None,
+            );
             match translate_markdown(
                 client,
                 provider,
@@ -894,6 +965,12 @@ pub async fn generate_meeting_summary(
             info!(
                 "English target with detected transcript language {:?}; running soft English normalization",
                 detected_transcript_language
+            );
+            emit_progress(
+                progress_callback,
+                SummaryProgressPhase::Translating,
+                None,
+                None,
             );
             let normalized = english_markdown_after_normalization_result(
                 &english_markdown,
@@ -1060,6 +1137,32 @@ async fn normalize_markdown_to_english(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn progress_callback_preserves_stage_and_step_counts() {
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let captured = updates.clone();
+        let callback: SummaryProgressCallback = Arc::new(move |update| {
+            captured.lock().unwrap().push(update);
+        });
+
+        emit_progress(
+            Some(&callback),
+            SummaryProgressPhase::AnalyzingChunks,
+            Some(2),
+            Some(5),
+        );
+
+        assert_eq!(
+            *updates.lock().unwrap(),
+            vec![SummaryProgressUpdate {
+                phase: SummaryProgressPhase::AnalyzingChunks,
+                current: Some(2),
+                total: Some(5),
+            }]
+        );
+    }
 
     #[test]
     fn chunk_summary_prompt_forces_english_base_output() {

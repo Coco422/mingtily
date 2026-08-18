@@ -1,6 +1,6 @@
 {
     "name": "mingtily",
-    "version": "0.7.4",
+    "version": "0.7.5",
     "private": true,
     "packageManager": "pnpm@10.33.0",
     "main": "electron/main.js",

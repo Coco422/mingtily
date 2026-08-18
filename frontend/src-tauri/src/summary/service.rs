@@ -9,12 +9,16 @@ use crate::summary::processor::{
     extract_meeting_name_from_markdown, generate_meeting_summary, language_name_from_code,
 };
 use crate::summary::templates::{self, Template};
-use crate::summary::{SummaryStreamCallback, SummaryStreamUpdate};
+use crate::summary::{
+    SummaryProgressCallback, SummaryProgressPhase, SummaryProgressUpdate, SummaryStreamCallback,
+    SummaryStreamUpdate,
+};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -36,6 +40,14 @@ struct SummaryGenerationStreamPayload {
     thinking: Option<String>,
     thinking_complete: bool,
     phase: String,
+}
+
+#[derive(Clone, Serialize)]
+struct SummaryGenerationProgressPayload {
+    meeting_id: String,
+    phase: SummaryProgressPhase,
+    current: Option<usize>,
+    total: Option<usize>,
 }
 
 /// Strips the first `#` heading line; returns "" if no `#` is found.
@@ -343,6 +355,26 @@ impl SummaryService {
             }
         }
 
+        let progress_app = app.clone();
+        let progress_meeting_id = meeting_id.clone();
+        let progress_callback: SummaryProgressCallback =
+            Arc::new(move |update: SummaryProgressUpdate| {
+                let _ = progress_app.emit(
+                    "summary-generation-progress",
+                    SummaryGenerationProgressPayload {
+                        meeting_id: progress_meeting_id.clone(),
+                        phase: update.phase,
+                        current: update.current,
+                        total: update.total,
+                    },
+                );
+            });
+        progress_callback(SummaryProgressUpdate {
+            phase: SummaryProgressPhase::Preparing,
+            current: None,
+            total: None,
+        });
+
         // Register cancellation token for this meeting
         let cancellation_token = Self::register_cancellation_token(&meeting_id);
         match SummaryProcessesRepository::get_summary_data(&pool, &meeting_id).await {
@@ -582,6 +614,8 @@ impl SummaryService {
         let stream_app = app.clone();
         let stream_meeting_id = meeting_id.clone();
         let last_streamed_update = Arc::new(Mutex::new(None::<SummaryStreamUpdate>));
+        let stream_progress_callback = progress_callback.clone();
+        let streaming_started = Arc::new(AtomicBool::new(false));
         let stream_callback: SummaryStreamCallback = Arc::new(move |update| {
             if update.markdown.trim().is_empty() && update.thinking.is_none() {
                 return;
@@ -596,6 +630,13 @@ impl SummaryService {
             };
 
             if should_emit {
+                if !streaming_started.swap(true, Ordering::Relaxed) {
+                    stream_progress_callback(SummaryProgressUpdate {
+                        phase: SummaryProgressPhase::Streaming,
+                        current: None,
+                        total: None,
+                    });
+                }
                 let _ = stream_app.emit(
                     "summary-generation-stream",
                     SummaryGenerationStreamPayload {
@@ -629,6 +670,7 @@ impl SummaryService {
             detected_summary_language.as_deref(),
             cached_english.as_deref(),
             Some(&stream_callback),
+            Some(&progress_callback),
         )
         .await;
 

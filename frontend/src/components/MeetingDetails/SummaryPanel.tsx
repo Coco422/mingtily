@@ -23,6 +23,17 @@ import {
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { SummaryProgressPhase } from '@/contexts/SummaryJobsContext';
+
+function formatElapsedTime(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
 
 interface SummaryPanelProps {
   meeting: {
@@ -46,6 +57,10 @@ interface SummaryPanelProps {
   streamingSummary?: string;
   streamingThinking?: string | null;
   streamingThinkingComplete?: boolean;
+  summaryPhase?: SummaryProgressPhase | null;
+  summaryCurrentStep?: number | null;
+  summaryTotalSteps?: number | null;
+  summaryStartedAt?: number | null;
   transcripts: Transcript[];
   modelConfig: ModelConfig;
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
@@ -85,6 +100,10 @@ export function SummaryPanel({
   streamingSummary = '',
   streamingThinking = null,
   streamingThinkingComplete = false,
+  summaryPhase = null,
+  summaryCurrentStep = null,
+  summaryTotalSteps = null,
+  summaryStartedAt = null,
   transcripts,
   modelConfig,
   setModelConfig,
@@ -109,6 +128,7 @@ export function SummaryPanel({
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const languageLoadVersionRef = useRef(0);
   const activeMeetingIdRef = useRef(meeting.id);
   const languageSaveVersionRef = useRef(0);
@@ -241,6 +261,58 @@ export function SummaryPanel({
   };
 
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
+  const isBuiltInProvider = modelConfig.provider === 'builtin-ai';
+
+  useEffect(() => {
+    if (!isSummaryLoading || summaryStartedAt === null) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const updateElapsed = () => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - summaryStartedAt) / 1000)));
+    };
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [isSummaryLoading, summaryStartedAt]);
+
+  const progressLabel = (() => {
+    if (streamingThinking !== null && !streamingThinkingComplete && !streamingSummary) {
+      return t('summary:thinkingLive');
+    }
+    if (streamingSummary || summaryPhase === 'streaming') {
+      return t('summary:streamingLive');
+    }
+    switch (summaryPhase) {
+      case 'analyzing_chunks':
+        return summaryCurrentStep !== null && summaryTotalSteps !== null
+          ? t('summary:progressAnalyzingChunks', {
+            current: summaryCurrentStep,
+            total: summaryTotalSteps,
+          })
+          : t('summary:progressPreparing');
+      case 'combining':
+        return summaryCurrentStep !== null && summaryTotalSteps !== null
+          ? t('summary:progressCombiningSteps', {
+            current: summaryCurrentStep,
+            total: summaryTotalSteps,
+          })
+          : t('summary:progressCombining');
+      case 'understanding':
+        return t(isBuiltInProvider
+          ? 'summary:progressUnderstandingLocal'
+          : 'summary:progressWaitingProvider');
+      case 'translating':
+        return t('summary:progressTranslating');
+      case 'preparing':
+      default:
+        return t('summary:progressPreparing');
+    }
+  })();
+  const showLocalFirstTokenHint = isBuiltInProvider && !streamingSummary &&
+    summaryPhase !== 'streaming' &&
+    (summaryPhase === 'analyzing_chunks' || elapsedSeconds >= 10);
 
   const languageSlot = (
     <Popover open={langPickerOpen} onOpenChange={setLangPickerOpen}>
@@ -357,16 +429,15 @@ export function SummaryPanel({
                   aria-hidden="true"
                 />
                 <span className="text-sm font-medium text-gray-800">
-                  {streamingThinking !== null && !streamingThinkingComplete && !streamingSummary
-                    ? t('summary:thinkingLive')
-                    : streamingSummary
-                    ? t('summary:streamingLive')
-                    : t('summary:preparingStream')}
+                  {progressLabel}
                 </span>
               </div>
-              {streamingSummary && (
-                <span className="text-xs text-gray-500">{t('summary:streamingHint')}</span>
-              )}
+              <div className="flex items-center gap-3 text-xs text-gray-500">
+                {streamingSummary && <span>{t('summary:streamingHint')}</span>}
+                {summaryStartedAt !== null && (
+                  <span>{t('summary:progressElapsed', { time: formatElapsedTime(elapsedSeconds) })}</span>
+                )}
+              </div>
             </div>
 
             {streamingSummary || streamingThinking !== null ? (
@@ -425,9 +496,16 @@ export function SummaryPanel({
               </div>
             ) : (
               <div className="flex min-h-[240px] items-center justify-center px-6">
-                <div className="flex items-center gap-3 rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-700" aria-hidden="true" />
-                  <span>{t('meeting:generatingSummary')}</span>
+                <div className="max-w-md rounded-md border border-gray-200 bg-gray-50 px-5 py-4 text-sm text-gray-600">
+                  <div className="flex items-center gap-3">
+                    <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-gray-700" aria-hidden="true" />
+                    <span>{progressLabel}</span>
+                  </div>
+                  {showLocalFirstTokenHint && (
+                    <p className="mt-3 pl-7 text-xs leading-5 text-gray-500">
+                      {t('summary:localFirstTokenHint')}
+                    </p>
+                  )}
                 </div>
               </div>
             )}

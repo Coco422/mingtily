@@ -15,6 +15,7 @@ export interface BackendSummaryResponse {
   data?: unknown;
   error?: string | null;
   meetingName?: string | null;
+  start?: string | null;
 }
 
 export function normalizeSummaryStatus(status: unknown): BackendSummaryStatus {
