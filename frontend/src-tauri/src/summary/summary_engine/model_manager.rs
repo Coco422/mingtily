@@ -230,19 +230,14 @@ impl ModelManager {
                     Ok(metadata) => {
                         let file_size_mb = metadata.len() / (1024 * 1024);
 
-                        // Allow 10% variance for file size check
-                        let expected_min = (model_def.size_mb as f64 * 0.9) as u64;
-                        let expected_max = (model_def.size_mb as f64 * 1.1) as u64;
-
                         log::info!(
-                            "Model '{}': found {} MB (expected {}-{} MB)",
+                            "Model '{}': found {} bytes (expected {} bytes)",
                             model_def.name,
-                            file_size_mb,
-                            expected_min,
-                            expected_max
+                            metadata.len(),
+                            model_def.size_bytes
                         );
 
-                        if file_size_mb >= expected_min && file_size_mb <= expected_max {
+                        if metadata.len() == model_def.size_bytes {
                             log::info!("Model '{}': AVAILABLE", model_def.name);
                             ModelStatus::Available
                         } else {
@@ -254,7 +249,7 @@ impl ModelManager {
                             );
                             ModelStatus::Corrupted {
                                 file_size: file_size_mb,
-                                expected_min_size: expected_min,
+                                expected_min_size: model_def.size_mb,
                             }
                         }
                     }
@@ -391,10 +386,9 @@ impl ModelManager {
         if file_path.exists() {
             if let Ok(metadata) = fs::metadata(&file_path).await {
                 let file_size_mb = metadata.len() / (1024 * 1024);
-                let expected_min = (model_def.size_mb as f64 * 0.9) as u64;
-                let expected_max = (model_def.size_mb as f64 * 1.1) as u64;
+                let expected_size_bytes = model_def.size_bytes;
 
-                if file_size_mb >= expected_min && file_size_mb <= expected_max {
+                if metadata.len() == model_def.size_bytes {
                     log::info!(
                         "Model '{}' already exists and is valid ({} MB), skipping download",
                         model_name,
@@ -422,14 +416,14 @@ impl ModelManager {
                     }
 
                     return Ok(());
-                } else if file_size_mb > expected_max {
+                } else if metadata.len() > expected_size_bytes {
                     // File is LARGER than expected - possibly corrupted or wrong file
                     // Delete and re-download in this case
                     log::warn!(
-                        "Model '{}' exists but is too large ({} MB, expected max {} MB), deleting and re-downloading",
+                        "Model '{}' exists but is too large ({} bytes, expected {} bytes), deleting and re-downloading",
                         model_name,
-                        file_size_mb,
-                        expected_max
+                        metadata.len(),
+                        expected_size_bytes
                     );
                     if let Err(e) = fs::remove_file(&file_path).await {
                         log::warn!("Failed to delete oversized model file: {}", e);
@@ -438,17 +432,20 @@ impl ModelManager {
                     // File is SMALLER than expected - likely partial download
                     // DON'T DELETE - let resume logic handle it
                     log::info!(
-                        "Model '{}' exists but is incomplete ({} MB, expected min {} MB), will resume download",
+                        "Model '{}' exists but is incomplete ({} MB, expected {:.1} MB), will resume download",
                         model_name,
                         file_size_mb,
-                        expected_min
+                        expected_size_bytes as f64 / (1024.0 * 1024.0)
                     );
                     // Continue to download/resume logic below
                 }
             }
         }
 
-        log::info!("Downloading from: {}", model_def.download_url);
+        log::info!(
+            "Downloading from ModelScope-first source list ({} fallback source(s))",
+            model_def.fallback_download_urls.len()
+        );
         log::info!("Saving to: {}", file_path.display());
 
         // Create models directory if needed
@@ -472,44 +469,69 @@ impl ModelManager {
             .build()
             .map_err(|e| anyhow!("Failed to create HTTP client: {}", e))?;
 
-        // Build request with Range header if resuming
-        let mut request = client.get(&model_def.download_url);
-        if existing_size > 0 {
+        let mut urls = Vec::with_capacity(1 + model_def.fallback_download_urls.len());
+        urls.push(model_def.download_url.as_str());
+        urls.extend(model_def.fallback_download_urls.iter().map(String::as_str));
+        let mut selected_response = None;
+        let mut failures = Vec::new();
+        for (index, url) in urls.iter().enumerate() {
             log::info!(
-                "Resuming download from byte {} ({:.1} MB)",
-                existing_size,
-                existing_size as f64 / (1024.0 * 1024.0)
+                "Trying summary model source {}/{}: {}",
+                index + 1,
+                urls.len(),
+                url
             );
-            request = request.header("Range", format!("bytes={}-", existing_size));
-        }
-
-        let response = request
-            .send()
-            .await
-            .map_err(|e| anyhow!("Failed to start download: {}", e))?;
-
-        // Check response status - 200 OK (full download) or 206 Partial Content (resume)
-        let (total_size, resuming) = if response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
-            // Server supports resume - total size = existing + remaining
-            let remaining = response.content_length().unwrap_or(0);
-            log::info!(
-                "Server supports resume, {} MB remaining",
-                remaining / (1024 * 1024)
-            );
-            (existing_size + remaining, true)
-        } else if response.status().is_success() {
-            // Server doesn't support resume or fresh download
+            let mut request = client.get(*url);
             if existing_size > 0 {
-                log::warn!("Server doesn't support resume, starting fresh download");
+                log::info!(
+                    "Resuming download from byte {} ({:.1} MB)",
+                    existing_size,
+                    existing_size as f64 / (1024.0 * 1024.0)
+                );
+                request = request.header("Range", format!("bytes={}-", existing_size));
             }
-            (response.content_length().unwrap_or(0), false)
-        } else {
-            let mut active = self.active_downloads.write().await;
-            active.remove(model_name);
-            return Err(anyhow!(
-                "Download failed with status: {}",
-                response.status()
-            ));
+            let response = match request.send().await {
+                Ok(response) => response,
+                Err(error) => {
+                    failures.push(format!("{url}: {error}"));
+                    continue;
+                }
+            };
+            let (candidate_total, candidate_resuming) =
+                if response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+                    (
+                        existing_size.saturating_add(response.content_length().unwrap_or(0)),
+                        true,
+                    )
+                } else if response.status().is_success() {
+                    (response.content_length().unwrap_or(0), false)
+                } else {
+                    failures.push(format!("{url}: HTTP {}", response.status()));
+                    continue;
+                };
+            if candidate_total != 0 && candidate_total != model_def.size_bytes {
+                failures.push(format!(
+                    "{url}: reported {candidate_total} bytes, expected {}",
+                    model_def.size_bytes
+                ));
+                continue;
+            }
+            selected_response = Some((response, candidate_total, candidate_resuming));
+            break;
+        }
+        let (response, total_size, resuming) = match selected_response {
+            Some(selected) => selected,
+            None => {
+                let error = anyhow!(
+                    "All summary model download sources failed: {}",
+                    failures.join(" | ")
+                );
+                self.active_downloads.write().await.remove(model_name);
+                if let Some(model_info) = self.available_models.write().await.get_mut(model_name) {
+                    model_info.status = ModelStatus::Error(error.to_string());
+                }
+                return Err(error);
+            }
         };
 
         log::info!("Total size: {} MB", total_size / (1024 * 1024));
@@ -725,6 +747,21 @@ impl ModelManager {
 
         writer.flush().await?;
         drop(writer);
+
+        if downloaded != model_def.size_bytes {
+            self.active_downloads.write().await.remove(model_name);
+            if let Some(model_info) = self.available_models.write().await.get_mut(model_name) {
+                model_info.status = ModelStatus::Error(format!(
+                    "Downloaded {} bytes; expected {}",
+                    downloaded, model_def.size_bytes
+                ));
+            }
+            return Err(anyhow!(
+                "Summary model download ended with {} bytes; expected {}",
+                downloaded,
+                model_def.size_bytes
+            ));
+        }
 
         log::info!("Download completed for model: {}", model_name);
 

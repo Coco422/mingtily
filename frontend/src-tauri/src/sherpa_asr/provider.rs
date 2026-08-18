@@ -407,4 +407,22 @@ mod tests {
             "auto"
         );
     }
+
+    #[test]
+    #[ignore = "requires a complete local FunASR Nano model directory"]
+    fn funasr_nano_fixture_initializes_native_recognizer() {
+        let root = std::env::var("MINGTILY_FUNASR_MODEL_DIR")
+            .expect("set MINGTILY_FUNASR_MODEL_DIR to the extracted model directory");
+        let model = InstalledSherpaModel {
+            id: "funasr-nano-int8".to_string(),
+            backend: SherpaAsrBackend::FunAsrNano,
+            root: PathBuf::from(root),
+        };
+        create_recognizer(
+            &model,
+            "auto",
+            &RuntimeEnhancements::from_parts(None, None, None),
+        )
+        .expect("FunASR Nano fixture should initialize");
+    }
 }

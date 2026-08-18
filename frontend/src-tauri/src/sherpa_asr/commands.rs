@@ -142,6 +142,49 @@ pub async fn sherpa_asr_download_model<R: Runtime>(
 }
 
 #[tauri::command]
+pub async fn sherpa_asr_import_model_archive<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Option<models::ImportedSherpaModel>, String> {
+    let app_for_dialog = app.clone();
+    let selected = tokio::task::spawn_blocking(move || {
+        app_for_dialog
+            .dialog()
+            .file()
+            .add_filter("Model archive", &["zip", "bz2"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| format!("Model archive dialog failed: {error}"))?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    models::import_archive(&app, &path)
+        .await
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn sherpa_asr_import_model_directory<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Option<models::ImportedSherpaModel>, String> {
+    let app_for_dialog = app.clone();
+    let selected =
+        tokio::task::spawn_blocking(move || app_for_dialog.dialog().file().blocking_pick_folder())
+            .await
+            .map_err(|error| format!("Model directory dialog failed: {error}"))?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|error| error.to_string())?;
+    models::import_directory(&app, &path)
+        .await
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn sherpa_asr_delete_model<R: Runtime>(
     app: AppHandle<R>,
     model_id: String,

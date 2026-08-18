@@ -607,6 +607,8 @@ pub fn run() {
             // Sherpa ONNX ASR model commands
             sherpa_asr::commands::sherpa_asr_list_models,
             sherpa_asr::commands::sherpa_asr_download_model,
+            sherpa_asr::commands::sherpa_asr_import_model_archive,
+            sherpa_asr::commands::sherpa_asr_import_model_directory,
             sherpa_asr::commands::sherpa_asr_delete_model,
             sherpa_asr::commands::sherpa_asr_get_streaming_config,
             sherpa_asr::commands::sherpa_asr_save_streaming_config,

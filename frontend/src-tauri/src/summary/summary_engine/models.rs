@@ -139,8 +139,15 @@ pub struct ModelDef {
     /// Template name for prompt formatting (e.g., "gemma3")
     pub template: String,
 
-    /// Download URL (HuggingFace or other source)
+    /// Primary download URL. ModelScope is preferred for mainland China.
     pub download_url: String,
+
+    /// Ordered fallback URLs for the exact same pinned GGUF artifact.
+    #[serde(default)]
+    pub fallback_download_urls: Vec<String>,
+
+    /// Exact expected artifact size, used to reject changed or truncated upstream files.
+    pub size_bytes: u64,
 
     /// File size in MiB. The field name is kept for API compatibility.
     pub size_mb: u64,
@@ -169,7 +176,9 @@ pub fn get_available_models() -> Vec<ModelDef> {
             display_name: "Qwen 3.5 2B (Balanced)".to_string(),
             gguf_file: "Qwen3.5-2B-Q4_K_M.gguf".to_string(),
             template: "qwen3.5_nonthinking".to_string(),
-            download_url: "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf".to_string(),
+            download_url: "https://www.modelscope.cn/api/v1/models/unsloth/Qwen3.5-2B-GGUF/repo?Revision=90057e31161eb95cc0bc1413c4f53b44de9b49c8&FilePath=Qwen3.5-2B-Q4_K_M.gguf".to_string(),
+            fallback_download_urls: vec!["https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf".to_string()],
+            size_bytes: 1_280_835_840,
             size_mb: 1221,
             context_size: 32768,
             layer_count: 24,
@@ -182,7 +191,9 @@ pub fn get_available_models() -> Vec<ModelDef> {
             display_name: "Qwen 3.5 4B (High Quality)".to_string(),
             gguf_file: "Qwen3.5-4B-Q4_K_M.gguf".to_string(),
             template: "qwen3.5_nonthinking".to_string(),
-            download_url: "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf".to_string(),
+            download_url: "https://www.modelscope.cn/api/v1/models/unsloth/Qwen3.5-4B-GGUF/repo?Revision=167b4afc359863325cb4164418c715421b4e9118&FilePath=Qwen3.5-4B-Q4_K_M.gguf".to_string(),
+            fallback_download_urls: vec!["https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-Q4_K_M.gguf".to_string()],
+            size_bytes: 2_740_937_888,
             size_mb: 2614,
             context_size: 32768,
             layer_count: 32,
@@ -195,7 +206,9 @@ pub fn get_available_models() -> Vec<ModelDef> {
             display_name: "Gemma 3 4B (Balanced)".to_string(),
             gguf_file: "gemma-3-4b-it-Q4_K_M.gguf".to_string(),
             template: "gemma3".to_string(),
-            download_url: "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf".to_string(),
+            download_url: "https://www.modelscope.cn/api/v1/models/bartowski/google_gemma-3-4b-it-GGUF/repo?Revision=e0926d695b692a1ab85997788ca6d99dc11a20ee&FilePath=google_gemma-3-4b-it-Q4_K_M.gguf".to_string(),
+            fallback_download_urls: vec!["https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/71506238f970075ca85125cd749c28b1b0eee84e/google_gemma-3-4b-it-Q4_K_M.gguf".to_string()],
+            size_bytes: 2_489_758_112,
             size_mb: 2374,
             context_size: 32768,
             layer_count: 35,
@@ -208,7 +221,9 @@ pub fn get_available_models() -> Vec<ModelDef> {
             display_name: "Gemma 3 1B (Fast)".to_string(),
             gguf_file: "gemma-3-1b-it-Q8_0.gguf".to_string(),
             template: "gemma3".to_string(),
-            download_url: "https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/main/google_gemma-3-1b-it-Q8_0.gguf".to_string(),
+            download_url: "https://www.modelscope.cn/api/v1/models/bartowski/google_gemma-3-1b-it-GGUF/repo?Revision=7cf830d34cf7872c91c7499b6626f4057ac9c290&FilePath=google_gemma-3-1b-it-Q8_0.gguf".to_string(),
+            fallback_download_urls: vec!["https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/116f76234503685a98f572982177b11d44ec8ff1/google_gemma-3-1b-it-Q8_0.gguf".to_string()],
+            size_bytes: 1_069_306_624,
             size_mb: 1019,
             context_size: 32768,
             layer_count: 26,
@@ -343,10 +358,12 @@ mod tests {
         assert_eq!(qwen_2b.display_name, "Qwen 3.5 2B (Balanced)");
         assert_eq!(qwen_2b.gguf_file, "Qwen3.5-2B-Q4_K_M.gguf");
         assert_eq!(qwen_2b.template, "qwen3.5_nonthinking");
-        assert_eq!(
-            qwen_2b.download_url,
-            "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf"
-        );
+        assert!(qwen_2b.download_url.contains("modelscope.cn"));
+        assert!(qwen_2b
+            .download_url
+            .contains("90057e31161eb95cc0bc1413c4f53b44de9b49c8"));
+        assert!(qwen_2b.fallback_download_urls[0].contains("huggingface.co"));
+        assert_eq!(qwen_2b.size_bytes, 1_280_835_840);
         assert_eq!(qwen_2b.size_mb, 1221);
         assert_eq!(qwen_2b.context_size, 32768);
         assert_eq!(qwen_2b.layer_count, 24);
@@ -359,10 +376,9 @@ mod tests {
         assert_eq!(qwen_4b.display_name, "Qwen 3.5 4B (High Quality)");
         assert_eq!(qwen_4b.gguf_file, "Qwen3.5-4B-Q4_K_M.gguf");
         assert_eq!(qwen_4b.template, "qwen3.5_nonthinking");
-        assert_eq!(
-            qwen_4b.download_url,
-            "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf"
-        );
+        assert!(qwen_4b.download_url.contains("modelscope.cn"));
+        assert!(qwen_4b.fallback_download_urls[0].contains("huggingface.co"));
+        assert_eq!(qwen_4b.size_bytes, 2_740_937_888);
         assert_eq!(qwen_4b.size_mb, 2614);
         assert_eq!(qwen_4b.context_size, 32768);
         assert_eq!(qwen_4b.layer_count, 32);
@@ -373,13 +389,12 @@ mod tests {
     }
 
     #[test]
-    fn gemma_models_use_huggingface_urls_and_gemma3_instruct_sampling() {
+    fn gemma_models_prefer_modelscope_and_keep_gemma3_instruct_sampling() {
         let gemma_1b = get_model_by_name("gemma3:1b").expect("gemma 1b model should exist");
         assert_eq!(gemma_1b.gguf_file, "gemma-3-1b-it-Q8_0.gguf");
-        assert_eq!(
-            gemma_1b.download_url,
-            "https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/main/google_gemma-3-1b-it-Q8_0.gguf"
-        );
+        assert!(gemma_1b.download_url.contains("modelscope.cn"));
+        assert!(gemma_1b.fallback_download_urls[0].contains("huggingface.co"));
+        assert_eq!(gemma_1b.size_bytes, 1_069_306_624);
         assert_eq!(
             gemma_1b.sampling,
             SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()])
@@ -393,10 +408,9 @@ mod tests {
         assert_eq!(gemma_1b.sampling.penalty_last_n, 0);
 
         let gemma_4b = get_model_by_name("gemma3:4b").expect("gemma 4b model should exist");
-        assert_eq!(
-            gemma_4b.download_url,
-            "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf"
-        );
+        assert!(gemma_4b.download_url.contains("modelscope.cn"));
+        assert!(gemma_4b.fallback_download_urls[0].contains("huggingface.co"));
+        assert_eq!(gemma_4b.size_bytes, 2_489_758_112);
         assert_eq!(
             gemma_4b.sampling,
             SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()])

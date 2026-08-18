@@ -1,5 +1,6 @@
 use crate::model_assets::{
-    self, LicenseFileSpec, ModelFileSpec, ModelInstallSource, ModelInstallSpec,
+    self, ArchiveFormat, ArchiveSourceSpec, DirectDownloadFileSpec, DirectSourceSpec,
+    LicenseFileSpec, ModelFileSpec, ModelInstallSource, ModelInstallSpec,
 };
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -18,6 +19,8 @@ const MODEL_SOURCE_PATH: &str = concat!(
 const MODEL_SIZE: u64 = 75_519_198;
 const MODEL_SHA256: &str = "65a3fb9f5ad7bfb96bf69e0dc4481df97f6ee60513c1d94ce981ba6effd524b1";
 const DOWNLOAD_SIZE: u64 = 64_717_756;
+#[cfg(test)]
+const MODELSCOPE_REVISION: &str = "8177426a1240345bd35b21616475ddcf425d5288";
 
 const APACHE_LICENSE: &str = include_str!("../../resources/licenses/APACHE-2.0.txt");
 
@@ -26,6 +29,25 @@ static MODEL_FILES: &[ModelFileSpec] = &[ModelFileSpec {
     install_path: "model.int8.onnx",
     size: MODEL_SIZE,
     sha256: MODEL_SHA256,
+}];
+static MODELSCOPE_FILES: &[DirectDownloadFileSpec] = &[DirectDownloadFileSpec {
+    url: "https://www.modelscope.cn/api/v1/models/ranger810/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/repo?Revision=8177426a1240345bd35b21616475ddcf425d5288&FilePath=model.int8.onnx",
+    install_path: "model.int8.onnx",
+    size: MODEL_SIZE,
+    sha256: MODEL_SHA256,
+}];
+static DIRECT_SOURCES: &[DirectSourceSpec] = &[DirectSourceSpec {
+    label: "ModelScope China",
+    download_size: MODEL_SIZE,
+    files: MODELSCOPE_FILES,
+}];
+static ARCHIVE_SOURCES: &[ArchiveSourceSpec] = &[ArchiveSourceSpec {
+    label: "sherpa-onnx GitHub Release",
+    url: ARCHIVE_URL,
+    sha256: ARCHIVE_SHA256,
+    download_size: DOWNLOAD_SIZE,
+    format: ArchiveFormat::TarBz2,
+    files: MODEL_FILES,
 }];
 
 static LICENSE_FILES: &[LicenseFileSpec] = &[LicenseFileSpec {
@@ -37,12 +59,11 @@ static MODEL_SPEC: ModelInstallSpec = ModelInstallSpec {
     id: MODEL_ID,
     provider: PROVIDER_ID,
     backend: BACKEND_ID,
-    source: ModelInstallSource::Archive {
-        url: ARCHIVE_URL,
-        sha256: ARCHIVE_SHA256,
-        files: MODEL_FILES,
+    source: ModelInstallSource::HybridVariants {
+        direct_sources: DIRECT_SOURCES,
+        archive_sources: ARCHIVE_SOURCES,
     },
-    download_size: DOWNLOAD_SIZE,
+    download_size: MODEL_SIZE,
     installed_size: MODEL_SIZE,
     licenses: LICENSE_FILES,
 };
@@ -94,7 +115,7 @@ pub fn status<R: Runtime>(app: &AppHandle<R>) -> Result<PunctuationModelStatus> 
         id: MODEL_ID.to_string(),
         name: "Chinese and English punctuation int8".to_string(),
         status: status.to_string(),
-        download_size: DOWNLOAD_SIZE,
+        download_size: MODEL_SPEC.download_size,
         installed_size: MODEL_SIZE,
         languages: vec!["zh".to_string(), "en".to_string()],
         license: "Apache-2.0".to_string(),
@@ -126,7 +147,11 @@ mod tests {
         assert_eq!(MODEL_FILES.len(), 1);
         assert_eq!(ARCHIVE_SHA256.len(), 64);
         assert_eq!(MODEL_SHA256.len(), 64);
-        assert_eq!(MODEL_SPEC.download_size, DOWNLOAD_SIZE);
+        assert_eq!(MODEL_SPEC.download_size, MODEL_SIZE);
         assert_eq!(MODEL_SPEC.installed_size, MODEL_SIZE);
+        assert_eq!(MODELSCOPE_REVISION.len(), 40);
+        assert_eq!(DIRECT_SOURCES[0].label, "ModelScope China");
+        assert!(DIRECT_SOURCES[0].files[0].url.contains(MODELSCOPE_REVISION));
+        assert_eq!(ARCHIVE_SOURCES[0].sha256, ARCHIVE_SHA256);
     }
 }

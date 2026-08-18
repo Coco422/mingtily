@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Context, Result};
 use bzip2::read::BzDecoder;
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -12,15 +11,18 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 pub const MODEL_ID: &str = "sherpa-v1";
 const BACKEND_ID: &str = "sherpa-pyannote3-eres2net";
 const SEGMENTATION_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2";
+const SEGMENTATION_MODELSCOPE_URL: &str = "https://www.modelscope.cn/api/v1/models/pengzhendong/sherpa-onnx-pyannote-segmentation-3-0/repo?Revision=103d397e9706dbb03f458fad62430ee8e9ae2bb4&FilePath=model.int8.onnx";
 const SEGMENTATION_SHA256: &str =
     "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488";
 const SEGMENTATION_MODEL_SHA256: &str =
     "d582f4b4c6b48205de7e0643c57df0df5615a3c176189be3fc461e9d18827b5d";
 const SEGMENTATION_DOWNLOAD_SIZE: u64 = 6_958_444;
 const EMBEDDING_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx";
+const EMBEDDING_MODELSCOPE_URL: &str = "https://www.modelscope.cn/api/v1/models/liaowenbin/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k/repo?Revision=38dbd263d67cf31fa0bb4c1184a31289f9fd94a8&FilePath=3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx";
 const EMBEDDING_SHA256: &str = "1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b";
 const EMBEDDING_DOWNLOAD_SIZE: u64 = 39_593_761;
-const TOTAL_DOWNLOAD_SIZE: u64 = SEGMENTATION_DOWNLOAD_SIZE + EMBEDDING_DOWNLOAD_SIZE;
+const MODELSCOPE_DOWNLOAD_SIZE: u64 = 1_540_506 + EMBEDDING_DOWNLOAD_SIZE;
+const TOTAL_DOWNLOAD_SIZE: u64 = MODELSCOPE_DOWNLOAD_SIZE;
 
 #[derive(Debug, Clone)]
 pub struct SpeakerModelPaths {
@@ -121,52 +123,130 @@ pub async fn download_model<R: Runtime>(app: AppHandle<R>) -> Result<()> {
     tokio::fs::create_dir_all(&staging).await?;
 
     let result = async {
-        let archive_part = staging.join("segmentation.tar.bz2.part");
-        download_file(
-            &app,
-            SEGMENTATION_URL,
-            &archive_part,
-            0,
-            TOTAL_DOWNLOAD_SIZE,
-        )
-        .await?;
-        verify_sha256(&archive_part, SEGMENTATION_SHA256)?;
-
+        let cache_root = parent.join(".downloads").join(MODEL_ID);
+        tokio::fs::create_dir_all(&cache_root).await?;
+        let segmentation_dir = staging.join("segmentation");
         let embedding_dir = staging.join("embedding");
+        tokio::fs::create_dir_all(&segmentation_dir).await?;
         tokio::fs::create_dir_all(&embedding_dir).await?;
-        let embedding_part = embedding_dir.join("3dspeaker_eres2net.onnx.part");
-        download_file(
-            &app,
-            EMBEDDING_URL,
-            &embedding_part,
-            SEGMENTATION_DOWNLOAD_SIZE,
-            TOTAL_DOWNLOAD_SIZE,
-        )
-        .await?;
-        verify_sha256(&embedding_part, EMBEDDING_SHA256)?;
-        tokio::fs::rename(
-            &embedding_part,
-            embedding_dir.join("3dspeaker_eres2net.onnx"),
-        )
-        .await?;
+        let ms_segmentation = cache_root.join("segmentation-modelscope.part");
+        let ms_embedding = cache_root.join("embedding-modelscope.part");
+        let modelscope_result = async {
+            crate::model_assets::download_verified_artifact(
+                MODEL_ID,
+                SEGMENTATION_MODELSCOPE_URL,
+                &ms_segmentation,
+                1_540_506,
+                SEGMENTATION_MODEL_SHA256,
+                |downloaded| {
+                    emit_download_progress(&app, downloaded, MODELSCOPE_DOWNLOAD_SIZE);
+                    Ok(())
+                },
+            )
+            .await?;
+            crate::model_assets::download_verified_artifact(
+                MODEL_ID,
+                EMBEDDING_MODELSCOPE_URL,
+                &ms_embedding,
+                EMBEDDING_DOWNLOAD_SIZE,
+                EMBEDDING_SHA256,
+                |downloaded| {
+                    emit_download_progress(
+                        &app,
+                        1_540_506u64.saturating_add(downloaded),
+                        MODELSCOPE_DOWNLOAD_SIZE,
+                    );
+                    Ok(())
+                },
+            )
+            .await?;
+            tokio::fs::copy(
+                &ms_segmentation,
+                segmentation_dir.join("model.int8.onnx"),
+            )
+            .await?;
+            tokio::fs::copy(
+                &ms_embedding,
+                embedding_dir.join("3dspeaker_eres2net.onnx"),
+            )
+            .await?;
+            write_speaker_license_files(&staging)?;
+            Ok::<(), anyhow::Error>(())
+        }
+        .await;
 
-        let staging_for_extract = staging.clone();
-        let archive_for_extract = archive_part.clone();
-        tokio::task::spawn_blocking(move || {
-            extract_segmentation_archive(&archive_for_extract, &staging_for_extract)
-        })
-        .await
-        .map_err(|error| anyhow!("Segmentation extraction task failed: {error}"))??;
-        tokio::fs::remove_file(&archive_part).await?;
+        let (segmentation_source, segmentation_sha256, embedding_source) =
+            if let Err(modelscope_error) = modelscope_result {
+                log::warn!(
+                    "ModelScope speaker model source failed; falling back to sherpa-onnx GitHub Release: {modelscope_error:#}"
+                );
+                let archive_part = cache_root.join("segmentation-github.part");
+                crate::model_assets::download_verified_artifact(
+                    MODEL_ID,
+                    SEGMENTATION_URL,
+                    &archive_part,
+                    SEGMENTATION_DOWNLOAD_SIZE,
+                    SEGMENTATION_SHA256,
+                    |downloaded| {
+                        emit_download_progress(
+                            &app,
+                            downloaded,
+                            SEGMENTATION_DOWNLOAD_SIZE + EMBEDDING_DOWNLOAD_SIZE,
+                        );
+                        Ok(())
+                    },
+                )
+                .await?;
+                let embedding_part = cache_root.join("embedding-github.part");
+                crate::model_assets::download_verified_artifact(
+                    MODEL_ID,
+                    EMBEDDING_URL,
+                    &embedding_part,
+                    EMBEDDING_DOWNLOAD_SIZE,
+                    EMBEDDING_SHA256,
+                    |downloaded| {
+                        emit_download_progress(
+                            &app,
+                            SEGMENTATION_DOWNLOAD_SIZE.saturating_add(downloaded),
+                            SEGMENTATION_DOWNLOAD_SIZE + EMBEDDING_DOWNLOAD_SIZE,
+                        );
+                        Ok(())
+                    },
+                )
+                .await?;
+                tokio::fs::copy(
+                    &embedding_part,
+                    embedding_dir.join("3dspeaker_eres2net.onnx"),
+                )
+                .await?;
+                let staging_for_extract = staging.clone();
+                let archive_for_extract = archive_part.clone();
+                tokio::task::spawn_blocking(move || {
+                    extract_segmentation_archive(&archive_for_extract, &staging_for_extract)
+                })
+                .await
+                .map_err(|error| anyhow!("Segmentation extraction task failed: {error}"))??;
+                (
+                    SEGMENTATION_URL,
+                    SEGMENTATION_SHA256,
+                    EMBEDDING_URL,
+                )
+            } else {
+                (
+                    SEGMENTATION_MODELSCOPE_URL,
+                    SEGMENTATION_MODEL_SHA256,
+                    EMBEDDING_MODELSCOPE_URL,
+                )
+            };
 
         let manifest = SpeakerModelManifest {
             id: MODEL_ID.to_string(),
             version: 1,
             backend: BACKEND_ID.to_string(),
-            segmentation_source: SEGMENTATION_URL.to_string(),
-            segmentation_sha256: SEGMENTATION_SHA256.to_string(),
+            segmentation_source: segmentation_source.to_string(),
+            segmentation_sha256: segmentation_sha256.to_string(),
             segmentation_model_sha256: SEGMENTATION_MODEL_SHA256.to_string(),
-            embedding_source: EMBEDDING_URL.to_string(),
+            embedding_source: embedding_source.to_string(),
             embedding_sha256: EMBEDDING_SHA256.to_string(),
         };
         tokio::fs::write(
@@ -182,6 +262,7 @@ pub async fn download_model<R: Runtime>(app: AppHandle<R>) -> Result<()> {
         if backup_root.exists() {
             tokio::fs::remove_dir_all(&backup_root).await?;
         }
+        let _ = tokio::fs::remove_dir_all(&cache_root).await;
         if final_root.exists() {
             tokio::fs::rename(&final_root, &backup_root).await?;
         }
@@ -225,48 +306,22 @@ pub async fn delete_model<R: Runtime>(app: &AppHandle<R>) -> Result<()> {
     Ok(())
 }
 
-async fn download_file<R: Runtime>(
-    app: &AppHandle<R>,
-    url: &str,
-    destination: &Path,
-    completed_before: u64,
-    total_bytes: u64,
-) -> Result<()> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .timeout(std::time::Duration::from_secs(1800))
-        .build()?;
-    let response = client.get(url).send().await?.error_for_status()?;
-    let mut stream = response.bytes_stream();
-    let mut file = tokio::fs::File::create(destination).await?;
-    let mut downloaded = 0u64;
-    let mut last_progress = u8::MAX;
-
-    use tokio::io::AsyncWriteExt;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        file.write_all(&chunk).await?;
-        downloaded += chunk.len() as u64;
-        let aggregate = completed_before + downloaded;
-        let progress = ((aggregate as f64 / total_bytes as f64) * 100.0)
-            .floor()
-            .clamp(0.0, 99.0) as u8;
-        if progress != last_progress {
-            last_progress = progress;
-            let _ = app.emit(
-                "speaker-diarization-model-download-progress",
-                DownloadProgressEvent {
-                    model_id: MODEL_ID.to_string(),
-                    progress,
-                    downloaded_mb: aggregate as f64 / 1_000_000.0,
-                    total_mb: total_bytes as f64 / 1_000_000.0,
-                    status: "downloading".to_string(),
-                },
-            );
-        }
-    }
-    file.flush().await?;
-    Ok(())
+fn emit_download_progress<R: Runtime>(app: &AppHandle<R>, downloaded: u64, total: u64) {
+    let progress = if total == 0 {
+        0
+    } else {
+        ((downloaded.saturating_mul(100) / total).min(99)) as u8
+    };
+    let _ = app.emit(
+        "speaker-diarization-model-download-progress",
+        DownloadProgressEvent {
+            model_id: MODEL_ID.to_string(),
+            progress,
+            downloaded_mb: downloaded as f64 / 1_000_000.0,
+            total_mb: total as f64 / 1_000_000.0,
+            status: "downloading".to_string(),
+        },
+    );
 }
 
 fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
@@ -326,6 +381,13 @@ fn extract_segmentation_archive(archive_path: &Path, staging: &Path) -> Result<(
         ));
     }
 
+    write_speaker_license_files(staging)?;
+    Ok(())
+}
+
+fn write_speaker_license_files(staging: &Path) -> Result<()> {
+    let licenses_dir = staging.join("licenses");
+    std::fs::create_dir_all(&licenses_dir)?;
     std::fs::write(
         licenses_dir.join("3D-Speaker-Apache-2.0.txt"),
         "3D-Speaker is licensed under the Apache License 2.0.\nhttps://github.com/modelscope/3D-Speaker\n",
@@ -354,13 +416,17 @@ fn validate_installation(paths: &SpeakerModelPaths) -> Result<()> {
     verify_sha256(&paths.embedding, EMBEDDING_SHA256)?;
     let manifest_path = paths.root.join("manifest.json");
     let manifest: SpeakerModelManifest = serde_json::from_slice(&std::fs::read(&manifest_path)?)?;
+    let supported_modelscope = manifest.segmentation_source == SEGMENTATION_MODELSCOPE_URL
+        && manifest.segmentation_sha256 == SEGMENTATION_MODEL_SHA256
+        && manifest.embedding_source == EMBEDDING_MODELSCOPE_URL;
+    let supported_legacy = manifest.segmentation_source == SEGMENTATION_URL
+        && manifest.segmentation_sha256 == SEGMENTATION_SHA256
+        && manifest.embedding_source == EMBEDDING_URL;
     if manifest.id != MODEL_ID
         || manifest.version != 1
         || manifest.backend != BACKEND_ID
-        || manifest.segmentation_source != SEGMENTATION_URL
-        || manifest.segmentation_sha256 != SEGMENTATION_SHA256
+        || (!supported_modelscope && !supported_legacy)
         || manifest.segmentation_model_sha256 != SEGMENTATION_MODEL_SHA256
-        || manifest.embedding_source != EMBEDDING_URL
         || manifest.embedding_sha256 != EMBEDDING_SHA256
     {
         return Err(anyhow!("Unsupported speaker model manifest"));
@@ -398,5 +464,13 @@ mod tests {
 
         let error = validate_installation(&paths).unwrap_err();
         assert!(error.to_string().contains("Segmentation model is missing"));
+    }
+
+    #[test]
+    fn speaker_models_prefer_pinned_modelscope_and_keep_legacy_sources() {
+        assert!(SEGMENTATION_MODELSCOPE_URL.contains("103d397e9706dbb03f458fad62430ee8e9ae2bb4"));
+        assert!(EMBEDDING_MODELSCOPE_URL.contains("38dbd263d67cf31fa0bb4c1184a31289f9fd94a8"));
+        assert!(SEGMENTATION_URL.contains("github.com"));
+        assert!(EMBEDDING_URL.contains("github.com"));
     }
 }

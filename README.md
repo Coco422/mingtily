@@ -14,7 +14,7 @@
 
 Mingtily 是一款本地优先的桌面会议助手，面向希望将录音、转写、说话人标签和本地模型保留在自己设备上的个人、开发者与小团队。需要更高总结质量或性能时，也可以由用户主动配置并调用外部 LLM Provider。
 
-当前版本：**[0.7.5](https://github.com/Coco422/mingtily/releases/tag/v0.7.5)**。带版本标签的 GitHub Actions 会发布 macOS Apple Silicon 与 Windows x64 开发版。安装包暂未进行操作系统级签名，但 Tauri 更新包由 Mingtily 完整性签名。Linux 目前作为无签名手动开发构建目标。
+当前版本：**[0.7.6](https://github.com/Coco422/mingtily/releases/tag/v0.7.6)**。带版本标签的 GitHub Actions 会发布 macOS Apple Silicon 与 Windows x64 开发版。安装包暂未进行操作系统级签名，但 Tauri 更新包由 Mingtily 完整性签名。Linux 目前作为无签名手动开发构建目标。
 
 ### 主要能力
 
@@ -38,6 +38,7 @@ Mingtily 不包含遥测客户端、使用分析、广告标识符或 Mingtily �
 - 冷启动和普通本地使用被设计为不访问非 loopback 服务。
 - 对用户明确配置的 Ollama 等 localhost 服务进行探测时，数据仍留在本机。
 - 模型只会在用户主动操作后下载，下载完成不会静默切换当前 Provider 或模型。
+- 中国大陆可用模型优先从 ModelScope 下载，并在兼容源间自动回退；下载支持断点续传、精确大小与 SHA-256 校验。
 - 用户可以手动检查 GitHub Releases，或在设置中明确开启自动检查。更新请求不包含会议或转写内容。
 - 外部 LLM 请求只会在用户配置或调用相应 Provider 后发生；此时相关转写内容会离开设备并直接发送到所配置的端点。
 - 诊断日志仅在本地滚动保存，最多五个文件、每个不超过 5 MB；只有用户在设置中主动导出时才会生成诊断包，应用不会自动上传。
@@ -59,6 +60,8 @@ Mingtily 不包含遥测客户端、使用分析、广告标识符或 Mingtily �
 | 外部总结 | OpenAI、Anthropic、Groq、OpenRouter、OpenAI Compatible | 转写内容会直接发送到用户配置的端点。 |
 
 全新安装默认选择 SenseVoice Small int8。下载约 158 MiB，安装后约 226 MiB；首次引导不会自动下载，必须由用户点击下载。
+
+Sherpa ONNX 语音模型还支持从本地压缩包或已解压目录离线导入。应用会自动识别内置支持的精确模型版本并校验全部运行时文件；无法识别或校验失败的文件不会替换现有模型。
 
 Parakeet 仅支持英文。Parakeet v3 固定到 [`istupakov/parakeet-tdt-0.6b-v3-onnx`](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) 的 revision `8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce`，并使用内置 SHA-256 校验值验证。
 
@@ -148,7 +151,7 @@ Mingtily 使用 MIT License。原始 Meetily 版权声明保留在 [LICENSE.md](
 
 Mingtily is a local-first desktop meeting assistant for individuals, developers, and small teams that want recordings, transcripts, speaker labels, and local models to stay on their own devices. When better summary quality or performance is needed, users can explicitly configure and invoke an external LLM Provider.
 
-Current version: **[0.7.5](https://github.com/Coco422/mingtily/releases/tag/v0.7.5)**. Tagged GitHub Actions releases target macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while Tauri updater payloads are integrity-signed by Mingtily. Linux is currently available as an unsigned manual development-build target.
+Current version: **[0.7.6](https://github.com/Coco422/mingtily/releases/tag/v0.7.6)**. Tagged GitHub Actions releases target macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while Tauri updater payloads are integrity-signed by Mingtily. Linux is currently available as an unsigned manual development-build target.
 
 ### Highlights
 
@@ -172,6 +175,7 @@ Mingtily has no telemetry client, usage analytics, advertising identifier, or Mi
 - Cold start and ordinary local use are designed not to contact non-loopback services.
 - Localhost discovery, such as checking an explicitly configured Ollama endpoint, stays on the device.
 - Model downloads start only after a user action, and completing a download never silently switches the active Provider or model.
+- Models available in mainland China prefer ModelScope, automatically fall back across compatible sources, and use resumable downloads with exact size and SHA-256 verification.
 - Users can manually check GitHub Releases or explicitly enable automatic checks in Settings. Update requests contain application/platform metadata required by Tauri, but no transcript or meeting content.
 - External LLM requests occur only after the user configures or invokes that Provider. The relevant transcript content leaves the device in that case.
 - Diagnostic logs rotate locally at five files of up to 5 MB each. They are never uploaded automatically and can be exported only from Settings after an explicit user action.

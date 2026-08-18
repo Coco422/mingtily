@@ -8,13 +8,154 @@ use reqwest::{
     Client, StatusCode,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+const WHISPER_MODELSCOPE_REVISION: &str = "52d9452b318d8aa5ea7a8def34b6df7e7fa283a1";
+const WHISPER_HUGGINGFACE_REVISION: &str = "5359861c739e955e79d9a303bcbc70fb988958b1";
+
+#[derive(Clone, Copy)]
+struct WhisperDownloadSpec {
+    model_name: &'static str,
+    file_name: &'static str,
+    size: u64,
+    sha256: &'static str,
+}
+
+const WHISPER_DOWNLOAD_SPECS: &[WhisperDownloadSpec] = &[
+    WhisperDownloadSpec {
+        model_name: "tiny",
+        file_name: "ggml-tiny.bin",
+        size: 77_691_713,
+        sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+    },
+    WhisperDownloadSpec {
+        model_name: "base",
+        file_name: "ggml-base.bin",
+        size: 147_951_465,
+        sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+    },
+    WhisperDownloadSpec {
+        model_name: "small",
+        file_name: "ggml-small.bin",
+        size: 487_601_967,
+        sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+    },
+    WhisperDownloadSpec {
+        model_name: "medium",
+        file_name: "ggml-medium.bin",
+        size: 1_533_763_059,
+        sha256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+    },
+    WhisperDownloadSpec {
+        model_name: "large-v3-turbo",
+        file_name: "ggml-large-v3-turbo.bin",
+        size: 1_624_555_275,
+        sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+    },
+    WhisperDownloadSpec {
+        model_name: "large-v3",
+        file_name: "ggml-large-v3.bin",
+        size: 3_095_033_483,
+        sha256: "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
+    },
+    WhisperDownloadSpec {
+        model_name: "tiny-q5_1",
+        file_name: "ggml-tiny-q5_1.bin",
+        size: 32_152_673,
+        sha256: "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7",
+    },
+    WhisperDownloadSpec {
+        model_name: "base-q5_1",
+        file_name: "ggml-base-q5_1.bin",
+        size: 59_707_625,
+        sha256: "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
+    },
+    WhisperDownloadSpec {
+        model_name: "small-q5_1",
+        file_name: "ggml-small-q5_1.bin",
+        size: 190_085_487,
+        sha256: "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
+    },
+    WhisperDownloadSpec {
+        model_name: "medium-q5_0",
+        file_name: "ggml-medium-q5_0.bin",
+        size: 539_212_467,
+        sha256: "19fea4b380c3a618ec4723c3eef2eb785ffba0d0538cf43f8f235e7b3b34220f",
+    },
+    WhisperDownloadSpec {
+        model_name: "large-v3-turbo-q5_0",
+        file_name: "ggml-large-v3-turbo-q5_0.bin",
+        size: 574_041_195,
+        sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+    },
+    WhisperDownloadSpec {
+        model_name: "large-v3-q5_0",
+        file_name: "ggml-large-v3-q5_0.bin",
+        size: 1_081_140_203,
+        sha256: "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1",
+    },
+];
+
+fn whisper_download_spec(model_name: &str) -> Option<WhisperDownloadSpec> {
+    WHISPER_DOWNLOAD_SPECS
+        .iter()
+        .find(|spec| spec.model_name == model_name)
+        .copied()
+}
+
+fn whisper_model_urls(spec: WhisperDownloadSpec) -> [String; 2] {
+    [
+        format!(
+            "https://www.modelscope.cn/api/v1/models/iceCream2025/whisper.cpp/repo?Revision={WHISPER_MODELSCOPE_REVISION}&FilePath={}",
+            spec.file_name
+        ),
+        format!(
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/{WHISPER_HUGGINGFACE_REVISION}/{}",
+            spec.file_name
+        ),
+    ]
+}
+
+fn verify_whisper_file(path: &Path, spec: WhisperDownloadSpec) -> Result<()> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.len() != spec.size {
+        return Err(anyhow!(
+            "{} has {} bytes; expected {}",
+            spec.file_name,
+            metadata.len(),
+            spec.size
+        ));
+    }
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    let actual = format!("{:x}", hasher.finalize());
+    if actual != spec.sha256 {
+        return Err(anyhow!(
+            "{} checksum mismatch: expected {}, got {}",
+            spec.file_name,
+            spec.sha256,
+            actual
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModelStatus {
@@ -1033,37 +1174,17 @@ impl WhisperEngine {
         model_name: &str,
         progress_callback: Option<Box<dyn Fn(u8) + Send + Sync>>,
     ) -> Result<()> {
-        // Official ggerganov/whisper.cpp model URLs from Hugging Face
-        let model_url = match model_name {
-            // Standard f16 models
-            "tiny" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
-            "base" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
-            "small" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
-            "medium" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
-            "large-v3-turbo" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
-            "large-v3" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
-
-            // Q5_1 quantized models
-            "tiny-q5_1" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin",
-            "base-q5_1" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin",
-            "small-q5_1" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
-
-            // Q5_0 quantized models
-            "medium-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin",
-            "large-v3-turbo-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
-            "large-v3-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
-
-            _ => return Err(anyhow!("Unsupported model: {}", model_name)),
-        };
-
-        self.download_model_from_url(model_name, model_url, progress_callback)
+        let spec = whisper_download_spec(model_name)
+            .ok_or_else(|| anyhow!("Unsupported model: {}", model_name))?;
+        let model_urls = whisper_model_urls(spec);
+        self.download_model_from_urls(model_name, &model_urls, progress_callback)
             .await
     }
 
-    async fn download_model_from_url(
+    async fn download_model_from_urls(
         &self,
         model_name: &str,
-        model_url: &str,
+        model_urls: &[String],
         progress_callback: Option<Box<dyn Fn(u8) + Send + Sync>>,
     ) -> Result<()> {
         log::info!("Starting download for model: {}", model_name);
@@ -1090,9 +1211,38 @@ impl WhisperEngine {
         self.update_model_status(model_name, ModelStatus::Downloading { progress: 0 })
             .await;
 
-        let result = self
-            .download_model_inner(model_name, model_url, progress_callback.as_deref())
-            .await;
+        let mut failures = Vec::new();
+        let mut result = Err(anyhow!("No Whisper download sources configured"));
+        for (index, model_url) in model_urls.iter().enumerate() {
+            log::info!(
+                "Trying Whisper model source {}/{} for {}: {}",
+                index + 1,
+                model_urls.len(),
+                model_name,
+                model_url
+            );
+            match self
+                .download_model_inner(model_name, model_url, progress_callback.as_deref())
+                .await
+            {
+                Ok(()) => {
+                    result = Ok(());
+                    break;
+                }
+                Err(error) if is_cancelled_download(&error) => {
+                    result = Err(error);
+                    break;
+                }
+                Err(error) => {
+                    log::warn!("Whisper source failed for {}: {error:#}", model_name);
+                    failures.push(error.to_string());
+                    result = Err(anyhow!(
+                        "All Whisper download sources failed: {}",
+                        failures.join(" | ")
+                    ));
+                }
+            }
+        }
 
         // Every terminal path must release the registration. Previously network and disk
         // errors returned early and made Retry fail with "already in progress" forever.
@@ -1129,6 +1279,17 @@ impl WhisperEngine {
         result
     }
 
+    #[cfg(test)]
+    async fn download_model_from_url(
+        &self,
+        model_name: &str,
+        model_url: &str,
+        progress_callback: Option<Box<dyn Fn(u8) + Send + Sync>>,
+    ) -> Result<()> {
+        self.download_model_from_urls(model_name, &[model_url.to_string()], progress_callback)
+            .await
+    }
+
     async fn download_model_inner(
         &self,
         model_name: &str,
@@ -1152,9 +1313,10 @@ impl WhisperEngine {
         }
 
         if file_path.exists() {
-            if self.validate_model_file(&file_path).await.is_ok()
-                && model_file_is_complete(model_name, &file_path)
-            {
+            let exact_file_is_valid = whisper_download_spec(model_name)
+                .map(|spec| verify_whisper_file(&file_path, spec).is_ok())
+                .unwrap_or_else(|| model_file_is_complete(model_name, &file_path));
+            if self.validate_model_file(&file_path).await.is_ok() && exact_file_is_valid {
                 log::info!(
                     "Model already exists and passed validation: {}",
                     file_path.display()
@@ -1250,6 +1412,16 @@ impl WhisperEngine {
         } else {
             response_size
         };
+        if let Some(expected_size) = whisper_download_spec(model_name).map(|spec| spec.size) {
+            if total_size != 0 && total_size != expected_size {
+                return Err(anyhow!(
+                    "Download source reported {} bytes for {}; expected {}",
+                    total_size,
+                    model_name,
+                    expected_size
+                ));
+            }
+        }
         log::info!(
             "Response successful, content length: {} bytes ({:.1} MB)",
             total_size,
@@ -1367,6 +1539,17 @@ impl WhisperEngine {
             remove_file_if_exists(&partial_path).await?;
             return Err(error);
         }
+        if let Some(spec) = whisper_download_spec(model_name) {
+            let verification_path = partial_path.clone();
+            if let Err(error) =
+                tokio::task::spawn_blocking(move || verify_whisper_file(&verification_path, spec))
+                    .await
+                    .map_err(|error| anyhow!("Whisper checksum task failed: {error}"))?
+            {
+                remove_file_if_exists(&partial_path).await?;
+                return Err(error);
+            }
+        }
 
         fs::rename(&partial_path, &file_path)
             .await
@@ -1469,6 +1652,19 @@ mod download_tests {
     use std::sync::atomic::{AtomicU8, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn every_whisper_model_prefers_pinned_modelscope_with_exact_fallback() {
+        assert_eq!(WHISPER_DOWNLOAD_SPECS.len(), 12);
+        for spec in WHISPER_DOWNLOAD_SPECS {
+            assert_eq!(spec.sha256.len(), 64);
+            let urls = whisper_model_urls(*spec);
+            assert!(urls[0].contains("modelscope.cn"));
+            assert!(urls[0].contains(WHISPER_MODELSCOPE_REVISION));
+            assert!(urls[1].contains("huggingface.co"));
+            assert!(urls[1].contains(WHISPER_HUGGINGFACE_REVISION));
+        }
+    }
 
     #[tokio::test]
     async fn failed_download_releases_active_registration_for_retry() {

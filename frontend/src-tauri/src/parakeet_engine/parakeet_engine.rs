@@ -1,5 +1,6 @@
 use crate::parakeet_engine::model::ParakeetModel;
 use anyhow::{anyhow, Result};
+use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -7,14 +8,23 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tar::Archive;
 use tokio::fs;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::RwLock;
 use tokio::time::timeout;
 
 const PARAKEET_V3_MODEL_NAME: &str = "parakeet-tdt-0.6b-v3-int8";
+const PARAKEET_V2_MODEL_NAME: &str = "parakeet-tdt-0.6b-v2-int8";
+const PARAKEET_V2_REVISION: &str = "0bbb45a3365852604aef28b538a8f066f4ccaa85";
 const PARAKEET_V3_REVISION: &str = "8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce";
 const PARAKEET_V3_REPOSITORY: &str = "istupakov/parakeet-tdt-0.6b-v3-onnx";
+#[cfg(test)]
+const PARAKEET_V3_MODELSCOPE_REVISION: &str = "9e59b3be0ae24ee75558bf82f60ce7de24199a3a";
+const PARAKEET_V3_MODELSCOPE_ARCHIVE_URL: &str = "https://www.modelscope.cn/api/v1/models/TonyWong/parakeet-v3-int8/repo?Revision=9e59b3be0ae24ee75558bf82f60ce7de24199a3a&FilePath=parakeet-v3-int8.tar.gz";
+const PARAKEET_V3_MODELSCOPE_ARCHIVE_SIZE: u64 = 478_517_071;
+const PARAKEET_V3_MODELSCOPE_ARCHIVE_SHA256: &str =
+    "43d37191602727524a7d8c6da0eef11c4ba24320f5b4730f1a2497befc2efa77";
 
 #[derive(Clone, Copy)]
 struct ModelFileSpec {
@@ -45,6 +55,28 @@ const PARAKEET_V3_INT8_FILES: [ModelFileSpec; 4] = [
         sha256: "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d",
     },
 ];
+const PARAKEET_V2_INT8_FILES: [ModelFileSpec; 4] = [
+    ModelFileSpec {
+        name: "encoder-model.int8.onnx",
+        size: 652_184_014,
+        sha256: "3e0581fda6ab843888b51e56d7ee78b6d5bc3237ec113af1f732d1d5286aa155",
+    },
+    ModelFileSpec {
+        name: "decoder_joint-model.int8.onnx",
+        size: 8_998_286,
+        sha256: "a449f49acd68979d418651dd2dcb737cc0f1bf0225e009e29ee326354edbf7d3",
+    },
+    ModelFileSpec {
+        name: "nemo128.onnx",
+        size: 139_764,
+        sha256: "a9fde1486ebfcc08f328d75ad4610c67835fea58c73ba57e3209a6f6cf019e9f",
+    },
+    ModelFileSpec {
+        name: "vocab.txt",
+        size: 9_384,
+        sha256: "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d",
+    },
+];
 
 fn parakeet_v3_base_url() -> String {
     format!(
@@ -54,10 +86,10 @@ fn parakeet_v3_base_url() -> String {
 }
 
 fn exact_file_specs(model_name: &str) -> Option<&'static [ModelFileSpec]> {
-    if model_name == PARAKEET_V3_MODEL_NAME {
-        Some(&PARAKEET_V3_INT8_FILES)
-    } else {
-        None
+    match model_name {
+        PARAKEET_V3_MODEL_NAME => Some(&PARAKEET_V3_INT8_FILES),
+        PARAKEET_V2_MODEL_NAME => Some(&PARAKEET_V2_INT8_FILES),
+        _ => None,
     }
 }
 
@@ -80,6 +112,53 @@ fn sha256_file(path: &Path) -> Result<String> {
     }
 
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn extract_modelscope_v3_archive(archive_path: &Path, staging: &Path) -> Result<()> {
+    std::fs::create_dir_all(staging)?;
+    let decoder = GzDecoder::new(std::fs::File::open(archive_path)?);
+    let mut archive = Archive::new(decoder);
+    let expected = PARAKEET_V3_INT8_FILES
+        .iter()
+        .map(|spec| spec.name)
+        .collect::<HashSet<_>>();
+    let mut extracted = HashSet::new();
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let entry_path = entry.path()?.to_path_buf();
+        let Some(file_name) = entry_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        if !expected.contains(file_name.as_str()) {
+            continue;
+        }
+        let destination = staging.join(&file_name);
+        let mut output = std::fs::File::create(&destination)?;
+        std::io::copy(&mut entry, &mut output)?;
+        extracted.insert(file_name);
+    }
+    if extracted.len() != expected.len() {
+        return Err(anyhow!(
+            "ModelScope Parakeet archive contained {}/{} required files",
+            extracted.len(),
+            expected.len()
+        ));
+    }
+    for spec in PARAKEET_V3_INT8_FILES {
+        let path = staging.join(spec.name);
+        let metadata = std::fs::metadata(&path)?;
+        if metadata.len() != spec.size || sha256_file(&path)? != spec.sha256 {
+            return Err(anyhow!(
+                "ModelScope Parakeet archive failed integrity verification for {}",
+                spec.name
+            ));
+        }
+    }
+    Ok(())
 }
 
 async fn verify_exact_file(path: &Path, spec: ModelFileSpec) -> Result<()> {
@@ -692,13 +771,13 @@ impl ParakeetEngine {
     pub async fn download_model(
         &self,
         model_name: &str,
-        progress_callback: Option<Box<dyn Fn(u8) + Send>>,
+        progress_callback: Option<Box<dyn Fn(u8) + Send + Sync>>,
     ) -> Result<()> {
         // Wrap simple callback to use detailed version
-        let detailed_callback: Option<Box<dyn Fn(DownloadProgress) + Send>> = progress_callback
-            .map(|cb| {
+        let detailed_callback: Option<Box<dyn Fn(DownloadProgress) + Send + Sync>> =
+            progress_callback.map(|cb| {
                 Box::new(move |p: DownloadProgress| cb(p.percent))
-                    as Box<dyn Fn(DownloadProgress) + Send>
+                    as Box<dyn Fn(DownloadProgress) + Send + Sync>
             });
         self.download_model_detailed(model_name, detailed_callback)
             .await
@@ -708,7 +787,7 @@ impl ParakeetEngine {
     pub async fn download_model_detailed(
         &self,
         model_name: &str,
-        progress_callback: Option<Box<dyn Fn(DownloadProgress) + Send>>,
+        progress_callback: Option<Box<dyn Fn(DownloadProgress) + Send + Sync>>,
     ) -> Result<()> {
         log::info!("Starting download for Parakeet model: {}", model_name);
 
@@ -763,7 +842,9 @@ impl ParakeetEngine {
 
         // HuggingFace base URL for Parakeet models (version-specific)
         let base_url = if model_name.contains("-v2-") {
-            "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/main".to_string()
+            format!(
+                "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/{PARAKEET_V2_REVISION}"
+            )
         } else {
             parakeet_v3_base_url()
         };
@@ -802,6 +883,113 @@ impl ParakeetEngine {
             // Continue anyway - we'll handle errors during download
         }
 
+        // The audited ModelScope v3 archive contains byte-for-byte identical files to
+        // the pinned Hugging Face artifact. Prefer it in mainland China, while keeping
+        // the existing per-file downloader as an automatic fallback.
+        if model_name == PARAKEET_V3_MODEL_NAME && model_info.quantization == QuantizationType::Int8
+        {
+            let cache_dir = self.models_dir.join(".downloads");
+            let archive_path = cache_dir.join("parakeet-v3-int8.tar.gz.part");
+            let staging = self
+                .models_dir
+                .join(format!(".{PARAKEET_V3_MODEL_NAME}.modelscope"));
+            let model_name_for_cancel = model_name.to_string();
+            let modelscope_result = crate::model_assets::download_verified_artifact(
+                model_name,
+                PARAKEET_V3_MODELSCOPE_ARCHIVE_URL,
+                &archive_path,
+                PARAKEET_V3_MODELSCOPE_ARCHIVE_SIZE,
+                PARAKEET_V3_MODELSCOPE_ARCHIVE_SHA256,
+                |downloaded| {
+                    if self
+                        .cancel_download_flag
+                        .try_read()
+                        .ok()
+                        .and_then(|flag| flag.clone())
+                        .as_deref()
+                        == Some(model_name_for_cancel.as_str())
+                    {
+                        return Err(anyhow!("Download cancelled by user"));
+                    }
+                    if let Some(ref callback) = progress_callback {
+                        callback(DownloadProgress::new(
+                            downloaded,
+                            PARAKEET_V3_MODELSCOPE_ARCHIVE_SIZE,
+                            0.0,
+                        ));
+                    }
+                    Ok(())
+                },
+            )
+            .await;
+
+            let modelscope_result = match modelscope_result {
+                Ok(()) => {
+                    async {
+                        if staging.exists() {
+                            fs::remove_dir_all(&staging).await?;
+                        }
+                        let archive_for_extract = archive_path.clone();
+                        let staging_for_extract = staging.clone();
+                        tokio::task::spawn_blocking(move || {
+                            extract_modelscope_v3_archive(
+                                &archive_for_extract,
+                                &staging_for_extract,
+                            )
+                        })
+                        .await
+                        .map_err(|error| anyhow!("Parakeet extraction task failed: {error}"))??;
+                        Ok::<(), anyhow::Error>(())
+                    }
+                    .await
+                }
+                Err(error) => Err(error),
+            };
+
+            match modelscope_result {
+                Ok(()) => {
+                    for spec in PARAKEET_V3_INT8_FILES {
+                        let destination = model_dir.join(spec.name);
+                        if destination.exists() {
+                            fs::remove_file(&destination).await?;
+                        }
+                        fs::rename(staging.join(spec.name), destination).await?;
+                    }
+                    let _ = fs::remove_dir_all(&staging).await;
+                    let _ = fs::remove_file(&archive_path).await;
+                    self.validate_model_directory(model_dir).await?;
+                    if let Some(ref callback) = progress_callback {
+                        callback(DownloadProgress::new(
+                            PARAKEET_V3_MODELSCOPE_ARCHIVE_SIZE,
+                            PARAKEET_V3_MODELSCOPE_ARCHIVE_SIZE,
+                            0.0,
+                        ));
+                    }
+                    if let Some(model) = self.available_models.write().await.get_mut(model_name) {
+                        model.status = ModelStatus::Available;
+                        model.path = model_dir.clone();
+                    }
+                    self.active_downloads.write().await.remove(model_name);
+                    *self.cancel_download_flag.write().await = None;
+                    log::info!("Downloaded Parakeet v3 from ModelScope China");
+                    return Ok(());
+                }
+                Err(error) if error.to_string().contains("cancelled by user") => {
+                    self.active_downloads.write().await.remove(model_name);
+                    if let Some(model) = self.available_models.write().await.get_mut(model_name) {
+                        model.status = ModelStatus::Missing;
+                    }
+                    return Err(error);
+                }
+                Err(error) => {
+                    log::warn!(
+                        "ModelScope Parakeet v3 source failed; falling back to pinned Hugging Face files: {error:#}"
+                    );
+                    let _ = fs::remove_dir_all(&staging).await;
+                }
+            }
+        }
+
         // Optimized HTTP client for large file downloads
         let client = reqwest::Client::builder()
             .tcp_nodelay(true) // Disable Nagle's algorithm for better streaming
@@ -818,16 +1006,10 @@ impl ParakeetEngine {
         let file_sizes: std::collections::HashMap<&str, u64> = match model_info.quantization {
             QuantizationType::Int8 => {
                 if model_name.contains("-v2-") {
-                    // V2 model sizes
-                    [
-                        ("encoder-model.int8.onnx", 652_000_000u64),     // 652 MB
-                        ("decoder_joint-model.int8.onnx", 9_000_000u64), // 9 MB
-                        ("nemo128.onnx", 140_000u64),                    // 140 KB
-                        ("vocab.txt", 9_380u64),                         // 9.38 KB
-                    ]
-                    .iter()
-                    .cloned()
-                    .collect()
+                    PARAKEET_V2_INT8_FILES
+                        .iter()
+                        .map(|spec| (spec.name, spec.size))
+                        .collect()
                 } else {
                     PARAKEET_V3_INT8_FILES
                         .iter()
@@ -1377,6 +1559,36 @@ mod tests {
             "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce"
         );
         assert_eq!(PARAKEET_V3_INT8_FILES.len(), 4);
+        assert_eq!(PARAKEET_V3_MODELSCOPE_REVISION.len(), 40);
+        assert!(PARAKEET_V3_MODELSCOPE_ARCHIVE_URL.contains("modelscope.cn"));
+        assert!(PARAKEET_V3_MODELSCOPE_ARCHIVE_URL.contains(PARAKEET_V3_MODELSCOPE_REVISION));
+        assert_eq!(PARAKEET_V3_MODELSCOPE_ARCHIVE_SHA256.len(), 64);
+    }
+
+    #[test]
+    fn v2_fallback_is_pinned_with_exact_file_contract() {
+        assert_eq!(PARAKEET_V2_REVISION.len(), 40);
+        assert_eq!(PARAKEET_V2_INT8_FILES.len(), 4);
+        assert!(PARAKEET_V2_INT8_FILES
+            .iter()
+            .all(|spec| spec.sha256.len() == 64));
+    }
+
+    #[test]
+    #[ignore = "requires the audited ModelScope Parakeet v3 archive"]
+    fn modelscope_v3_archive_extracts_to_exact_runtime_files() {
+        let archive = std::env::var("MINGTILY_PARAKEET_V3_ARCHIVE")
+            .expect("set MINGTILY_PARAKEET_V3_ARCHIVE to parakeet-v3-int8.tar.gz");
+        let directory = tempfile::tempdir().unwrap();
+        extract_modelscope_v3_archive(Path::new(&archive), directory.path()).unwrap();
+        for spec in PARAKEET_V3_INT8_FILES {
+            assert_eq!(
+                std::fs::metadata(directory.path().join(spec.name))
+                    .unwrap()
+                    .len(),
+                spec.size
+            );
+        }
     }
 
     #[tokio::test]

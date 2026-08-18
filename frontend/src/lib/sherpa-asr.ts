@@ -29,6 +29,11 @@ export interface SherpaAsrDownloadProgress {
   status: string;
 }
 
+export interface ImportedSherpaModel {
+  model_id: string;
+  path: string;
+}
+
 export interface StreamingTranscriptionConfig {
   enabled: boolean;
   provider: typeof SHERPA_ASR_PROVIDER_ID;
@@ -116,6 +121,10 @@ export const SherpaAsrAPI = {
     invoke<HomophoneRuleStatus[]>('sherpa_asr_delete_homophone_rule', { ruleId }),
   downloadModel: (modelId: string) =>
     invoke<void>('sherpa_asr_download_model', { modelId }),
+  importModelArchive: () =>
+    invoke<ImportedSherpaModel | null>('sherpa_asr_import_model_archive'),
+  importModelDirectory: () =>
+    invoke<ImportedSherpaModel | null>('sherpa_asr_import_model_directory'),
   deleteModel: (modelId: string) =>
     invoke<void>('sherpa_asr_delete_model', { modelId }),
 };
