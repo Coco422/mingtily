@@ -488,10 +488,15 @@ impl SummaryService {
 
             match model {
                 Ok(model_def) => {
-                    // Reserve 300 tokens for prompt overhead
-                    let optimal = model_def.context_size.saturating_sub(300) as usize;
+                    // The processor makes the final decision with the model's
+                    // real tokenizer. Keep this fallback threshold aligned
+                    // with its minimum output headroom.
+                    let optimal = model_def
+                        .context_size
+                        .saturating_sub(models::MIN_GENERATION_HEADROOM_TOKENS as u32)
+                        as usize;
                     info!(
-                        "✓ Using BuiltInAI context size: {} tokens (chunk size: {})",
+                        "✓ Using BuiltInAI context size: {} tokens (safe input budget: {})",
                         model_def.context_size, optimal
                     );
                     optimal

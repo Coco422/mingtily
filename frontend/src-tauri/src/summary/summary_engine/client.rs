@@ -41,6 +41,11 @@ enum Request {
         stop_tokens: Option<Vec<String>>,
         stream: Option<bool>,
     },
+    Tokenize {
+        prompt: String,
+        context_size: Option<u32>,
+        model_path: Option<String>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,7 +53,14 @@ enum Request {
 enum Response {
     Response { text: String, error: Option<String> },
     Token { text: String },
+    TokenCount { count: usize, context_size: u32 },
     Error { message: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuiltinPromptMetrics {
+    pub prompt_tokens: usize,
+    pub context_size: usize,
 }
 
 // ============================================================================
@@ -203,7 +215,9 @@ pub async fn generate_with_builtin_streaming(
     let sampling = model_def.sampling.sanitize_for_llama_helper();
     let request = Request::Generate {
         prompt: formatted_prompt,
-        max_tokens: Some(models::DEFAULT_MAX_TOKENS),
+        // Let the model stop naturally. llama-helper still enforces the hard
+        // context boundary, so this is unbounded only within the model window.
+        max_tokens: None,
         context_size: Some(model_def.context_size),
         model_path: Some(model_path.to_string_lossy().to_string()),
         temperature: Some(sampling.temperature),
@@ -285,7 +299,62 @@ pub async fn generate_with_builtin_streaming(
             }
         }
         Response::Token { .. } => Err(anyhow!("Sidecar ended without a terminal response")),
+        Response::TokenCount { .. } => Err(anyhow!(
+            "Sidecar returned a token count for a generation request"
+        )),
         Response::Error { message } => Err(anyhow!("Sidecar error: {}", message)),
+    }
+}
+
+/// Count the fully formatted prompt with the selected model's real tokenizer.
+///
+/// The returned count includes the model-specific chat template and BOS token,
+/// matching the exact prompt that `generate_with_builtin_streaming` sends.
+pub async fn count_builtin_prompt_tokens(
+    app_data_dir: &PathBuf,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+) -> Result<BuiltinPromptMetrics> {
+    let model_def = models::get_model_by_name(model_name)
+        .ok_or_else(|| anyhow!("Unknown model: {}", model_name))?;
+    let model_path = get_cached_model_path(app_data_dir, model_name)?;
+    let formatted_prompt = models::format_prompt(&model_def.template, system_prompt, user_prompt)?;
+
+    let manager = {
+        let mut global_manager = SIDECAR_MANAGER.lock().await;
+        if global_manager.is_none() {
+            let new_manager = SidecarManager::new(app_data_dir.clone())?;
+            *global_manager = Some(Arc::new(new_manager));
+        }
+        global_manager.clone().unwrap()
+    };
+    manager.ensure_running(model_path.clone()).await?;
+
+    let request = Request::Tokenize {
+        prompt: formatted_prompt,
+        context_size: Some(model_def.context_size),
+        model_path: Some(model_path.to_string_lossy().to_string()),
+    };
+    let response_json = manager
+        .send_request(
+            serde_json::to_string(&request)?,
+            Duration::from_secs(models::TOKENIZATION_TIMEOUT_SECS),
+        )
+        .await?;
+    let response: Response = serde_json::from_str(&response_json)
+        .with_context(|| format!("Failed to parse token count response: {}", response_json))?;
+
+    match response {
+        Response::TokenCount {
+            count,
+            context_size,
+        } => Ok(BuiltinPromptMetrics {
+            prompt_tokens: count,
+            context_size: context_size as usize,
+        }),
+        Response::Error { message } => Err(anyhow!("Sidecar tokenization error: {}", message)),
+        _ => Err(anyhow!("Unexpected sidecar response while counting tokens")),
     }
 }
 
@@ -376,6 +445,41 @@ mod tests {
     }
 
     #[test]
+    fn test_tokenize_request_serialization() {
+        let request = Request::Tokenize {
+            prompt: "完整提示词".to_string(),
+            context_size: Some(32768),
+            model_path: Some("/path/to/model.gguf".to_string()),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"type\":\"tokenize\""));
+        assert!(json.contains("\"context_size\":32768"));
+    }
+
+    #[test]
+    fn test_unbounded_generate_request_serializes_null_limit() {
+        let request = Request::Generate {
+            prompt: "test prompt".to_string(),
+            max_tokens: None,
+            context_size: Some(32768),
+            model_path: Some("/path/to/model.gguf".to_string()),
+            temperature: Some(0.7),
+            top_k: Some(20),
+            top_p: Some(0.8),
+            presence_penalty: None,
+            frequency_penalty: None,
+            repeat_penalty: None,
+            penalty_last_n: None,
+            stop_tokens: None,
+            stream: None,
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"max_tokens\":null"));
+    }
+
+    #[test]
     fn test_response_deserialization() {
         let json = r#"{"type":"response","text":"generated text","error":null}"#;
         let response: Response = serde_json::from_str(json).unwrap();
@@ -409,6 +513,23 @@ mod tests {
 
         match response {
             Response::Token { text } => assert_eq!(text, "partial"),
+            _ => panic!("Wrong response type"),
+        }
+    }
+
+    #[test]
+    fn test_token_count_response_deserialization() {
+        let json = r#"{"type":"token_count","count":96019,"context_size":32768}"#;
+        let response: Response = serde_json::from_str(json).unwrap();
+
+        match response {
+            Response::TokenCount {
+                count,
+                context_size,
+            } => {
+                assert_eq!(count, 96_019);
+                assert_eq!(context_size, 32_768);
+            }
             _ => panic!("Wrong response type"),
         }
     }

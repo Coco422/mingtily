@@ -9,8 +9,9 @@ pub mod sidecar;
 
 // Re-export commonly used types
 pub use client::{
-    force_shutdown_sidecar, generate_with_builtin, generate_with_builtin_streaming,
-    is_sidecar_healthy, shutdown_sidecar_gracefully,
+    count_builtin_prompt_tokens, force_shutdown_sidecar, generate_with_builtin,
+    generate_with_builtin_streaming, is_sidecar_healthy, shutdown_sidecar_gracefully,
+    BuiltinPromptMetrics,
 };
 pub use commands::{
     __cmd__builtin_ai_cancel_download, __cmd__builtin_ai_delete_model,

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use encoding_rs;
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
@@ -38,15 +37,22 @@ enum Request {
         stop_tokens: Option<Vec<String>>,
         stream: Option<bool>,
     },
+    Tokenize {
+        prompt: String,
+        context_size: Option<u32>,
+        model_path: Option<String>,
+    },
     Ping,
     Shutdown,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)] // `response` is part of the stable sidecar JSON protocol.
 enum Response {
     Response { text: String, error: Option<String> },
     Token { text: String },
+    TokenCount { count: usize, context_size: u32 },
     Pong,
     Goodbye,
     Error { message: String },
@@ -61,6 +67,27 @@ struct SamplingConfig {
     frequency_penalty: f32,
     repeat_penalty: f32,
     penalty_last_n: i32,
+}
+
+fn resolve_output_token_limit(
+    prompt_tokens: usize,
+    context_size: usize,
+    requested_limit: Option<i32>,
+) -> Result<usize> {
+    if prompt_tokens >= context_size {
+        anyhow::bail!(
+            "Prompt requires {} tokens, but the model context is {} tokens; the input must be split before generation",
+            prompt_tokens,
+            context_size
+        );
+    }
+
+    let available_output_tokens = context_size - prompt_tokens;
+    Ok(requested_limit
+        .filter(|limit| *limit > 0)
+        .map(|limit| limit as usize)
+        .unwrap_or(available_output_tokens)
+        .min(available_output_tokens))
 }
 
 impl SamplingConfig {
@@ -347,16 +374,35 @@ impl ModelState {
         Ok(())
     }
 
+    fn count_tokens(&self, prompt: &str) -> Result<usize> {
+        let model = self.model.as_ref().context("Model not loaded")?;
+        let tokens = model
+            .str_to_token(prompt, AddBos::Always)
+            .with_context(|| "failed to tokenize prompt")?;
+        Ok(tokens.len())
+    }
+
     fn generate(
         &mut self,
         prompt: String,
-        max_tokens: i32,
+        max_tokens: Option<i32>,
         sampling: SamplingConfig,
         stop_tokens: Vec<String>,
         on_token: &mut dyn FnMut(&str) -> Result<()>,
     ) -> Result<String> {
         let start_time = Instant::now();
         let model = self.model.as_ref().context("Model not loaded")?;
+
+        // Tokenize and reject oversized prompts before allocating the KV cache
+        // and compute buffers for a context that cannot be used.
+        let tokens_list = model
+            .str_to_token(&prompt, AddBos::Always)
+            .with_context(|| "failed to tokenize prompt")?;
+        eprintln!("📝 Tokenized prompt: {} tokens", tokens_list.len());
+
+        let context_size = self.context_size as usize;
+        let max_output_tokens =
+            resolve_output_token_limit(tokens_list.len(), context_size, max_tokens)?;
 
         // Calculate thread count (conservative default: max(1, (Cores / 2) + 2))
         // This ensures the UI thread is never starved
@@ -379,18 +425,12 @@ impl ModelState {
             .new_context(&self.backend, ctx_params)
             .context("unable to create the llama_context")?;
 
-        let tokens_list = model
-            .str_to_token(&prompt, AddBos::Always)
-            .with_context(|| "failed to tokenize prompt")?;
-
-        eprintln!("📝 Tokenized prompt: {} tokens", tokens_list.len());
-
         // Use context size for batch capacity to handle long prompts
         let batch_size = self.context_size as usize;
         let mut batch = LlamaBatch::new(batch_size, 1);
 
         let last_index: i32 = (tokens_list.len() - 1) as i32;
-        for (i, token) in (0_i32..).zip(tokens_list.into_iter()) {
+        for (i, token) in (0_i32..).zip(tokens_list) {
             let is_last = i == last_index;
             batch
                 .add(token, i, &[0], is_last)
@@ -405,7 +445,10 @@ impl ModelState {
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut output = String::new();
 
-        eprintln!("🔄 Starting generation (max_tokens: {})", max_tokens);
+        eprintln!(
+            "🔄 Starting generation (up to {} tokens, context-limited)",
+            max_output_tokens
+        );
 
         use llama_cpp_2::sampling::LlamaSampler;
 
@@ -452,8 +495,10 @@ impl ModelState {
 
         loop {
             // Check if we've generated enough tokens
-            if (n_cur - n_prompt_tokens) >= max_tokens {
-                eprintln!("✓ Reached max_tokens limit");
+            if (n_cur - n_prompt_tokens) as usize >= max_output_tokens
+                || n_cur as usize >= context_size
+            {
+                eprintln!("✓ Reached generation context limit");
                 break;
             }
 
@@ -609,7 +654,6 @@ fn main() -> Result<()> {
                         stop_tokens,
                         stream,
                     }) => {
-                        let max_tokens = max_tokens.unwrap_or(512);
                         let context_size = context_size.unwrap_or(2048);
 
                         let sampling = SamplingConfig::from_request(
@@ -662,6 +706,33 @@ fn main() -> Result<()> {
                                     error: Some(format!("Generation failed: {}", e)),
                                 })?;
                             }
+                        }
+                    }
+                    Ok(Request::Tokenize {
+                        prompt,
+                        context_size,
+                        model_path,
+                    }) => {
+                        let context_size = context_size.unwrap_or(2048);
+
+                        if let Some(path_str) = model_path {
+                            let path = PathBuf::from(path_str);
+                            if let Err(e) = state.load_model_if_needed(path, context_size) {
+                                send_response(&Response::Error {
+                                    message: format!("Failed to load model: {}", e),
+                                })?;
+                                continue;
+                            }
+                        }
+
+                        match state.count_tokens(&prompt) {
+                            Ok(count) => send_response(&Response::TokenCount {
+                                count,
+                                context_size: state.context_size,
+                            })?,
+                            Err(e) => send_response(&Response::Error {
+                                message: format!("Failed to tokenize prompt: {}", e),
+                            })?,
                         }
                     }
                     Ok(Request::Ping) => {
@@ -779,5 +850,52 @@ mod tests {
         };
 
         assert_eq!(stream, Some(true));
+    }
+
+    #[test]
+    fn tokenize_request_deserializes_complete_prompt() {
+        let json = r#"{"type":"tokenize","prompt":"完整提示词","context_size":32768,"model_path":"model.gguf"}"#;
+        let request: Request = serde_json::from_str(json).unwrap();
+        let Request::Tokenize {
+            prompt,
+            context_size,
+            model_path,
+        } = request
+        else {
+            panic!("expected tokenize request");
+        };
+
+        assert_eq!(prompt, "完整提示词");
+        assert_eq!(context_size, Some(32768));
+        assert_eq!(model_path.as_deref(), Some("model.gguf"));
+    }
+
+    #[test]
+    fn unlimited_generation_uses_remaining_context() {
+        assert_eq!(
+            resolve_output_token_limit(20_000, 32_768, None).unwrap(),
+            12_768
+        );
+    }
+
+    #[test]
+    fn requested_generation_limit_is_clamped_to_context() {
+        assert_eq!(
+            resolve_output_token_limit(30_000, 32_768, Some(4096)).unwrap(),
+            2768
+        );
+        assert_eq!(
+            resolve_output_token_limit(20_000, 32_768, Some(2048)).unwrap(),
+            2048
+        );
+    }
+
+    #[test]
+    fn full_context_prompt_is_rejected_before_batch_add() {
+        let error = resolve_output_token_limit(32_768, 32_768, None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Prompt requires 32768 tokens"));
+        assert!(error.contains("input must be split"));
     }
 }

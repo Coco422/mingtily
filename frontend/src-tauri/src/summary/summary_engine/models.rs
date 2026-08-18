@@ -318,8 +318,14 @@ pub fn format_prompt(
 // Configuration Constants
 // ============================================================================
 
-/// Default max tokens for generation (increased for better summary quality)
-pub const DEFAULT_MAX_TOKENS: i32 = 4096;
+/// Minimum room retained for useful local-model output when deciding whether
+/// an input must be split. This is not an output cap: generation may continue
+/// until EOS or the model's hard context boundary.
+pub const MIN_GENERATION_HEADROOM_TOKENS: usize = 4096;
+
+/// Tokenization is local and normally completes quickly, but model startup can
+/// take longer on low-end machines.
+pub const TOKENIZATION_TIMEOUT_SECS: u64 = 120;
 
 /// Idle timeout for sidecar (seconds) - can be overridden via LLAMA_IDLE_TIMEOUT env var
 pub const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300; // 5 minutes

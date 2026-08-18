@@ -176,6 +176,142 @@ fn build_final_report_system_prompt(
     )
 }
 
+fn build_final_report_user_prompt(content: &str, custom_prompt: &str) -> String {
+    let mut prompt = format!("<transcript_chunks>\n{content}\n</transcript_chunks>\n");
+
+    if !custom_prompt.is_empty() {
+        prompt.push_str("\n\nUser Provided Context:\n\n<user_context>\n");
+        prompt.push_str(custom_prompt);
+        prompt.push_str("\n</user_context>");
+    }
+
+    prompt
+}
+
+struct BuiltinPromptSizer<'a> {
+    app_data_dir: &'a PathBuf,
+    model_name: &'a str,
+    context_size: usize,
+    input_budget: usize,
+}
+
+fn builtin_safe_input_budget(context_size: usize) -> usize {
+    let headroom = crate::summary::summary_engine::models::MIN_GENERATION_HEADROOM_TOKENS
+        .min((context_size / 4).max(1))
+        .min(context_size.saturating_sub(1));
+    context_size.saturating_sub(headroom).max(1)
+}
+
+impl<'a> BuiltinPromptSizer<'a> {
+    fn new(app_data_dir: &'a PathBuf, model_name: &'a str) -> Result<Self, String> {
+        let model = crate::summary::summary_engine::models::get_model_by_name(model_name)
+            .ok_or_else(|| format!("Unknown built-in summary model: {model_name}"))?;
+        let context_size = model.context_size as usize;
+
+        Ok(Self {
+            app_data_dir,
+            model_name,
+            context_size,
+            input_budget: builtin_safe_input_budget(context_size),
+        })
+    }
+
+    async fn count(&self, system_prompt: &str, user_prompt: &str) -> Result<usize, String> {
+        let metrics = crate::summary::summary_engine::count_builtin_prompt_tokens(
+            self.app_data_dir,
+            self.model_name,
+            system_prompt,
+            user_prompt,
+        )
+        .await
+        .map_err(|e| format!("Failed to count local-model prompt tokens: {e}"))?;
+
+        if metrics.context_size != self.context_size {
+            return Err(format!(
+                "Local-model context changed unexpectedly (expected: {}, actual: {})",
+                self.context_size, metrics.context_size
+            ));
+        }
+
+        Ok(metrics.prompt_tokens)
+    }
+
+    async fn fits(&self, system_prompt: &str, user_prompt: &str) -> Result<bool, String> {
+        Ok(self.count(system_prompt, user_prompt).await? <= self.input_budget)
+    }
+
+    /// Split text by repeatedly measuring the complete model-formatted prompt.
+    /// Character indices are used only as candidate boundaries; capacity is
+    /// always decided by the selected model's real tokenizer.
+    async fn split<F>(
+        &self,
+        text: &str,
+        system_prompt: &str,
+        build_user_prompt: F,
+    ) -> Result<Vec<String>, String>
+    where
+        F: Fn(&str) -> String,
+    {
+        if text.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        if self.fits(system_prompt, &build_user_prompt(text)).await? {
+            return Ok(vec![text.to_string()]);
+        }
+
+        let mut offsets: Vec<usize> = text.char_indices().map(|(index, _)| index).collect();
+        offsets.push(text.len());
+        let char_count = offsets.len() - 1;
+        let mut chunks = Vec::new();
+        let mut start = 0_usize;
+
+        while start < char_count {
+            let mut low = start + 1;
+            let mut high = char_count;
+            let mut best_end = None;
+
+            while low <= high {
+                let midpoint = low + (high - low) / 2;
+                let candidate = &text[offsets[start]..offsets[midpoint]];
+                let tokens = self
+                    .count(system_prompt, &build_user_prompt(candidate))
+                    .await?;
+
+                if tokens <= self.input_budget {
+                    best_end = Some(midpoint);
+                    low = midpoint + 1;
+                } else {
+                    high = midpoint.saturating_sub(1);
+                }
+            }
+
+            let end = best_end.ok_or_else(|| {
+                format!(
+                    "The local-model prompt instructions leave no room for input within the {}-token budget",
+                    self.input_budget
+                )
+            })?;
+            chunks.push(text[offsets[start]..offsets[end]].to_string());
+
+            if end >= char_count {
+                break;
+            }
+
+            // Keep a small Unicode-safe overlap for continuity, while always
+            // advancing even when a chunk itself is very short.
+            let overlapped_start = end.saturating_sub(200);
+            start = if overlapped_start > start {
+                overlapped_start
+            } else {
+                end
+            };
+        }
+
+        Ok(chunks)
+    }
+}
+
 /// Rough token count estimation using character count
 pub fn rough_token_count(s: &str) -> usize {
     let char_count = s.chars().count();
@@ -418,7 +554,20 @@ pub async fn generate_meeting_summary(
     let final_language_action =
         resolve_final_language_action(summary_language, detected_transcript_language);
     let total_tokens = rough_token_count(text);
-    info!("Transcript length: {} tokens", total_tokens);
+    info!("Estimated transcript length: {} tokens", total_tokens);
+
+    let clean_template_markdown = template.to_markdown_structure();
+    let section_instructions = template.to_section_instructions();
+    let final_system_prompt =
+        build_final_report_system_prompt(&section_instructions, &clean_template_markdown);
+
+    let builtin_prompt_sizer = if provider == &LLMProvider::BuiltInAI {
+        let data_dir = app_data_dir
+            .ok_or_else(|| "app_data_dir is required for BuiltInAI provider".to_string())?;
+        Some(BuiltinPromptSizer::new(data_dir, model_name)?)
+    } else {
+        None
+    };
 
     let (mut english_markdown, successful_chunk_count) = if let Some(cached) =
         resolve_cached_english(cached_english, summary_language)
@@ -429,34 +578,50 @@ pub async fn generate_meeting_summary(
         );
         (cached.to_string(), 1_i64)
     } else {
-        let content_to_summarize: String;
+        let mut content_to_summarize: String;
         let successful_chunk_count: i64;
 
-        // Strategy: Use single-pass for cloud providers or short transcripts
-        // Use multi-level chunking for Ollama/BuiltInAI with long transcripts
-        // Note: CustomOpenAI is treated like cloud providers (unlimited context)
-        if (provider != &LLMProvider::Ollama && provider != &LLMProvider::BuiltInAI)
-            || total_tokens < token_threshold
-        {
+        // Built-in models use their real tokenizer over the complete formatted
+        // final prompt. Other providers retain their existing strategy.
+        let use_single_pass = if let Some(sizer) = builtin_prompt_sizer.as_ref() {
+            let final_user_prompt = build_final_report_user_prompt(text, custom_prompt);
+            let actual_tokens = sizer
+                .count(&final_system_prompt, &final_user_prompt)
+                .await?;
             info!(
-                "Using single-pass summarization (tokens: {}, threshold: {})",
-                total_tokens, token_threshold
+                "Local-model formatted prompt: {} tokens (safe input budget: {})",
+                actual_tokens, sizer.input_budget
+            );
+            actual_tokens <= sizer.input_budget
+        } else {
+            provider != &LLMProvider::Ollama || total_tokens < token_threshold
+        };
+
+        if use_single_pass {
+            info!(
+                "Using single-pass summarization (estimated transcript tokens: {})",
+                total_tokens
             );
             content_to_summarize = text.to_string();
             successful_chunk_count = 1;
         } else {
             info!(
-                "Using multi-level summarization (tokens: {} exceeds threshold: {})",
-                total_tokens, token_threshold
+                "Using multi-level summarization (estimated transcript tokens: {})",
+                total_tokens
             );
 
-            // Reserve 300 tokens for prompt overhead
-            let chunks = chunk_text(text, token_threshold - 300, 100);
+            let system_prompt_chunk = "You are an expert meeting summarizer.";
+            let chunks = if let Some(sizer) = builtin_prompt_sizer.as_ref() {
+                sizer
+                    .split(text, system_prompt_chunk, build_chunk_summary_user_prompt)
+                    .await?
+            } else {
+                chunk_text(text, token_threshold.saturating_sub(300).max(1), 100)
+            };
             let num_chunks = chunks.len();
             info!("Split transcript into {} chunks", num_chunks);
 
             let mut chunk_summaries = Vec::new();
-            let system_prompt_chunk = "You are an expert meeting summarizer.";
 
             for (i, chunk) in chunks.iter().enumerate() {
                 // Check for cancellation before processing each chunk
@@ -518,31 +683,87 @@ pub async fn generate_meeting_summary(
                 successful_chunk_count, num_chunks
             );
 
-            // Combine chunk summaries if multiple chunks
+            // Combine chunk summaries if multiple chunks. Built-in models use
+            // tokenizer-sized reduction rounds so this stage cannot overflow.
             content_to_summarize = if chunk_summaries.len() > 1 {
                 info!(
                     "Combining {} chunk summaries into cohesive summary",
                     chunk_summaries.len()
                 );
-                let combined_text = chunk_summaries.join("\n---\n");
                 let system_prompt_combine = "You are an expert at synthesizing meeting summaries.";
-                let user_prompt_combine = build_combine_summary_user_prompt(&combined_text);
-                generate_summary(
-                    client,
-                    provider,
-                    model_name,
-                    api_key,
-                    system_prompt_combine,
-                    &user_prompt_combine,
-                    ollama_endpoint,
-                    custom_openai_endpoint,
-                    max_tokens,
-                    temperature,
-                    top_p,
-                    app_data_dir,
-                    cancellation_token,
-                )
-                .await?
+                if let Some(sizer) = builtin_prompt_sizer.as_ref() {
+                    let mut pending = chunk_summaries;
+                    let mut reduction_round = 0_usize;
+
+                    loop {
+                        reduction_round += 1;
+                        if reduction_round > 8 {
+                            return Err("Local summary reduction did not converge after 8 rounds"
+                                .to_string());
+                        }
+
+                        let combined_text = pending.join("\n---\n");
+                        let groups = sizer
+                            .split(
+                                &combined_text,
+                                system_prompt_combine,
+                                build_combine_summary_user_prompt,
+                            )
+                            .await?;
+                        info!(
+                            "Local summary reduction round {}: {} group(s)",
+                            reduction_round,
+                            groups.len()
+                        );
+
+                        let mut reduced = Vec::with_capacity(groups.len());
+                        for group in groups {
+                            let user_prompt_combine = build_combine_summary_user_prompt(&group);
+                            reduced.push(
+                                generate_summary(
+                                    client,
+                                    provider,
+                                    model_name,
+                                    api_key,
+                                    system_prompt_combine,
+                                    &user_prompt_combine,
+                                    ollama_endpoint,
+                                    custom_openai_endpoint,
+                                    max_tokens,
+                                    temperature,
+                                    top_p,
+                                    app_data_dir,
+                                    cancellation_token,
+                                )
+                                .await?,
+                            );
+                        }
+
+                        if reduced.len() == 1 {
+                            break reduced.remove(0);
+                        }
+                        pending = reduced;
+                    }
+                } else {
+                    let combined_text = chunk_summaries.join("\n---\n");
+                    let user_prompt_combine = build_combine_summary_user_prompt(&combined_text);
+                    generate_summary(
+                        client,
+                        provider,
+                        model_name,
+                        api_key,
+                        system_prompt_combine,
+                        &user_prompt_combine,
+                        ollama_endpoint,
+                        custom_openai_endpoint,
+                        max_tokens,
+                        temperature,
+                        top_p,
+                        app_data_dir,
+                        cancellation_token,
+                    )
+                    .await?
+                }
             } else {
                 chunk_summaries.remove(0)
             };
@@ -553,21 +774,60 @@ pub async fn generate_meeting_summary(
             template_id
         );
 
-        // Generate markdown structure and section instructions using template methods
-        let clean_template_markdown = template.to_markdown_structure();
-        let section_instructions = template.to_section_instructions();
+        if let Some(sizer) = builtin_prompt_sizer.as_ref() {
+            let system_prompt_combine = "You are an expert at synthesizing meeting summaries.";
+            for compaction_round in 1..=4 {
+                let final_user_prompt =
+                    build_final_report_user_prompt(&content_to_summarize, custom_prompt);
+                if sizer.fits(&final_system_prompt, &final_user_prompt).await? {
+                    break;
+                }
 
-        let final_system_prompt =
-            build_final_report_system_prompt(&section_instructions, &clean_template_markdown);
+                if compaction_round == 4 {
+                    return Err(
+                        "Local summary could not be compacted to fit the model context".to_string(),
+                    );
+                }
 
-        let mut final_user_prompt =
-            format!("<transcript_chunks>\n{content_to_summarize}\n</transcript_chunks>\n");
-
-        if !custom_prompt.is_empty() {
-            final_user_prompt.push_str("\n\nUser Provided Context:\n\n<user_context>\n");
-            final_user_prompt.push_str(custom_prompt);
-            final_user_prompt.push_str("\n</user_context>");
+                info!(
+                    "Final local summary prompt still exceeds the safe budget; compacting (round {})",
+                    compaction_round
+                );
+                let groups = sizer
+                    .split(
+                        &content_to_summarize,
+                        system_prompt_combine,
+                        build_combine_summary_user_prompt,
+                    )
+                    .await?;
+                let mut compacted = Vec::with_capacity(groups.len());
+                for group in groups {
+                    let user_prompt_combine = build_combine_summary_user_prompt(&group);
+                    compacted.push(
+                        generate_summary(
+                            client,
+                            provider,
+                            model_name,
+                            api_key,
+                            system_prompt_combine,
+                            &user_prompt_combine,
+                            ollama_endpoint,
+                            custom_openai_endpoint,
+                            max_tokens,
+                            temperature,
+                            top_p,
+                            app_data_dir,
+                            cancellation_token,
+                        )
+                        .await?,
+                    );
+                }
+                content_to_summarize = compacted.join("\n---\n");
+            }
         }
+
+        let final_user_prompt =
+            build_final_report_user_prompt(&content_to_summarize, custom_prompt);
 
         // Check cancellation before final summary generation
         if let Some(token) = cancellation_token {
@@ -823,6 +1083,20 @@ mod tests {
 
         assert!(prompt.contains(ENGLISH_BASE_SUMMARY_INSTRUCTION));
         assert!(prompt.contains("SECTION-SPECIFIC INSTRUCTIONS"));
+    }
+
+    #[test]
+    fn final_report_user_prompt_preserves_unicode_and_custom_context() {
+        let prompt = build_final_report_user_prompt("张三：确认发布", "只记录已确认事项");
+
+        assert!(prompt.contains("<transcript_chunks>\n张三：确认发布"));
+        assert!(prompt.contains("<user_context>\n只记录已确认事项"));
+    }
+
+    #[test]
+    fn builtin_budget_reserves_output_without_capping_it() {
+        assert_eq!(builtin_safe_input_budget(32_768), 28_672);
+        assert_eq!(builtin_safe_input_budget(2048), 1536);
     }
 
     #[test]
