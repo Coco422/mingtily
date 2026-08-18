@@ -167,18 +167,36 @@ impl AudioStream {
             device.name
         );
 
-        // Create Core Audio capture
-        info!("🔊 Stream: Calling CoreAudioCapture::new()...");
-        let capture_impl = CoreAudioCapture::new().map_err(|e| {
-            error!("❌ Stream: CoreAudioCapture::new() failed: {}", e);
-            anyhow::anyhow!("Failed to create Core Audio capture: {}", e)
-        })?;
+        // AudioDeviceCreateIOProcID can block for roughly one minute when macOS has not
+        // granted System Audio Recording permission. Keep that native work off the async
+        // runtime and stop waiting after a short, actionable timeout. The detached blocking
+        // task owns all native resources and drops them if it eventually returns.
+        info!("🔊 Stream: Verifying Core Audio capture permission...");
+        let setup_task = tokio::task::spawn_blocking(|| {
+            let capture_impl = CoreAudioCapture::new().map_err(|e| {
+                error!("❌ Stream: CoreAudioCapture::new() failed: {}", e);
+                anyhow::anyhow!("Failed to create Core Audio capture: {}", e)
+            })?;
 
-        info!("✅ Stream: CoreAudioCapture created, calling stream()...");
-        let core_stream = capture_impl.stream().map_err(|e| {
-            error!("❌ Stream: capture_impl.stream() failed: {}", e);
-            anyhow::anyhow!("Failed to create Core Audio stream: {}", e)
-        })?;
+            capture_impl.stream().map_err(|e| {
+                error!("❌ Stream: capture_impl.stream() failed: {}", e);
+                anyhow::anyhow!("Failed to create Core Audio stream: {}", e)
+            })
+        });
+        let core_stream = match tokio::time::timeout(std::time::Duration::from_secs(8), setup_task)
+            .await
+        {
+            Ok(Ok(Ok(stream))) => stream,
+            Ok(Ok(Err(error))) => return Err(error),
+            Ok(Err(error)) => {
+                return Err(anyhow::anyhow!("Core Audio setup task failed: {}", error));
+            }
+            Err(_) => {
+                return Err(anyhow::anyhow!(
+                    "System audio permission is not ready. Enable Mingtily in System Settings > Privacy & Security > Screen & System Audio Recording > System Audio Recording Only, then try again"
+                ));
+            }
+        };
 
         let sample_rate = core_stream.sample_rate();
         info!(
@@ -408,7 +426,7 @@ impl AudioStreamManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         use super::capture::get_current_backend;
         let backend = get_current_backend();
         info!("🎙️ Starting audio streams with backend: {:?}", backend);
@@ -442,6 +460,7 @@ impl AudioStreamManager {
         }
 
         // Start system audio stream
+        let mut system_audio_warning = None;
         if let Some(sys_device) = system_device {
             info!(
                 "🔊 Creating system audio stream: {} (backend: {:?})",
@@ -462,7 +481,9 @@ impl AudioStreamManager {
                 }
                 Err(e) => {
                     warn!("⚠️ Failed to create system audio stream: {}", e);
-                    // Don't fail if only system audio fails
+                    // System audio is optional. Continue with the microphone, but surface
+                    // the failure so the UI never silently claims computer audio is captured.
+                    system_audio_warning = Some(e.to_string());
                 }
             }
         } else {
@@ -474,7 +495,7 @@ impl AudioStreamManager {
             return Err(anyhow::anyhow!("No audio streams could be created"));
         }
 
-        Ok(())
+        Ok(system_audio_warning)
     }
 
     /// Stop all audio streams

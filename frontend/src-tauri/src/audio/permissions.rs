@@ -4,6 +4,11 @@ use log::{error, info, warn};
 
 #[cfg(target_os = "macos")]
 use std::process::Command;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(target_os = "macos")]
+static SYSTEM_AUDIO_VERIFIED: AtomicBool = AtomicBool::new(false);
 
 /// Check if the app has Audio Capture permission (required for Core Audio taps on macOS 14.4+)
 ///
@@ -12,16 +17,12 @@ use std::process::Command;
 /// show a permission dialog to the user. If permission is denied, the tap will return
 /// silence (all zeros).
 ///
-/// This function returns true because the actual permission prompt happens automatically
-/// when AudioHardwareCreateProcessTap is called by the cidre library.
+/// macOS does not expose a public preflight API for the AudioCapture TCC service. This
+/// returns true only after this process has successfully created and started a Core Audio
+/// stream; creating a tap alone is not proof because denied taps may still be created.
 #[cfg(target_os = "macos")]
 pub fn check_screen_recording_permission() -> bool {
-    info!("ℹ️  Core Audio tap requires Audio Capture permission (macOS 14.4+)");
-    info!("📍 Permission dialog will appear automatically when recording starts");
-    info!("   If already granted: System Settings → Privacy & Security → Audio Capture");
-
-    // Always return true - the actual permission dialog is triggered by Core Audio API
-    true
+    SYSTEM_AUDIO_VERIFIED.load(Ordering::Acquire)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -35,16 +36,15 @@ pub fn check_screen_recording_permission() -> bool {
 pub fn request_screen_recording_permission() -> Result<()> {
     info!("🔐 Opening System Settings for Audio Capture permission...");
 
-    // Open System Settings to Privacy & Security page
-    // Note: There's no direct URL for Audio Capture, so we open the main Privacy page
+    // AudioCapture is managed in the Screen & System Audio Recording privacy pane.
     let result = Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
         .spawn();
 
     match result {
         Ok(_) => {
-            info!("✅ Opened System Settings - navigate to Privacy & Security → Audio Capture");
-            info!("👉 Please enable Audio Capture permission and restart the app");
+            info!("✅ Opened Screen & System Audio Recording settings");
+            info!("👉 Enable Mingtily under System Audio Recording Only, then retry");
             Ok(())
         }
         Err(e) => {
@@ -88,24 +88,17 @@ pub async fn request_screen_recording_permission_command() -> Result<(), String>
     request_screen_recording_permission().map_err(|e| e.to_string())
 }
 
-/// Trigger system audio permission request and verify it was granted
-/// Returns Ok(true) if permission granted (tap created successfully), Ok(false) if denied
+/// Trigger system audio permission and verify that a complete stream can start.
+/// Creating only the process tap is insufficient: macOS may allow that while delivering
+/// silence or blocking IO-proc creation when AudioCapture permission is missing.
 #[cfg(target_os = "macos")]
 pub fn trigger_system_audio_permission() -> Result<bool> {
     info!("🔐 Triggering Audio Capture permission request...");
 
-    // Try to create a Core Audio capture - this triggers the permission dialog
-    // if NSAudioCaptureUsageDescription is present in Info.plist
-    // NOTE: We only create the tap, don't start streaming - similar to mic permission approach
-    match crate::audio::capture::CoreAudioCapture::new() {
-        Ok(_capture) => {
-            info!("✅ Core Audio tap created successfully");
-            // Sleep briefly to allow permission dialog to appear (if shown)
-            // Similar to microphone permission handling in discovery.rs
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            info!("✅ Audio Capture permission appears to be granted");
-            // Note: On macOS, even with permission denied, tap creation may succeed
-            // but audio will be silence. For onboarding, we just check tap creation.
+    match crate::audio::capture::CoreAudioCapture::new().and_then(|capture| capture.stream()) {
+        Ok(stream) => {
+            drop(stream);
+            info!("✅ Audio Capture permission verified with a started stream");
             Ok(true)
         }
         Err(e) => {
@@ -134,11 +127,26 @@ pub fn trigger_system_audio_permission() -> Result<bool> {
 /// Returns true if permission was granted (stream created), false if denied
 #[tauri::command]
 pub async fn trigger_system_audio_permission_command() -> Result<bool, String> {
-    // Run in blocking task to avoid blocking the async runtime
-    tokio::task::spawn_blocking(|| trigger_system_audio_permission())
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| e.to_string())
+    // AudioDeviceCreateIOProcID may block for about a minute when permission is absent.
+    // Bound onboarding to eight seconds; the detached native task owns and later drops
+    // any resources it creates, while the user can grant access in System Settings.
+    let task = tokio::task::spawn_blocking(trigger_system_audio_permission);
+    match tokio::time::timeout(std::time::Duration::from_secs(8), task).await {
+        Ok(joined) => {
+            let granted = joined
+                .map_err(|e| format!("Task join error: {}", e))?
+                .map_err(|e| e.to_string())?;
+            #[cfg(target_os = "macos")]
+            SYSTEM_AUDIO_VERIFIED.store(granted, Ordering::Release);
+            Ok(granted)
+        }
+        Err(_) => {
+            #[cfg(target_os = "macos")]
+            SYSTEM_AUDIO_VERIFIED.store(false, Ordering::Release);
+            warn!("Audio Capture verification timed out; permission is not ready");
+            Ok(false)
+        }
+    }
 }
 
 #[cfg(test)]

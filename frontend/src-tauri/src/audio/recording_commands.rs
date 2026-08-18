@@ -68,10 +68,26 @@ fn start_recording_transcription_tasks<R: Runtime>(
     receivers: super::recording_manager::RecordingReceivers,
     streaming_model: Option<crate::sherpa_asr::models::InstalledSherpaModel>,
 ) {
-    let task_handle = transcription::start_transcription_task(app.clone(), receivers.segmented);
+    let super::recording_manager::RecordingReceivers {
+        segmented,
+        streaming,
+        system_audio_warning,
+    } = receivers;
+
+    if let Some(detail) = system_audio_warning {
+        let _ = app.emit(
+            "recording-warning",
+            serde_json::json!({
+                "kind": "systemAudio",
+                "detail": detail,
+            }),
+        );
+    }
+
+    let task_handle = transcription::start_transcription_task(app.clone(), segmented);
     *TRANSCRIPTION_TASK.lock().unwrap() = Some(task_handle);
 
-    if let (Some(streaming_receiver), Some(model)) = (receivers.streaming, streaming_model) {
+    if let (Some(streaming_receiver), Some(model)) = (streaming, streaming_model) {
         let task_handle = crate::sherpa_asr::start_live_transcription_task(
             app.clone(),
             streaming_receiver,

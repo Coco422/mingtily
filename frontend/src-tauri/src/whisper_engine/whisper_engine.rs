@@ -3,10 +3,13 @@
 use super::acceleration::{whisper_context_acceleration_for, WhisperCompiledBackend};
 use crate::config::WHISPER_MODEL_CATALOG;
 use anyhow::{anyhow, Result};
-use reqwest::Client;
+use reqwest::{
+    header::{CONTENT_RANGE, RANGE},
+    Client, StatusCode,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -1028,34 +1031,8 @@ impl WhisperEngine {
     pub async fn download_model(
         &self,
         model_name: &str,
-        progress_callback: Option<Box<dyn Fn(u8) + Send>>,
+        progress_callback: Option<Box<dyn Fn(u8) + Send + Sync>>,
     ) -> Result<()> {
-        log::info!("Starting download for model: {}", model_name);
-
-        // Check if download is already in progress for this model
-        {
-            let active = self.active_downloads.read().await;
-            if active.contains(model_name) {
-                log::warn!("Download already in progress for model: {}", model_name);
-                return Err(anyhow!(
-                    "Download already in progress for model: {}",
-                    model_name
-                ));
-            }
-        }
-
-        // Add to active downloads
-        {
-            let mut active = self.active_downloads.write().await;
-            active.insert(model_name.to_string());
-        }
-
-        // Clear any previous cancellation flag for this model
-        {
-            let mut cancel_flag = self.cancel_download_flag.write().await;
-            *cancel_flag = None;
-        }
-
         // Official ggerganov/whisper.cpp model URLs from Hugging Face
         let model_url = match model_name {
             // Standard f16 models
@@ -1076,14 +1053,94 @@ impl WhisperEngine {
             "large-v3-turbo-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
             "large-v3-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
 
-            _ => return Err(anyhow!("Unsupported model: {}", model_name))
+            _ => return Err(anyhow!("Unsupported model: {}", model_name)),
         };
 
+        self.download_model_from_url(model_name, model_url, progress_callback)
+            .await
+    }
+
+    async fn download_model_from_url(
+        &self,
+        model_name: &str,
+        model_url: &str,
+        progress_callback: Option<Box<dyn Fn(u8) + Send + Sync>>,
+    ) -> Result<()> {
+        log::info!("Starting download for model: {}", model_name);
+
+        // Check and register atomically so two simultaneous requests cannot both start.
+        {
+            let mut active = self.active_downloads.write().await;
+            if !active.insert(model_name.to_string()) {
+                log::warn!("Download already in progress for model: {}", model_name);
+                return Err(anyhow!(
+                    "Download already in progress for model: {}",
+                    model_name
+                ));
+            }
+        }
+
+        {
+            let mut cancel_flag = self.cancel_download_flag.write().await;
+            if cancel_flag.as_deref() == Some(model_name) {
+                *cancel_flag = None;
+            }
+        }
+
+        self.update_model_status(model_name, ModelStatus::Downloading { progress: 0 })
+            .await;
+
+        let result = self
+            .download_model_inner(model_name, model_url, progress_callback.as_deref())
+            .await;
+
+        // Every terminal path must release the registration. Previously network and disk
+        // errors returned early and made Retry fail with "already in progress" forever.
+        {
+            let mut active = self.active_downloads.write().await;
+            active.remove(model_name);
+        }
+        {
+            let mut cancel_flag = self.cancel_download_flag.write().await;
+            if cancel_flag.as_deref() == Some(model_name) {
+                *cancel_flag = None;
+            }
+        }
+
+        match &result {
+            Ok(()) => {
+                let file_path = self.models_dir.join(format!("ggml-{}.bin", model_name));
+                let mut models = self.available_models.write().await;
+                if let Some(model_info) = models.get_mut(model_name) {
+                    model_info.status = ModelStatus::Available;
+                    model_info.path = file_path;
+                }
+            }
+            Err(error) if is_cancelled_download(error) => {
+                self.update_model_status(model_name, ModelStatus::Missing)
+                    .await;
+            }
+            Err(error) => {
+                self.update_model_status(model_name, ModelStatus::Error(error.to_string()))
+                    .await;
+            }
+        }
+
+        result
+    }
+
+    async fn download_model_inner(
+        &self,
+        model_name: &str,
+        model_url: &str,
+        progress_callback: Option<&(dyn Fn(u8) + Send + Sync)>,
+    ) -> Result<()> {
         log::info!("Model URL for {}: {}", model_name, model_url);
 
         // Generate correct filename - all models follow ggml-{model_name}.bin pattern
         let filename = format!("ggml-{}.bin", model_name);
         let file_path = self.models_dir.join(&filename);
+        let partial_path = partial_download_path(&file_path);
 
         log::info!("Downloading to file path: {}", file_path.display());
 
@@ -1094,36 +1151,105 @@ impl WhisperEngine {
                 .map_err(|e| anyhow!("Failed to create models directory: {}", e))?;
         }
 
-        // Update model status to downloading
-        {
-            let mut models = self.available_models.write().await;
-            if let Some(model_info) = models.get_mut(model_name) {
-                model_info.status = ModelStatus::Downloading { progress: 0 };
+        if file_path.exists() {
+            if self.validate_model_file(&file_path).await.is_ok()
+                && model_file_is_complete(model_name, &file_path)
+            {
+                log::info!(
+                    "Model already exists and passed validation: {}",
+                    file_path.display()
+                );
+                if let Some(callback) = progress_callback {
+                    callback(100);
+                }
+                return Ok(());
+            }
+
+            // Releases before this fix wrote partial data to the final filename. Preserve a
+            // valid GGML prefix as resumable data; discard unrelated/corrupt content.
+            if !partial_path.exists() && self.validate_model_file(&file_path).await.is_ok() {
+                fs::rename(&file_path, &partial_path)
+                    .await
+                    .map_err(|e| anyhow!("Failed to preserve partial download: {}", e))?;
+            } else {
+                fs::remove_file(&file_path)
+                    .await
+                    .map_err(|e| anyhow!("Failed to remove incomplete model file: {}", e))?;
             }
         }
 
-        log::info!("Creating HTTP client and starting request...");
-        let client = Client::new();
+        let client = Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(20))
+            .build()
+            .map_err(|e| anyhow!("Failed to create download client: {}", e))?;
 
-        log::info!("Sending GET request to: {}", model_url);
-        let response = client
-            .get(model_url)
+        let mut resume_offset = match fs::metadata(&partial_path).await {
+            Ok(metadata) => metadata.len(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(anyhow!("Failed to inspect partial download: {}", error)),
+        };
+
+        if self.is_download_cancelled(model_name).await {
+            remove_file_if_exists(&partial_path).await?;
+            return Err(anyhow!("Download cancelled by user"));
+        }
+
+        log::info!(
+            "Sending GET request to {} (resume offset: {} bytes)",
+            model_url,
+            resume_offset
+        );
+        let mut request = client.get(model_url);
+        if resume_offset > 0 {
+            request = request.header(RANGE, format!("bytes={}-", resume_offset));
+        }
+        let mut response = request
             .send()
             .await
             .map_err(|e| anyhow!("Failed to start download: {}", e))?;
 
+        if self.is_download_cancelled(model_name).await {
+            remove_file_if_exists(&partial_path).await?;
+            return Err(anyhow!("Download cancelled by user"));
+        }
+
+        // A stale or already-complete partial can produce 416. Restart cleanly once.
+        if resume_offset > 0 && response.status() == StatusCode::RANGE_NOT_SATISFIABLE {
+            log::warn!("Server rejected the saved download range; restarting from zero");
+            resume_offset = 0;
+            remove_file_if_exists(&partial_path).await?;
+            response = client
+                .get(model_url)
+                .send()
+                .await
+                .map_err(|e| anyhow!("Failed to restart download: {}", e))?;
+        }
+
         log::info!("Received response with status: {}", response.status());
         if !response.status().is_success() {
-            // Remove from active downloads on error
-            let mut active = self.active_downloads.write().await;
-            active.remove(model_name);
             return Err(anyhow!(
                 "Download failed with status: {}",
                 response.status()
             ));
         }
 
-        let total_size = response.content_length().unwrap_or(0);
+        let is_partial_response = response.status() == StatusCode::PARTIAL_CONTENT;
+        if resume_offset > 0 && !is_partial_response {
+            log::warn!("Server ignored the Range request; restarting the local file from zero");
+            resume_offset = 0;
+        }
+
+        let response_size = response.content_length().unwrap_or(0);
+        let total_size = if is_partial_response {
+            response
+                .headers()
+                .get(CONTENT_RANGE)
+                .and_then(|value| value.to_str().ok())
+                .and_then(parse_content_range_total)
+                .unwrap_or_else(|| resume_offset.saturating_add(response_size))
+        } else {
+            response_size
+        };
         log::info!(
             "Response successful, content length: {} bytes ({:.1} MB)",
             total_size,
@@ -1134,11 +1260,19 @@ impl WhisperEngine {
             log::warn!("Content length is 0 or unknown - download may not show accurate progress");
         }
 
-        let mut file = fs::File::create(&file_path)
+        let mut options = fs::OpenOptions::new();
+        options.create(true).write(true);
+        if resume_offset > 0 && is_partial_response {
+            options.append(true);
+        } else {
+            options.truncate(true);
+        }
+        let mut file = options
+            .open(&partial_path)
             .await
-            .map_err(|e| anyhow!("Failed to create file: {}", e))?;
+            .map_err(|e| anyhow!("Failed to open partial download: {}", e))?;
 
-        log::info!("File created successfully at: {}", file_path.display());
+        log::info!("Partial download file ready at: {}", partial_path.display());
 
         // Stream download with real progress reporting
         log::info!("Starting streaming download...");
@@ -1149,26 +1283,22 @@ impl WhisperEngine {
 
         use futures_util::StreamExt;
         let mut stream = response.bytes_stream();
-        let mut downloaded = 0u64;
-        let mut last_progress_report = 0u8;
+        let mut downloaded = resume_offset;
+        let initial_progress = download_progress(downloaded, total_size);
+        let mut last_progress_report = initial_progress;
         let mut last_report_time = std::time::Instant::now();
 
-        // Emit initial 0% progress immediately
-        if let Some(ref callback) = progress_callback {
-            callback(0);
+        if let Some(callback) = progress_callback {
+            callback(initial_progress);
         }
 
         while let Some(chunk_result) = stream.next().await {
             // Check for cancellation before processing chunk
-            {
-                let cancel_flag = self.cancel_download_flag.read().await;
-                if cancel_flag.as_ref() == Some(&model_name.to_string()) {
-                    log::info!("Download cancelled for {}", model_name);
-                    // Remove from active downloads on cancellation
-                    let mut active = self.active_downloads.write().await;
-                    active.remove(model_name);
-                    return Err(anyhow!("Download cancelled by user"));
-                }
+            if self.is_download_cancelled(model_name).await {
+                log::info!("Download cancelled for {}", model_name);
+                drop(file);
+                remove_file_if_exists(&partial_path).await?;
+                return Err(anyhow!("Download cancelled by user"));
             }
 
             let chunk = chunk_result.map_err(|e| anyhow!("Failed to read chunk: {}", e))?;
@@ -1180,11 +1310,7 @@ impl WhisperEngine {
             downloaded += chunk.len() as u64;
 
             // Calculate progress
-            let progress = if total_size > 0 {
-                ((downloaded as f64 / total_size as f64) * 100.0) as u8
-            } else {
-                0
-            };
+            let progress = download_progress(downloaded, total_size);
 
             // Report progress every 1% or every 2 seconds for better UI responsiveness
             let time_since_last_report = last_report_time.elapsed().as_secs();
@@ -1200,15 +1326,11 @@ impl WhisperEngine {
                 );
 
                 // Update progress in model info
-                {
-                    let mut models = self.available_models.write().await;
-                    if let Some(model_info) = models.get_mut(model_name) {
-                        model_info.status = ModelStatus::Downloading { progress };
-                    }
-                }
+                self.update_model_status(model_name, ModelStatus::Downloading { progress })
+                    .await;
 
                 // Call progress callback
-                if let Some(ref callback) = progress_callback {
+                if let Some(callback) = progress_callback {
                     callback(progress);
                 }
 
@@ -1219,40 +1341,57 @@ impl WhisperEngine {
 
         log::info!("Streaming download completed: {} bytes", downloaded);
 
-        // Ensure 100% progress is always reported
-        {
-            let mut models = self.available_models.write().await;
-            if let Some(model_info) = models.get_mut(model_name) {
-                model_info.status = ModelStatus::Downloading { progress: 100 };
-            }
+        if self.is_download_cancelled(model_name).await {
+            drop(file);
+            remove_file_if_exists(&partial_path).await?;
+            return Err(anyhow!("Download cancelled by user"));
         }
 
-        if let Some(ref callback) = progress_callback {
-            callback(100);
+        if total_size > 0 && downloaded != total_size {
+            return Err(anyhow!(
+                "Download ended early: received {} of {} bytes",
+                downloaded,
+                total_size
+            ));
         }
 
         file.flush()
             .await
             .map_err(|e| anyhow!("Failed to flush file: {}", e))?;
+        file.sync_all()
+            .await
+            .map_err(|e| anyhow!("Failed to sync model file: {}", e))?;
+        drop(file);
+
+        if let Err(error) = self.validate_model_file(&partial_path).await {
+            remove_file_if_exists(&partial_path).await?;
+            return Err(error);
+        }
+
+        fs::rename(&partial_path, &file_path)
+            .await
+            .map_err(|e| anyhow!("Failed to finalize model download: {}", e))?;
+
+        self.update_model_status(model_name, ModelStatus::Downloading { progress: 100 })
+            .await;
+        if let Some(callback) = progress_callback {
+            callback(100);
+        }
 
         log::info!("Download completed for model: {}", model_name);
 
-        // Update model status to available
-        {
-            let mut models = self.available_models.write().await;
-            if let Some(model_info) = models.get_mut(model_name) {
-                model_info.status = ModelStatus::Available;
-                model_info.path = file_path.clone();
-            }
-        }
-
-        // Remove from active downloads on completion
-        {
-            let mut active = self.active_downloads.write().await;
-            active.remove(model_name);
-        }
-
         Ok(())
+    }
+
+    async fn is_download_cancelled(&self, model_name: &str) -> bool {
+        self.cancel_download_flag.read().await.as_deref() == Some(model_name)
+    }
+
+    async fn update_model_status(&self, model_name: &str, status: ModelStatus) {
+        let mut models = self.available_models.write().await;
+        if let Some(model_info) = models.get_mut(model_name) {
+            model_info.status = status;
+        }
     }
 
     pub async fn cancel_download(&self, model_name: &str) -> Result<()> {
@@ -1264,36 +1403,140 @@ impl WhisperEngine {
             *cancel_flag = Some(model_name.to_string());
         }
 
-        // Remove from active downloads
-        {
-            let mut active = self.active_downloads.write().await;
-            active.remove(model_name);
-        }
-
         // Update model status to Missing (so it can be retried)
-        {
-            let mut models = self.available_models.write().await;
-            if let Some(model_info) = models.get_mut(model_name) {
-                model_info.status = ModelStatus::Missing;
-            }
-        }
+        self.update_model_status(model_name, ModelStatus::Missing)
+            .await;
 
-        // Clean up partially downloaded files
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await; // Brief delay to let download loop detect cancellation
-
-        let filename = format!("ggml-{}.bin", model_name);
-        let file_path = self.models_dir.join(&filename);
-        if file_path.exists() {
-            if let Err(e) = fs::remove_file(&file_path).await {
-                log::warn!("Failed to clean up cancelled download file: {}", e);
-            } else {
-                log::info!(
-                    "Cleaned up cancelled download file: {}",
-                    file_path.display()
-                );
-            }
-        }
+        // The download loop owns the open file and performs cleanup. Keeping the active
+        // registration until it exits also prevents an immediate retry from racing it.
 
         Ok(())
+    }
+}
+
+fn partial_download_path(file_path: &Path) -> PathBuf {
+    let mut name = file_path.as_os_str().to_os_string();
+    name.push(".part");
+    PathBuf::from(name)
+}
+
+fn parse_content_range_total(value: &str) -> Option<u64> {
+    value.rsplit_once('/')?.1.parse().ok()
+}
+
+fn download_progress(downloaded: u64, total_size: u64) -> u8 {
+    if total_size == 0 {
+        0
+    } else {
+        // Reserve 100% for validation + atomic rename so the UI never announces a
+        // corrupted or not-yet-finalized model as complete.
+        ((downloaded.saturating_mul(100) / total_size).min(99)) as u8
+    }
+}
+
+fn model_file_is_complete(model_name: &str, file_path: &Path) -> bool {
+    let Some((_, _, size_mb, _, _, _)) = WHISPER_MODEL_CATALOG
+        .iter()
+        .find(|(name, _, _, _, _, _)| *name == model_name)
+    else {
+        return true;
+    };
+    let expected_min = ((*size_mb as f64) * 0.9 * 1024.0 * 1024.0) as u64;
+    std::fs::metadata(file_path)
+        .map(|metadata| metadata.len() >= expected_min)
+        .unwrap_or(false)
+}
+
+async fn remove_file_if_exists(path: &Path) -> Result<()> {
+    match fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(anyhow!(
+            "Failed to remove partial download {}: {}",
+            path.display(),
+            error
+        )),
+    }
+}
+
+fn is_cancelled_download(error: &anyhow::Error) -> bool {
+    error.to_string().contains("Download cancelled by user")
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU8, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn failed_download_releases_active_registration_for_retry() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = WhisperEngine::new_with_models_dir(Some(temp.path().to_path_buf())).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let url = format!("http://{address}/model.bin");
+
+        let first = engine.download_model_from_url("test", &url, None).await;
+        assert!(first.is_err());
+        assert!(!engine.active_downloads.read().await.contains("test"));
+
+        let second = engine.download_model_from_url("test", &url, None).await;
+        assert!(second.is_err());
+        assert!(!second
+            .unwrap_err()
+            .to_string()
+            .contains("already in progress"));
+    }
+
+    #[test]
+    fn transfer_progress_reserves_completion_for_finalization() {
+        assert_eq!(download_progress(0, 100), 0);
+        assert_eq!(download_progress(50, 100), 50);
+        assert_eq!(download_progress(100, 100), 99);
+        assert_eq!(download_progress(200, 100), 99);
+        assert_eq!(download_progress(10, 0), 0);
+    }
+
+    #[tokio::test]
+    async fn resumes_partial_download_and_atomically_finalizes_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = WhisperEngine::new_with_models_dir(Some(temp.path().to_path_buf())).unwrap();
+        let final_path = temp.path().join("ggml-test.bin");
+        let partial_path = partial_download_path(&final_path);
+        fs::write(&partial_path, b"ggmlPART").await.unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = vec![0_u8; 2048];
+            let bytes_read = socket.read(&mut request).await.unwrap();
+            let request = String::from_utf8_lossy(&request[..bytes_read]).to_string();
+            let response = b"HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nContent-Range: bytes 8-11/12\r\nConnection: close\r\n\r\ntail";
+            socket.write_all(response).await.unwrap();
+            request
+        });
+
+        let progress = Arc::new(AtomicU8::new(0));
+        let callback_progress = progress.clone();
+        engine
+            .download_model_from_url(
+                "test",
+                &format!("http://{address}/model.bin"),
+                Some(Box::new(move |value| {
+                    callback_progress.store(value, Ordering::SeqCst);
+                })),
+            )
+            .await
+            .unwrap();
+
+        let request = server.await.unwrap();
+        assert!(request.to_ascii_lowercase().contains("range: bytes=8-"));
+        assert_eq!(fs::read(&final_path).await.unwrap(), b"ggmlPARTtail");
+        assert!(!partial_path.exists());
+        assert_eq!(progress.load(Ordering::SeqCst), 100);
     }
 }

@@ -24,6 +24,7 @@ pub enum StreamManagerType {
 pub struct RecordingReceivers {
     pub segmented: mpsc::UnboundedReceiver<AudioChunk>,
     pub streaming: Option<mpsc::UnboundedReceiver<AudioChunk>>,
+    pub system_audio_warning: Option<String>,
 }
 
 /// Simplified recording manager that coordinates all audio components
@@ -145,7 +146,8 @@ impl RecordingManager {
 
         // Start audio streams - they send RAW unmixed chunks to pipeline for mixing
         // Pipeline handles mixing and distribution to both recording and transcription
-        self.stream_manager
+        let system_audio_warning = self
+            .stream_manager
             .start_streams(microphone_device.clone(), system_device.clone(), None)
             .await?;
 
@@ -167,6 +169,7 @@ impl RecordingManager {
         Ok(RecordingReceivers {
             segmented: transcription_receiver,
             streaming: streaming_receiver,
+            system_audio_warning,
         })
     }
 

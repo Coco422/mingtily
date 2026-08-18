@@ -32,7 +32,7 @@ export function PermissionsStep() {
     if (permissions.microphone === 'denied') {
       // Try to open system settings
       try {
-        await invoke('open_system_settings');
+        await invoke('open_system_settings', { preferencePane: 'Privacy_Microphone' });
       } catch {
         alert(t('microphoneSettingsHint'));
       }
@@ -61,35 +61,29 @@ export function PermissionsStep() {
 
   // Request system audio permission
   const handleSystemAudioAction = async () => {
-    if (permissions.systemAudio === 'denied') {
-      // Try to open system settings
-      try {
-        await invoke('open_system_settings');
-      } catch {
-        alert(t('audioCaptureSettingsHint'));
-      }
-      return;
-    }
-
     setIsPending(true);
     try {
-      console.log('[PermissionsStep] Triggering Audio Capture permission...');
-      // Backend creates Core Audio tap, captures audio, and verifies it's not silence
-      // Returns true if permission granted and audio verified, false if denied (silence)
+      console.log('[PermissionsStep] Verifying Audio Capture permission...');
+      // A process tap can be created even when permission is missing. The backend only
+      // returns true after a complete Core Audio stream starts within a bounded timeout.
       const granted = await invoke<boolean>('trigger_system_audio_permission_command');
       console.log('[PermissionsStep] System audio permission result:', granted);
 
       if (granted) {
         setPermissionStatus('systemAudio', 'authorized');
-        console.log('[PermissionsStep] Audio Capture permission verified - audio is not silence');
+        console.log('[PermissionsStep] Audio Capture permission verified');
       } else {
-        // Permission was denied (audio is silence)
         setPermissionStatus('systemAudio', 'denied');
-        console.log('[PermissionsStep] Audio Capture permission denied - audio is silence');
+        await invoke('open_system_settings', { preferencePane: 'Privacy_ScreenCapture' });
       }
     } catch (err) {
       console.error('[PermissionsStep] Failed to request system audio permission:', err);
       setPermissionStatus('systemAudio', 'denied');
+      try {
+        await invoke('open_system_settings', { preferencePane: 'Privacy_ScreenCapture' });
+      } catch {
+        alert(t('audioCaptureSettingsHint'));
+      }
     } finally {
       setIsPending(false);
     }

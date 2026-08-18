@@ -319,10 +319,20 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           setSpeechDetected(true);
         });
 
+        const recordingWarningUnsubscribe = await listen<{ kind?: string }>('recording-warning', (event) => {
+          if (event.payload?.kind === 'systemAudio') {
+            setDeviceError({
+              title: t('systemAudioUnavailable'),
+              message: t('systemAudioUnavailableHint'),
+            });
+          }
+        });
+
         unsubscribes = [
           transcriptErrorUnsubscribe,
           transcriptionErrorUnsubscribe,
-          speechDetectedUnsubscribe
+          speechDetectedUnsubscribe,
+          recordingWarningUnsubscribe,
         ];
         console.log('Recording event listeners set up successfully');
       } catch (error) {
@@ -340,7 +350,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         }
       });
     };
-  }, [onRecordingStop, onTranscriptionError]);
+  }, [onRecordingStop, onTranscriptionError, t]);
 
   return (
     <TooltipProvider>
