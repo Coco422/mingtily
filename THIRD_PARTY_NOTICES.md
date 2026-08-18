@@ -59,7 +59,7 @@ Mingtily downloads the int8 encoder, int8 decoder, and token file only after use
 
 Mingtily treats this as a Beta model because its download and installed sizes are substantially larger than the other local ASR choices. The archive and all installed inference files are verified with built-in SHA256 values.
 
-## FunASR Nano int8
+## Fun-ASR Nano int8
 
 - Base model: [FunAudioLLM/Fun-ASR-Nano-2512](https://huggingface.co/FunAudioLLM/Fun-ASR-Nano-2512)
 - ONNX conversion source: [Wasser1462/FunASR-nano-onnx](https://github.com/Wasser1462/FunASR-nano-onnx)

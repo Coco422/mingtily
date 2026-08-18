@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Summary, SummaryResponse } from '@/types';
+import { Summary, SummaryResponse, TranscriptSegmentData } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -27,27 +27,15 @@ export default function PageContent({
   onAutoGenerateComplete,
   onMeetingUpdated,
   onRefetchTranscripts,
-  // Pagination props for efficient transcript loading
   segments,
-  hasMore,
-  isLoadingMore,
-  totalCount,
-  loadedCount,
-  onLoadMore,
 }: {
   meeting: any;
   summaryData: Summary | null;
   shouldAutoGenerate?: boolean;
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
-  onRefetchTranscripts?: () => Promise<void>;
-  // Pagination props
-  segments?: any[];
-  hasMore?: boolean;
-  isLoadingMore?: boolean;
-  totalCount?: number;
-  loadedCount?: number;
-  onLoadMore?: () => void;
+  onRefetchTranscripts?: () => Promise<boolean>;
+  segments?: TranscriptSegmentData[];
 }) {
   const { t } = useTranslation('settings');
   console.log('📄 PAGE CONTENT: Initializing with data:', {
@@ -186,19 +174,16 @@ export default function PageContent({
           onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
           isRecording={isRecording}
           disableAutoScroll={true}
-          // Pagination props for efficient loading
-          usePagination={true}
           segments={segments}
-          hasMore={hasMore}
-          isLoadingMore={isLoadingMore}
-          totalCount={totalCount}
-          loadedCount={loadedCount}
-          onLoadMore={onLoadMore}
           // Retranscription props
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={async () => {
-            await onRefetchTranscripts?.();
+            const refreshed = await onRefetchTranscripts?.();
+            if (refreshed === false) {
+              toast.error(t('meeting:transcriptRefreshFailed'));
+              return;
+            }
             await refreshSpeakerMap();
           }}
           speakerParticipants={speakerMap.participants}

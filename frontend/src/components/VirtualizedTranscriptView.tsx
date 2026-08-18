@@ -33,18 +33,27 @@ export interface VirtualizedTranscriptViewProps {
     /** Completely disable auto-scroll behavior (for meeting details page) */
     disableAutoScroll?: boolean;
 
-    // Pagination props (infinite scroll)
-    hasMore?: boolean;
-    isLoadingMore?: boolean;
-    totalCount?: number;
-    loadedCount?: number;
-    onLoadMore?: () => void;
     speakerParticipants?: SpeakerParticipant[];
     onSpeakerClick?: (sourceSpeaker: string) => void;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
 const VIRTUALIZATION_THRESHOLD = 10;
+const DEFAULT_TRANSCRIPT_PANEL_WIDTH = 360;
+const TRANSCRIPT_HORIZONTAL_CHROME = 90;
+const TEXT_LINE_HEIGHT = 26;
+
+function estimateTranscriptHeight(segment: TranscriptSegmentData, panelWidth: number): number {
+    const textWidth = Math.max(120, panelWidth - TRANSCRIPT_HORIZONTAL_CHROME);
+    const unitsPerLine = Math.max(8, textWidth / 16);
+    let textUnits = 0;
+    for (const character of segment.text) {
+        textUnits += (character.codePointAt(0) ?? 0) <= 0xff ? 0.55 : 1;
+    }
+    const lineCount = Math.max(1, Math.ceil(textUnits / unitsPerLine));
+    const speakerHeight = segment.speaker ? 20 : 0;
+    return 12 + speakerHeight + lineCount * TEXT_LINE_HEIGHT;
+}
 
 // Helper function to format seconds as recording-relative time [MM:SS]
 function formatRecordingTime(seconds: number | undefined): string {
@@ -160,35 +169,56 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     liveSegment = null,
     showConfidence = true,
     disableAutoScroll = false,
-    hasMore = false,
-    isLoadingMore = false,
-    totalCount = 0,
-    loadedCount = 0,
-    onLoadMore,
     speakerParticipants = [],
     onSpeakerClick,
 }) => {
     const { t } = useTranslation('recording');
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
-    // Ref for infinite scroll trigger element
-    const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
+    const [panelWidth, setPanelWidth] = useState(DEFAULT_TRANSCRIPT_PANEL_WIDTH);
 
     // Force re-render without flushSync (avoids React warning)
     const [, rerender] = useReducer((x: number) => x + 1, 0);
 
-    // Setup virtualizer for efficient rendering of large lists
+    const estimateSize = useCallback(
+        (index: number) => estimateTranscriptHeight(segments[index], panelWidth),
+        [panelWidth, segments],
+    );
+    const getItemKey = useCallback(
+        (index: number) => segments[index]?.id ?? index,
+        [segments],
+    );
+
+    // Setup virtualizer for efficient rendering of large lists.
     const virtualizer = useVirtualizer({
         count: segments.length,
         getScrollElement: () => scrollRef.current,
-        estimateSize: () => 60, // Estimated height per segment
-        overscan: 10, // Render extra items above/below viewport
+        estimateSize,
+        getItemKey,
+        overscan: 10,
         onChange: () => {
             startTransition(() => {
                 rerender();
             });
         },
     });
+
+    useEffect(() => {
+        const element = scrollRef.current;
+        if (!element) return;
+
+        const observer = new ResizeObserver(([entry]) => {
+            if (!entry) return;
+            const nextWidth = Math.round(entry.contentRect.width);
+            setPanelWidth((currentWidth) => currentWidth === nextWidth ? currentWidth : nextWidth);
+        });
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, []);
+
+    useEffect(() => {
+        virtualizer.measure();
+    }, [panelWidth, virtualizer]);
 
     // Custom hook for auto-scrolling (supports both virtualized and non-virtualized)
     useAutoScroll({
@@ -207,62 +237,6 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         isRecording,
         enableStreaming
     );
-
-    // Infinite scroll: IntersectionObserver to trigger loading more
-    useEffect(() => {
-        if (!onLoadMore || !hasMore || isLoadingMore || isRecording || segments.length === 0) {
-            return;
-        }
-
-        const triggerElement = loadMoreTriggerRef.current;
-        if (!triggerElement) return;
-
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
-                    onLoadMore();
-                }
-            },
-            {
-                root: null,
-                rootMargin: '100px',
-                threshold: 0,
-            }
-        );
-
-        observer.observe(triggerElement);
-
-        return () => observer.disconnect();
-    }, [hasMore, isLoadingMore, onLoadMore, isRecording, segments.length]);
-
-    // Scroll-based fallback for fast scrolling
-    useEffect(() => {
-        if (!onLoadMore || !hasMore || isLoadingMore || isRecording) return;
-
-        const scrollElement = scrollRef.current;
-        if (!scrollElement) return;
-
-        let ticking = false;
-
-        const handleScroll = () => {
-            if (ticking || isLoadingMore || !hasMore) return;
-
-            ticking = true;
-            requestAnimationFrame(() => {
-                const { scrollTop, scrollHeight, clientHeight } = scrollElement;
-                const scrollBottom = scrollHeight - scrollTop - clientHeight;
-
-                // Trigger load when within 200px of bottom
-                if (scrollBottom < 200 && hasMore && !isLoadingMore) {
-                    onLoadMore();
-                }
-                ticking = false;
-            });
-        };
-
-        scrollElement.addEventListener('scroll', handleScroll, { passive: true });
-        return () => scrollElement.removeEventListener('scroll', handleScroll);
-    }, [onLoadMore, hasMore, isLoadingMore, isRecording]);
 
     // Use simple rendering for small lists, virtualization for large lists
     const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
@@ -351,22 +325,6 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                         })}
                     </div>
 
-                    {/* Infinite scroll trigger and loading indicator */}
-                    {(hasMore || isLoadingMore) && !isRecording && segments.length > 0 && (
-                        <div ref={loadMoreTriggerRef} className="flex justify-center items-center py-4 mt-2">
-                            {isLoadingMore ? (
-                                <div className="flex items-center gap-2 text-gray-500">
-                                    <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-                                    <span className="text-sm">{t('loadingMore')}</span>
-                                </div>
-                            ) : hasMore && totalCount > 0 ? (
-                                <span className="text-sm text-gray-400">
-                                    {t('showingSegments', { loaded: loadedCount, total: totalCount })}
-                                </span>
-                            ) : null}
-                        </div>
-                    )}
-
                     {/* Listening indicator when recording */}
                     {!isStopping && isRecording && !isPaused && !isProcessing && segments.length > 0 && (
                         <motion.div
@@ -411,22 +369,6 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             );
                         })}
                     </div>
-
-                    {/* Infinite scroll trigger (for small lists that grow) */}
-                    {(hasMore || isLoadingMore) && !isRecording && segments.length > 0 && (
-                        <div ref={loadMoreTriggerRef} className="flex justify-center items-center py-4 mt-2">
-                            {isLoadingMore ? (
-                                <div className="flex items-center gap-2 text-gray-500">
-                                    <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-                                    <span className="text-sm">{t('loadingMore')}</span>
-                                </div>
-                            ) : hasMore && totalCount > 0 ? (
-                                <span className="text-sm text-gray-400">
-                                    {t('showingSegments', { loaded: loadedCount, total: totalCount })}
-                                </span>
-                            ) : null}
-                        </div>
-                    )}
 
                     {/* Listening indicator when recording */}
                     {!isStopping && isRecording && !isPaused && !isProcessing && segments.length > 0 && (

@@ -696,7 +696,7 @@ fn status_for_spec<R: Runtime>(
             true,
         ),
         FUNASR_NANO_MODEL_ID => (
-            "FunASR Nano int8",
+            "Fun-ASR Nano int8",
             vec![
                 "zh", "yue", "en", "ja", "ko", "vi", "id", "th", "ms", "tl", "ar", "hi",
             ],
@@ -818,7 +818,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires the audited ModelScope FunASR Nano archive"]
+    #[ignore = "requires the audited ModelScope Fun-ASR Nano archive"]
     async fn modelscope_funasr_archive_imports_and_validates() {
         let archive = std::env::var("MINGTILY_FUNASR_ARCHIVE")
             .expect("set MINGTILY_FUNASR_ARCHIVE to funasr-nano-int8.zip");

@@ -8,8 +8,6 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
-
 // Generic structure for OpenAI-compatible API chat messages
 #[derive(Debug, Serialize)]
 pub struct ChatMessage {
@@ -129,6 +127,7 @@ pub async fn generate_summary(
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    request_timeout: Duration,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String, String> {
@@ -144,6 +143,7 @@ pub async fn generate_summary(
         max_tokens,
         temperature,
         top_p,
+        request_timeout,
         app_data_dir,
         cancellation_token,
         None,
@@ -164,6 +164,7 @@ pub async fn generate_summary_with_callback(
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    request_timeout: Duration,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
     stream_callback: Option<&SummaryTextStreamCallback>,
@@ -187,6 +188,7 @@ pub async fn generate_summary_with_callback(
             user_prompt,
             cancellation_token,
             stream_callback,
+            request_timeout,
         )
         .await
         .map_err(|e| e.to_string());
@@ -314,7 +316,7 @@ pub async fn generate_summary_with_callback(
         .post(api_url)
         .headers(headers)
         .json(&request_body)
-        .timeout(REQUEST_TIMEOUT_DURATION)
+        .timeout(request_timeout)
         .send();
 
     // Use tokio::select to race between cancellation and request completion
@@ -325,7 +327,7 @@ pub async fn generate_summary_with_callback(
                     if e.is_timeout() {
                         format!(
                             "LLM request timed out after {} seconds",
-                            REQUEST_TIMEOUT_DURATION.as_secs()
+                            request_timeout.as_secs()
                         )
                     } else {
                         format!("Failed to send request to LLM: {}", e)
@@ -341,7 +343,7 @@ pub async fn generate_summary_with_callback(
             if e.is_timeout() {
                 format!(
                     "LLM request timed out after {} seconds",
-                    REQUEST_TIMEOUT_DURATION.as_secs()
+                    request_timeout.as_secs()
                 )
             } else {
                 format!("Failed to send request to LLM: {}", e)

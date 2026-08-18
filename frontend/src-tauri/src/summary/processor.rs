@@ -8,6 +8,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
 use std::path::PathBuf;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
@@ -553,6 +554,7 @@ pub async fn generate_meeting_summary(
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    request_timeout: Duration,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
     summary_language: Option<&str>,
@@ -683,6 +685,7 @@ pub async fn generate_meeting_summary(
                     max_tokens,
                     temperature,
                     top_p,
+                    request_timeout,
                     app_data_dir,
                     cancellation_token,
                 )
@@ -777,6 +780,7 @@ pub async fn generate_meeting_summary(
                                     max_tokens,
                                     temperature,
                                     top_p,
+                                    request_timeout,
                                     app_data_dir,
                                     cancellation_token,
                                 )
@@ -810,6 +814,7 @@ pub async fn generate_meeting_summary(
                         max_tokens,
                         temperature,
                         top_p,
+                        request_timeout,
                         app_data_dir,
                         cancellation_token,
                     )
@@ -874,6 +879,7 @@ pub async fn generate_meeting_summary(
                             max_tokens,
                             temperature,
                             top_p,
+                            request_timeout,
                             app_data_dir,
                             cancellation_token,
                         )
@@ -919,6 +925,7 @@ pub async fn generate_meeting_summary(
             max_tokens,
             temperature,
             top_p,
+            request_timeout,
             app_data_dir,
             cancellation_token,
             final_report_stream.as_ref(),
@@ -951,6 +958,7 @@ pub async fn generate_meeting_summary(
                 max_tokens,
                 temperature,
                 top_p,
+                request_timeout,
                 app_data_dir,
                 cancellation_token,
                 stream_callback,
@@ -985,6 +993,7 @@ pub async fn generate_meeting_summary(
                     max_tokens,
                     temperature,
                     top_p,
+                    request_timeout,
                     app_data_dir,
                     cancellation_token,
                     stream_callback,
@@ -1015,6 +1024,7 @@ async fn run_markdown_transform(
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    request_timeout: Duration,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
     stream_callback: Option<&SummaryStreamCallback>,
@@ -1038,6 +1048,7 @@ async fn run_markdown_transform(
         max_tokens,
         temperature,
         top_p,
+        request_timeout,
         app_data_dir,
         cancellation_token,
         sanitized_callback.as_ref(),
@@ -1061,6 +1072,7 @@ async fn translate_markdown(
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    request_timeout: Duration,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
     stream_callback: Option<&SummaryStreamCallback>,
@@ -1085,6 +1097,7 @@ async fn translate_markdown(
         max_tokens,
         temperature,
         top_p,
+        request_timeout,
         app_data_dir,
         cancellation_token,
         stream_callback,
@@ -1104,6 +1117,7 @@ async fn normalize_markdown_to_english(
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    request_timeout: Duration,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
     stream_callback: Option<&SummaryStreamCallback>,
@@ -1127,6 +1141,7 @@ async fn normalize_markdown_to_english(
         max_tokens,
         temperature,
         top_p,
+        request_timeout,
         app_data_dir,
         cancellation_token,
         stream_callback,

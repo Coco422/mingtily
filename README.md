@@ -14,19 +14,21 @@
 
 Mingtily 是一款本地优先的桌面会议助手，面向希望将录音、转写、说话人标签和本地模型保留在自己设备上的个人、开发者与小团队。需要更高总结质量或性能时，也可以由用户主动配置并调用外部 LLM Provider。
 
-当前版本：**[0.7.6](https://github.com/Coco422/mingtily/releases/tag/v0.7.6)**。带版本标签的 GitHub Actions 会发布 macOS Apple Silicon 与 Windows x64 开发版。安装包暂未进行操作系统级签名，但 Tauri 更新包由 Mingtily 完整性签名。Linux 目前作为无签名手动开发构建目标。
+当前版本：**[0.7.7](https://github.com/Coco422/mingtily/releases/tag/v0.7.7)**。带版本标签的 GitHub Actions 会发布 macOS Apple Silicon 与 Windows x64 开发版。安装包暂未进行操作系统级签名，但 Tauri 更新包由 Mingtily 完整性签名。Linux 目前作为无签名手动开发构建目标。
 
 ### 主要能力
 
 - 在同一会议时间线中录制麦克风与系统音频。
 - 导入常见音频格式，包括 M4A/MP4 容器中的 Opus 音频。
-- 使用 Whisper、NVIDIA Parakeet、SenseVoice、离线或流式 Paraformer、Qwen3-ASR 与 FunASR Nano 在本地转写。
+- 使用 Whisper、NVIDIA Parakeet、SenseVoice、离线或流式 Paraformer、Qwen3-ASR 与 Fun-ASR Nano 在本地转写。
 - 使用 Sherpa ONNX、Pyannote segmentation 与 3D-Speaker ERes2Net 添加说话人标签；说话人分离不可用时，录音和转写仍会继续。
 - 在单场会议内命名、合并或拆分检测到的说话人标签；显示、颜色、复制文本和后续摘要输入统一使用整理后的姓名。
 - 使用全局自定义术语、精确纠错和可选的高级 FST 兼容规则改善最终转写；临时流式文本保持原样。
 - 使用可选的内置模型、Ollama 或用户配置的外部 Provider 生成 AI 总结。
 - 摘要在应用级后台任务中继续生成；离开会议详情再返回时会恢复进度、结果或持久错误，而不是显示空白页面。
 - 流式展示 AI 总结；首个 token 前显示真实处理阶段和累计耗时，支持的 reasoning 标签会在生成时显示，完成后折叠且不会写入最终摘要。
+- 可按长会议和 Provider 性能调整单次模型调用超时；外部 API、Ollama 与内置 AI 使用同一设置。
+- 已结束会议一次读取完整转写快照，滚动条从首次展示起代表整场会议；虚拟列表仍只渲染视口附近内容。
 - 展示录音时长和停止后的分阶段处理进度，避免长时间本地处理没有反馈。
 - 使用 `zh-CN` 或 `en-US` 界面；界面语言、转写语言和总结语言相互独立。
 - 在录音被意外中断后恢复音频检查点和转写状态。
@@ -52,7 +54,7 @@ Mingtily 不包含遥测客户端、使用分析、广告标识符或 Mingtily �
 
 | 能力 | 当前选择 | 说明 |
 |---|---|---|
-| 语音识别 | Whisper、Parakeet TDT 0.6B v2/v3、SenseVoice Small int8、Paraformer Small int8、Paraformer Streaming zh/en int8、Qwen3-ASR 0.6B int8、FunASR Nano int8 | SenseVoice 是推荐的中文选择，支持强制普通话或粤语。Parakeet 仅支持英文。Beta 实时增强使用流式模型显示临时文本，再由独立最终模型保存正式转写。 |
+| 语音识别 | Whisper、Parakeet TDT 0.6B v2/v3、SenseVoice Small int8、Paraformer Small int8、Paraformer Streaming zh/en int8、Qwen3-ASR 0.6B int8、Fun-ASR Nano int8 | SenseVoice 是推荐的中文选择，支持强制普通话或粤语。Parakeet 仅支持英文。Beta 实时增强使用流式模型显示临时文本，再由独立最终模型保存正式转写。 |
 | 标点恢复 | Sherpa ONNX CT-Transformer zh/en int8 | 可选的本地后处理，仅作用于 SenseVoice 最终片段；下载约 62 MiB，不可用时保留原始转写。 |
 | 说话人分离 | Sherpa ONNX `sherpa-v1` | Pyannote segmentation 3.0 int8 与 3D-Speaker ERes2Net，下载约 47 MB。 |
 | 内置总结 | Qwen 3.5 2B/4B、Gemma 3 1B/4B | 可选 GGUF 下载；本地推理由随应用提供的 `llama-helper` sidecar 执行。 |
@@ -80,12 +82,12 @@ Apple notarization、Apple Developer ID 与生产级 Windows 安装包签名暂�
 1. 打开 **设置 → 模型**，下载一个本地语音识别模型。
 2. 打开 **设置 → 服务**，选择已安装的转写 Provider 与模型。
 3. 使用 SenseVoice 时，可以下载可选的标点恢复模型来改善中英文最终转写。
-4. 在 **设置 → 服务 → 自定义术语** 中维护姓名与领域术语，并按需添加“识别成 → 替换为”的精确纠错。Qwen3-ASR、FunASR Nano 与 Whisper 还会将术语作为模型提示；其他模型仍会对最终保存文本应用精确纠错。
+4. 在 **设置 → 服务 → 自定义术语** 中维护姓名与领域术语，并按需添加“识别成 → 替换为”的精确纠错。Qwen3-ASR、Fun-ASR Nano 与 Whisper 还会将术语作为模型提示；其他模型仍会对最终保存文本应用精确纠错。
 5. Sherpa ONNX 用户如有兼容需要，可在折叠的高级选项中选择一个预生成 FST；应用不会生成 FST、下载 Pynini 或把多个规则传入原生层。
 6. 如需连续修订的实时文字，可下载 **Paraformer Streaming zh/en int8**，在 **设置 → 服务** 中选择 **Beta · 实时增强**，并分别指定流式模型与最终模型。
 7. 可选下载并启用说话人分离模型；已知参会人数时，可以在 **设置 → 服务** 中指定 1–10 人。
 8. 开始录音，或启用 Beta 文件导入/重新转写。会议完成后可在详情页管理说话人，将多个检测标签合并为同一人物。
-9. 仅在需要总结时配置 Built-in AI、Ollama 或外部 Provider。后台总结在页面切换后仍会继续，侧边栏会显示运行和未读终态。
+9. 仅在需要总结时配置 Built-in AI、Ollama 或外部 Provider。后台总结在页面切换后仍会继续，侧边栏会显示运行和未读终态；长上下文 Provider 可在 AI 总结设置中延长单次调用超时。
 10. 在 **设置 → 常规** 中手动检查更新，或明确开启自动检查。
 
 会议级说话人映射不会自动改写旧摘要；需要时请重新生成摘要。模型下载也不会静默改变当前 Provider 或模型。
@@ -127,7 +129,7 @@ pnpm tauri:build
 ### 已知限制
 
 - 一台 Windows x64 测试设备上，SenseVoice 安装完成后应用曾在刷新模型状态时退出。重启后模型仍可使用，相关 Windows 模块仍在排查。
-- Parakeet 仅支持英文。FunASR Nano 和两种 Paraformer 自动检测语言；SenseVoice、Qwen3-ASR 与 Whisper 接受各自支持的固定语言提示。
+- Parakeet 仅支持英文。Fun-ASR Nano 和两种 Paraformer 自动检测语言；SenseVoice、Qwen3-ASR 与 Whisper 接受各自支持的固定语言提示。
 - Beta 实时增强中的 Paraformer Streaming 临时文本会在说话时持续修订，且不会写入 SQLite、IndexedDB 或 transcript JSON。
 - 说话人标签在一个 VAD 片段结束后出现，并非 token 级标签；重叠语音只分配给占主导的说话人，不会重复转写。
 - 自动说话人检测属于启发式方法。已知会议人数时，建议指定 1–10 人来限制实时身份并辅助最终校正。
@@ -151,19 +153,21 @@ Mingtily 使用 MIT License。原始 Meetily 版权声明保留在 [LICENSE.md](
 
 Mingtily is a local-first desktop meeting assistant for individuals, developers, and small teams that want recordings, transcripts, speaker labels, and local models to stay on their own devices. When better summary quality or performance is needed, users can explicitly configure and invoke an external LLM Provider.
 
-Current version: **[0.7.6](https://github.com/Coco422/mingtily/releases/tag/v0.7.6)**. Tagged GitHub Actions releases target macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while Tauri updater payloads are integrity-signed by Mingtily. Linux is currently available as an unsigned manual development-build target.
+Current version: **[0.7.7](https://github.com/Coco422/mingtily/releases/tag/v0.7.7)**. Tagged GitHub Actions releases target macOS Apple Silicon and Windows x64. Installers remain unsigned at the operating-system level, while Tauri updater payloads are integrity-signed by Mingtily. Linux is currently available as an unsigned manual development-build target.
 
 ### Highlights
 
 - Record microphone and system audio in one meeting timeline.
 - Import common audio formats, including Opus audio inside M4A/MP4 containers.
-- Transcribe locally with Whisper, NVIDIA Parakeet, SenseVoice, offline or streaming Paraformer, Qwen3-ASR, and FunASR Nano.
+- Transcribe locally with Whisper, NVIDIA Parakeet, SenseVoice, offline or streaming Paraformer, Qwen3-ASR, and Fun-ASR Nano.
 - Add speaker labels with Sherpa ONNX, Pyannote segmentation, and 3D-Speaker ERes2Net. Recording and transcription continue if diarization is unavailable.
 - Name, merge, or split detected speaker labels within a meeting. Display, color, copied text, and future summary input all use the resolved participant names.
 - Improve finalized transcripts with global custom terminology, exact replacements, and optional advanced FST compatibility rules. Provisional streaming text remains unchanged.
 - Generate summaries with an optional built-in model, Ollama, or a user-configured external Provider.
 - Keep summaries running as application-level background jobs. Leaving and reopening meeting details restores progress, results, or persistent errors instead of showing a blank page.
 - Stream AI summary output as it arrives; before the first token, show the real processing stage and elapsed time. Supported reasoning tags are shown while active and folded after completion without entering the saved summary.
+- Adjust the per-model-call summary timeout for long meetings and slower Providers; the same setting covers external APIs, Ollama, and Built-in AI.
+- Load a complete transcript snapshot for finished meetings so the scrollbar represents the full timeline immediately, while virtualization keeps only nearby rows mounted.
 - Show recording duration and staged stop/finalization progress instead of leaving long local processing unexplained.
 - Use the interface in `zh-CN` or `en-US`; UI, transcription, and summary languages are configured independently.
 - Recover audio checkpoints and transcript state after an interrupted recording.
@@ -189,7 +193,7 @@ Large model weights are not bundled with the application. Models are downloaded 
 
 | Capability | Current choices | Notes |
 |---|---|---|
-| Speech recognition | Whisper, Parakeet TDT 0.6B v2/v3, SenseVoice Small int8, Paraformer Small int8, Paraformer Streaming zh/en int8, Qwen3-ASR 0.6B int8, FunASR Nano int8 | SenseVoice is the recommended Chinese choice and supports forced Mandarin or Cantonese. Parakeet is English-only. Offline Paraformer is lightweight; Beta live enhancement uses a streaming model for provisional text and a separate finalized model for saved transcripts. Qwen3-ASR and FunASR Nano are larger multilingual Beta options. |
+| Speech recognition | Whisper, Parakeet TDT 0.6B v2/v3, SenseVoice Small int8, Paraformer Small int8, Paraformer Streaming zh/en int8, Qwen3-ASR 0.6B int8, Fun-ASR Nano int8 | SenseVoice is the recommended Chinese choice and supports forced Mandarin or Cantonese. Parakeet is English-only. Offline Paraformer is lightweight; Beta live enhancement uses a streaming model for provisional text and a separate finalized model for saved transcripts. Qwen3-ASR and Fun-ASR Nano are larger multilingual Beta options. |
 | Punctuation restoration | Sherpa ONNX CT-Transformer zh/en int8 | Optional local post-processing for final SenseVoice segments; approximately 62 MiB to download and fail-open when unavailable. |
 | Speaker diarization | Sherpa ONNX `sherpa-v1` | Pyannote segmentation 3.0 int8 plus 3D-Speaker ERes2Net; approximately 47 MB to download. |
 | Built-in summaries | Qwen 3.5 2B/4B, Gemma 3 1B/4B | Optional GGUF downloads; local inference uses the bundled `llama-helper` sidecar. |
@@ -215,12 +219,12 @@ Code signing, Apple notarization, and production installer signing are deferred 
 1. Open **Settings → Models** and download a local speech-recognition model.
 2. Open **Settings → Services** and select the installed transcription Provider and model.
 3. When using SenseVoice, optionally download punctuation restoration for more consistent Chinese and English finalized transcripts.
-4. In **Settings → Services → Custom terminology**, add names and domain terms plus optional “recognized as → replace with” exact corrections. Qwen3-ASR, FunASR Nano, and Whisper also receive terms as model prompts; other models still apply exact corrections to finalized saved text.
+4. In **Settings → Services → Custom terminology**, add names and domain terms plus optional “recognized as → replace with” exact corrections. Qwen3-ASR, Fun-ASR Nano, and Whisper also receive terms as model prompts; other models still apply exact corrections to finalized saved text.
 5. Sherpa ONNX users that need compatibility rules can select one pre-generated FST in the collapsed advanced options. Mingtily does not generate FST files, download Pynini, or pass multiple rules to the native layer.
 6. For continuously revised live text, download **Paraformer Streaming zh/en int8**, choose **Beta · live enhancement** in **Settings → Services**, then select the streaming and finalized models separately.
 7. Optionally download and enable speaker diarization. If the expected meeting size is known, specify 1–10 speakers in **Settings → Services**.
 8. Start a recording or enable Beta import/retranscription. After a meeting finishes, use the meeting-details speaker manager to merge multiple detected labels into one participant.
-9. Configure Built-in AI, Ollama, or an external Provider only when summaries are needed. Background summaries continue across navigation, while the sidebar shows running and unread terminal states.
+9. Configure Built-in AI, Ollama, or an external Provider only when summaries are needed. Background summaries continue across navigation, while the sidebar shows running and unread terminal states; extend the per-call timeout in AI summary settings for slow long-context Providers.
 10. In **Settings → General**, manually check for releases or explicitly enable automatic checks.
 
 Meeting-level speaker mappings do not rewrite old summaries automatically; regenerate the summary when needed. Model downloads also never silently change the active Provider or model.
@@ -305,7 +309,7 @@ See [AGENTS.md](AGENTS.md) for durable engineering boundaries and [CONTRIBUTING.
 ### Known limitations
 
 - On one Windows x64 test device, SenseVoice installation completed but the app exited during the post-install model-status refresh. Restarting preserved the installed model; the faulting Windows module is still under investigation.
-- Parakeet is English-only and does not support Chinese. FunASR Nano and both Paraformer choices use automatic language detection. SenseVoice, Qwen3-ASR, and Whisper accept supported fixed-language hints.
+- Parakeet is English-only and does not support Chinese. Fun-ASR Nano and both Paraformer choices use automatic language detection. SenseVoice, Qwen3-ASR, and Whisper accept supported fixed-language hints.
 - In Beta live enhancement, Paraformer Streaming shows a provisional hypothesis that can change while the user speaks. A separate finalized model transcribes completed VAD segments; provisional text is never persisted.
 - Live speaker labels appear after a VAD segment finishes; they are not token-level labels.
 - Overlapping speech is assigned to the dominant speaker and is not transcribed twice.

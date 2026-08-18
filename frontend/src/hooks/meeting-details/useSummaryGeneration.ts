@@ -210,25 +210,8 @@ export function useSummaryGeneration({
     try {
       console.log('📊 Fetching all transcripts for meeting:', meetingId);
 
-      // First, get total count by fetching first page
-      const firstPage = await invokeTauri('api_get_meeting_transcripts', {
-        meetingId,
-        limit: 1,
-        offset: 0,
-      }) as { transcripts: Transcript[]; total_count: number; has_more: boolean };
-
-      const totalCount = firstPage.total_count;
-      console.log(`📊 Total transcripts in database: ${totalCount}`);
-
-      if (totalCount === 0) {
-        return [];
-      }
-
-      // Fetch all transcripts in one call
       const allData = await invokeTauri('api_get_meeting_transcripts', {
         meetingId,
-        limit: totalCount,
-        offset: 0,
       }) as { transcripts: Transcript[]; total_count: number; has_more: boolean };
 
       console.log(`✅ Fetched ${allData.transcripts.length} transcripts from database`);

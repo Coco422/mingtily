@@ -75,11 +75,14 @@ impl MeetingsRepository {
 
         if let Some(meeting) = meeting {
             // Get all transcripts for this meeting
-            let transcripts =
-                sqlx::query_as::<_, Transcript>("SELECT * FROM transcripts WHERE meeting_id = ?")
-                    .bind(meeting_id)
-                    .fetch_all(&mut *transaction)
-                    .await?;
+            let transcripts = sqlx::query_as::<_, Transcript>(
+                "SELECT * FROM transcripts
+                 WHERE meeting_id = ?
+                 ORDER BY audio_start_time ASC, id ASC",
+            )
+            .bind(meeting_id)
+            .fetch_all(&mut *transaction)
+            .await?;
 
             transaction.commit().await?;
 
@@ -131,7 +134,28 @@ impl MeetingsRepository {
         Ok(meeting)
     }
 
-    /// Get meeting transcripts with pagination support
+    /// Get every transcript for a meeting in stable timeline order.
+    pub async fn get_meeting_transcripts(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Vec<Transcript>, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol(
+                "meeting_id cannot be empty".to_string(),
+            ));
+        }
+
+        sqlx::query_as::<_, Transcript>(
+            "SELECT * FROM transcripts
+             WHERE meeting_id = ?
+             ORDER BY audio_start_time ASC, id ASC",
+        )
+        .bind(meeting_id)
+        .fetch_all(pool)
+        .await
+    }
+
+    /// Get meeting transcripts with pagination support.
     pub async fn get_meeting_transcripts_paginated(
         pool: &SqlitePool,
         meeting_id: &str,
@@ -150,11 +174,11 @@ impl MeetingsRepository {
             .fetch_one(pool)
             .await?;
 
-        // Get paginated transcripts ordered by audio_start_time
+        // Get paginated transcripts in the same stable order as the full snapshot.
         let transcripts = sqlx::query_as::<_, Transcript>(
             "SELECT * FROM transcripts
              WHERE meeting_id = ?
-             ORDER BY audio_start_time ASC
+             ORDER BY audio_start_time ASC, id ASC
              LIMIT ? OFFSET ?",
         )
         .bind(meeting_id)
@@ -228,6 +252,99 @@ impl MeetingsRepository {
 
         transaction.commit().await?;
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE transcripts (
+                id TEXT PRIMARY KEY,
+                meeting_id TEXT NOT NULL,
+                transcript TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                summary TEXT,
+                action_items TEXT,
+                key_points TEXT,
+                audio_start_time REAL,
+                audio_end_time REAL,
+                duration REAL,
+                speaker TEXT
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn insert_transcripts(pool: &SqlitePool, meeting_id: &str, count: usize) {
+        let mut transaction = pool.begin().await.unwrap();
+        for index in (0..count).rev() {
+            sqlx::query(
+                "INSERT INTO transcripts
+                 (id, meeting_id, transcript, timestamp, audio_start_time)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(format!("{meeting_id}-{index:04}"))
+            .bind(meeting_id)
+            .bind(format!("segment {index}"))
+            .bind("12:00:00")
+            .bind((index / 2) as f64)
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        }
+        transaction.commit().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn full_snapshot_is_not_truncated_and_has_stable_order() {
+        let pool = test_pool().await;
+
+        for count in [0_usize, 1, 100, 101, 1000, 5000, 10_000] {
+            let meeting_id = format!("meeting-{count}");
+            insert_transcripts(&pool, &meeting_id, count).await;
+
+            let transcripts = MeetingsRepository::get_meeting_transcripts(&pool, &meeting_id)
+                .await
+                .unwrap();
+            assert_eq!(transcripts.len(), count);
+            assert!(transcripts.windows(2).all(|pair| {
+                pair[0].audio_start_time < pair[1].audio_start_time
+                    || (pair[0].audio_start_time == pair[1].audio_start_time
+                        && pair[0].id < pair[1].id)
+            }));
+        }
+    }
+
+    #[tokio::test]
+    async fn paginated_snapshot_keeps_total_and_stable_order() {
+        let pool = test_pool().await;
+        insert_transcripts(&pool, "meeting-page", 101).await;
+
+        let (transcripts, total) =
+            MeetingsRepository::get_meeting_transcripts_paginated(&pool, "meeting-page", 10, 95)
+                .await
+                .unwrap();
+
+        assert_eq!(total, 101);
+        assert_eq!(transcripts.len(), 6);
+        assert!(transcripts.windows(2).all(|pair| {
+            pair[0].audio_start_time < pair[1].audio_start_time
+                || (pair[0].audio_start_time == pair[1].audio_start_time && pair[0].id < pair[1].id)
+        }));
     }
 }
 

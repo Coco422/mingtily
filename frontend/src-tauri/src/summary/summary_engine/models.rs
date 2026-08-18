@@ -345,7 +345,8 @@ pub const TOKENIZATION_TIMEOUT_SECS: u64 = 120;
 /// Idle timeout for sidecar (seconds) - can be overridden via LLAMA_IDLE_TIMEOUT env var
 pub const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300; // 5 minutes
 
-/// Generation timeout (how long to wait for a response)
+/// Fallback generation timeout for direct built-in engine callers. Meeting
+/// summaries use the persisted summary runtime setting instead.
 pub const GENERATION_TIMEOUT_SECS: u64 = 900; // 15 minutes
 
 #[cfg(test)]

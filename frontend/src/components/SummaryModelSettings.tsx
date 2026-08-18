@@ -6,12 +6,18 @@ import { toast } from 'sonner';
 import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal';
 import { SummaryLanguageSettings } from '@/components/SummaryLanguageSettings';
 import { Switch } from './ui/switch';
+import { Input } from './ui/input';
+import { Button } from './ui/button';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTranslation } from 'react-i18next';
 
 interface SummaryModelSettingsProps {
   refetchTrigger?: number; // Change this to trigger refetch
   showAssetManagement?: boolean;
+}
+
+interface SummaryRuntimeConfig {
+  requestTimeoutSecs: number;
 }
 
 export function SummaryModelSettings({ refetchTrigger, showAssetManagement = true }: SummaryModelSettingsProps) {
@@ -25,6 +31,19 @@ export function SummaryModelSettings({ refetchTrigger, showAssetManagement = tru
   });
 
   const { isAutoSummary, toggleIsAutoSummary } = useConfig();
+  const [requestTimeoutMinutes, setRequestTimeoutMinutes] = useState('30');
+  const [isTimeoutSaving, setIsTimeoutSaving] = useState(false);
+
+  useEffect(() => {
+    invoke<SummaryRuntimeConfig>('api_get_summary_runtime_config')
+      .then((config) => {
+        setRequestTimeoutMinutes(String(config.requestTimeoutSecs / 60));
+      })
+      .catch((error) => {
+        console.error('Failed to load summary runtime config:', error);
+        toast.error(t('services.summary.requestTimeoutLoadFailed'));
+      });
+  }, [t]);
 
   // Reusable fetch function
   const fetchModelConfig = useCallback(async () => {
@@ -125,6 +144,32 @@ export function SummaryModelSettings({ refetchTrigger, showAssetManagement = tru
     }
   };
 
+  const timeoutMinutes = Number(requestTimeoutMinutes);
+  const timeoutIsValid = Number.isInteger(timeoutMinutes)
+    && timeoutMinutes >= 5
+    && timeoutMinutes <= 1440;
+
+  const handleSaveRequestTimeout = async () => {
+    if (!timeoutIsValid) {
+      toast.error(t('services.summary.requestTimeoutInvalid'));
+      return;
+    }
+
+    setIsTimeoutSaving(true);
+    try {
+      const saved = await invoke<SummaryRuntimeConfig>('api_save_summary_runtime_config', {
+        requestTimeoutSecs: timeoutMinutes * 60,
+      });
+      setRequestTimeoutMinutes(String(saved.requestTimeoutSecs / 60));
+      toast.success(t('services.summary.requestTimeoutSaved'));
+    } catch (error) {
+      console.error('Failed to save summary runtime config:', error);
+      toast.error(t('services.summary.requestTimeoutSaveFailed'));
+    } finally {
+      setIsTimeoutSaving(false);
+    }
+  };
+
   return (
     <div className='flex flex-col gap-4'>
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
@@ -152,6 +197,48 @@ export function SummaryModelSettings({ refetchTrigger, showAssetManagement = tru
           skipInitialFetch={true}
           showAssetManagement={showAssetManagement}
         />
+
+        <div className="mt-6 border-t border-gray-200 pt-6">
+          <div className="max-w-2xl">
+            <label htmlFor="summary-request-timeout" className="text-sm font-medium text-gray-900">
+              {t('services.summary.requestTimeout')}
+            </label>
+            <p className="mt-1 text-sm text-gray-600">
+              {t('services.summary.requestTimeoutDescription')}
+            </p>
+            <div className="mt-3 flex max-w-md items-center gap-3">
+              <Input
+                id="summary-request-timeout"
+                type="number"
+                min={5}
+                max={1440}
+                step={5}
+                value={requestTimeoutMinutes}
+                onChange={(event) => setRequestTimeoutMinutes(event.target.value)}
+                aria-invalid={!timeoutIsValid}
+                className="w-32"
+              />
+              <span className="text-sm text-gray-600">
+                {t('services.summary.requestTimeoutMinutes')}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSaveRequestTimeout}
+                disabled={!timeoutIsValid || isTimeoutSaving}
+              >
+                {isTimeoutSaving
+                  ? t('services.summary.requestTimeoutSaving')
+                  : t('services.summary.requestTimeoutSave')}
+              </Button>
+            </div>
+            {!timeoutIsValid && (
+              <p className="mt-2 text-sm text-red-600">
+                {t('services.summary.requestTimeoutInvalid')}
+              </p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -276,9 +276,34 @@ mod tests {
         .await
         .unwrap()
         .get(0);
+        let transcript_timeline_index: String = sqlx::query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_transcripts_meeting_timeline'",
+        )
+        .fetch_one(manager.pool())
+        .await
+        .unwrap()
+        .get(0);
+        let transcript_query_plan = sqlx::query(
+            "EXPLAIN QUERY PLAN
+             SELECT * FROM transcripts
+             WHERE meeting_id = ?
+             ORDER BY audio_start_time ASC, id ASC",
+        )
+        .bind("meeting-test")
+        .fetch_all(manager.pool())
+        .await
+        .unwrap();
 
-        assert_eq!(latest_version, 20260817000000);
+        assert_eq!(latest_version, 20260818000000);
         assert_eq!(speaker_map_table, "meeting_speaker_maps");
+        assert_eq!(
+            transcript_timeline_index,
+            "idx_transcripts_meeting_timeline"
+        );
+        assert!(transcript_query_plan.iter().any(|row| {
+            row.get::<String, _>("detail")
+                .contains("idx_transcripts_meeting_timeline")
+        }));
         manager.cleanup().await.unwrap();
     }
 

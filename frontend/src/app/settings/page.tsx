@@ -62,7 +62,7 @@ export default function SettingsPage() {
         <div className="max-w-6xl mx-auto p-8 pt-6">
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto w-full justify-start overflow-x-auto overflow-y-hidden">
+            <TabsList className="sticky top-0 z-30 h-auto w-full justify-start overflow-x-auto overflow-y-hidden rounded-none border-b border-gray-200 bg-gray-50/95 p-0 shadow-[0_1px_0_rgba(15,23,42,0.04)] backdrop-blur supports-[backdrop-filter]:bg-gray-50/85">
               {tabs.map((tab, index) => {
                 const Icon = tab.icon;
                 return (

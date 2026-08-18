@@ -15,7 +15,16 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - **失败可降级**：说话人分离、摘要或单个 Provider 失败时，不应丢失录音和原始转写。
 - **隐私边界可验证**：不加入使用分析或广告追踪；更新检查默认关闭，用户明确启用后才访问 GitHub Release；其他远程调用前明确说明数据去向。
 
-## 当前基础：0.7.6
+## 当前基础：0.7.7
+
+0.7.7 改善长会议的总结等待与会后转写浏览体验。
+
+- AI 总结新增 5–1440 分钟的单次模型调用超时设置，默认 30 分钟；外部 API、Ollama 与内置 AI 从下一个任务起统一使用该设置。
+- 已结束会议一次读取完整转写快照，复制全文和摘要输入也复用同一全量请求；虚拟列表继续限制实际挂载的 DOM 数量。
+- 全量和分页查询统一按音频时间与记录 ID 稳定排序，并通过会议时间线联合索引保障长会议读取。
+- 设置分类栏在滚动时保持可见，语音模型的用户界面名称统一为 Fun-ASR Nano。
+
+### 0.7.6：可靠模型下载与离线导入
 
 0.7.6 改善中国大陆网络环境下的模型获取可靠性，并加入 Sherpa ONNX 语音模型离线导入。
 
@@ -56,7 +65,7 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 设置页重构为“常规 / 录音 / 模型 / 服务 / Beta”；模型资产使用按需加载和折叠分组，Services 只初始化当前转写 Provider。
 - Models 统一管理 Whisper、Parakeet、Speaker Diarization、本地摘要和 Ollama 模型资产。
 - Services 统一选择转写、说话人分离和 AI 摘要的 Provider 与模型。
-- 本地 Whisper、仅英文的 Parakeet、SenseVoice、Offline Paraformer、Qwen3-ASR 和 FunASR Nano 转写，SenseVoice 作为推荐中文模型。
+- 本地 Whisper、仅英文的 Parakeet、SenseVoice、Offline Paraformer、Qwen3-ASR 和 Fun-ASR Nano 转写，SenseVoice 作为推荐中文模型。
 - 可选的本地中英标点恢复模型，为 SenseVoice 最终转写片段补充标点；模型缺失或失败时保留原始 ASR 文本。
 - 实时录音、文件导入和重新转写统一使用 `TranscriptionProvider` 生命周期。
 - Opus-in-M4A 导入，以及 Sherpa ONNX 说话人分离。
@@ -78,7 +87,7 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 - 摘要任务通过 SQLite 原子状态防止同一会议重复启动，应用启动时将遗留任务标记为 interrupted。
 - 会议内可将多个检测标签合并并命名为同一人物，显示、颜色、复制和后续摘要输入统一使用解析后的姓名。
 - Services 新增全局“自定义术语”，支持普通词表、大小写敏感的精确纠错以及折叠的高级 FST 兼容选项。
-- 术语提示覆盖 Qwen3-ASR、FunASR Nano 与 Whisper；其他模型仍对 finalized 文本应用非级联精确纠错。
+- 术语提示覆盖 Qwen3-ASR、Fun-ASR Nano 与 Whisper；其他模型仍对 finalized 文本应用非级联精确纠错。
 - FST 配置和 Sherpa ONNX 运行时严格限制为单一活动规则，旧多选配置必须重新选择后才能使用。
 
 ## 0.6.3：中文默认转写与可跳过初始化下载
@@ -92,8 +101,8 @@ Mingtily 的目标是成为一款面向个人、开发者和小团队的本地�
 ## 0.6.2：最终转写增强与设置页整理
 
 - 修复录音按钮、导航自动启动和侧边栏事件可能重复触发后端录音的问题；重复启动拒绝会与真实后端状态核对，不再把已经成功开始的录音显示为失败。
-- Qwen3-ASR 与 FunASR Nano 支持 finalized 动态热词；热词可以在 Services 提前配置，只作用于保存的最终转写，不进入 Online Paraformer provisional 文本。
-- 新增 FunASR Nano int8 finalized Beta 模型，保留自动语言检测、ITN、内置标点和用户显式下载、SHA256 校验边界。
+- Qwen3-ASR 与 Fun-ASR Nano 支持 finalized 动态热词；热词可以在 Services 提前配置，只作用于保存的最终转写，不进入 Online Paraformer provisional 文本。
+- 新增 Fun-ASR Nano int8 finalized Beta 模型，保留自动语言检测、ITN、内置标点和用户显式下载、SHA256 校验边界。
 - 新增可选的 Sherpa 中文同音词替换：用户主动下载 lexicon、导入预生成 `.fst` 规则并在 Services 启用；资源缺失或运行失败时保留原始 ASR 文本。
 - Models 使用折叠分组并延迟挂载非当前区域；Whisper 默认只展开 Small，其余模型收进高级区域，Parakeet 默认折叠并明确仅支持英文、不支持中文。
 - Services 不再无条件初始化 Whisper 与 Parakeet，只在当前 Provider 被选择时加载对应模型列表；同一进程内复用初始化任务。

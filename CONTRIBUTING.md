@@ -81,7 +81,7 @@ Common types include `feat`, `fix`, `docs`, `refactor`, `test`, `build`, and `ch
 After the release commit is on `main` and Validation succeeds, create the draft release with an authenticated maintainer account before pushing the version tag. GitHub may keep a new draft tag virtual, so create and push the annotated tag only after the draft exists; that tag push triggers the Release workflow.
 
 ```bash
-version=0.7.6
+version="$(node -p "require('./frontend/package.json').version")"
 gh release create "v${version}" \
   --draft \
   --target "$(git rev-parse HEAD)" \

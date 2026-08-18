@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires a complete local FunASR Nano model directory"]
+    #[ignore = "requires a complete local Fun-ASR Nano model directory"]
     fn funasr_nano_fixture_initializes_native_recognizer() {
         let root = std::env::var("MINGTILY_FUNASR_MODEL_DIR")
             .expect("set MINGTILY_FUNASR_MODEL_DIR to the extracted model directory");
@@ -423,6 +423,6 @@ mod tests {
             "auto",
             &RuntimeEnhancements::from_parts(None, None, None),
         )
-        .expect("FunASR Nano fixture should initialize");
+        .expect("Fun-ASR Nano fixture should initialize");
     }
 }

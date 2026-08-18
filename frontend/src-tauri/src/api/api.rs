@@ -160,6 +160,60 @@ pub struct PaginatedTranscriptsResponse {
     pub has_more: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TranscriptQuery {
+    All,
+    Paginated { limit: i64, offset: i64 },
+}
+
+fn validate_transcript_query(
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<TranscriptQuery, String> {
+    match (limit, offset) {
+        (None, None) => Ok(TranscriptQuery::All),
+        (Some(limit), Some(offset)) if limit > 0 && offset >= 0 => {
+            Ok(TranscriptQuery::Paginated { limit, offset })
+        }
+        (Some(limit), Some(_)) if limit <= 0 => {
+            Err("Transcript page limit must be greater than zero".to_string())
+        }
+        (Some(_), Some(offset)) if offset < 0 => {
+            Err("Transcript page offset cannot be negative".to_string())
+        }
+        _ => Err("Transcript pagination requires both limit and offset".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod transcript_query_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_full_and_valid_paginated_queries() {
+        assert_eq!(
+            validate_transcript_query(None, None).unwrap(),
+            TranscriptQuery::All
+        );
+        assert_eq!(
+            validate_transcript_query(Some(100), Some(0)).unwrap(),
+            TranscriptQuery::Paginated {
+                limit: 100,
+                offset: 0
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_or_invalid_pagination() {
+        assert!(validate_transcript_query(Some(100), None).is_err());
+        assert!(validate_transcript_query(None, Some(0)).is_err());
+        assert!(validate_transcript_query(Some(0), Some(0)).is_err());
+        assert!(validate_transcript_query(Some(-1), Some(0)).is_err());
+        assert!(validate_transcript_query(Some(100), Some(-1)).is_err());
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SaveMeetingTitleRequest {
     pub meeting_id: String,
@@ -852,66 +906,86 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
     }
 }
 
-/// Get paginated transcripts for a meeting
+/// Get all transcripts for a meeting, or a page when both pagination arguments are provided.
 #[tauri::command]
 pub async fn api_get_meeting_transcripts<R: Runtime>(
     _app: AppHandle<R>,
     meeting_id: String,
-    limit: i64,
-    offset: i64,
+    limit: Option<i64>,
+    offset: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<PaginatedTranscriptsResponse, String> {
     log_info!(
-        "api_get_meeting_transcripts called for meeting_id: {}, limit: {}, offset: {}",
+        "api_get_meeting_transcripts called for meeting_id: {}, limit: {:?}, offset: {:?}",
         meeting_id,
         limit,
         offset
     );
 
     let pool = state.db_manager.pool();
+    let query = validate_transcript_query(limit, offset)?;
 
-    match MeetingsRepository::get_meeting_transcripts_paginated(pool, &meeting_id, limit, offset)
-        .await
-    {
-        Ok((transcripts, total_count)) => {
-            log_info!(
-                "Successfully retrieved {} transcripts for meeting {} (total: {})",
-                transcripts.len(),
-                meeting_id,
-                total_count
-            );
-
-            // Convert Transcript to MeetingTranscript
-            let meeting_transcripts = transcripts
-                .into_iter()
-                .map(|t| MeetingTranscript {
-                    id: t.id,
-                    text: t.transcript,
-                    timestamp: t.timestamp,
-                    audio_start_time: t.audio_start_time,
-                    audio_end_time: t.audio_end_time,
-                    duration: t.duration,
-                    speaker: t.speaker,
-                })
-                .collect::<Vec<_>>();
-
-            let has_more = (offset + meeting_transcripts.len() as i64) < total_count;
-
-            Ok(PaginatedTranscriptsResponse {
-                transcripts: meeting_transcripts,
-                total_count,
-                has_more,
-            })
+    let (transcripts, total_count, has_more) = match query {
+        TranscriptQuery::All => {
+            let transcripts = MeetingsRepository::get_meeting_transcripts(pool, &meeting_id)
+                .await
+                .map_err(|error| {
+                    log_error!(
+                        "Error retrieving all transcripts for meeting {}: {}",
+                        meeting_id,
+                        error
+                    );
+                    format!("Failed to retrieve transcripts: {error}")
+                })?;
+            let total_count = transcripts.len() as i64;
+            (transcripts, total_count, false)
         }
-        Err(e) => {
-            log_error!(
-                "Error retrieving transcripts for meeting {}: {}",
-                meeting_id,
-                e
-            );
-            Err(format!("Failed to retrieve transcripts: {}", e))
+        TranscriptQuery::Paginated { limit, offset } => {
+            let (transcripts, total_count) = MeetingsRepository::get_meeting_transcripts_paginated(
+                pool,
+                &meeting_id,
+                limit,
+                offset,
+            )
+            .await
+            .map_err(|error| {
+                log_error!(
+                    "Error retrieving transcripts for meeting {}: {}",
+                    meeting_id,
+                    error
+                );
+                format!("Failed to retrieve transcripts: {error}")
+            })?;
+            let has_more = offset + (transcripts.len() as i64) < total_count;
+            (transcripts, total_count, has_more)
         }
-    }
+    };
+
+    log_info!(
+        "Successfully retrieved {} transcripts for meeting {} (total: {})",
+        transcripts.len(),
+        meeting_id,
+        total_count
+    );
+
+    let meeting_transcripts = transcripts
+        .into_iter()
+        .map(|transcript| MeetingTranscript {
+            id: transcript.id,
+            text: transcript.transcript,
+            timestamp: transcript.timestamp,
+            audio_start_time: transcript.audio_start_time,
+            audio_end_time: transcript.audio_end_time,
+            duration: transcript.duration,
+            speaker: transcript.speaker,
+        })
+        .collect();
+
+    Ok(PaginatedTranscriptsResponse {
+        transcripts: meeting_transcripts,
+        total_count,
+        has_more,
+    })
 }
 
 #[tauri::command]

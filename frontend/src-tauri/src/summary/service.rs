@@ -8,6 +8,7 @@ use crate::summary::metadata::read_detected_summary_language_from_metadata;
 use crate::summary::processor::{
     extract_meeting_name_from_markdown, generate_meeting_summary, language_name_from_code,
 };
+use crate::summary::runtime_config::{self, SummaryRuntimeConfig};
 use crate::summary::templates::{self, Template};
 use crate::summary::{
     SummaryProgressCallback, SummaryProgressPhase, SummaryProgressUpdate, SummaryStreamCallback,
@@ -610,6 +611,22 @@ impl SummaryService {
             }),
         };
 
+        let runtime_config = match runtime_config::load_config(&app) {
+            Ok(config) => config,
+            Err(error) => {
+                warn!(
+                    "Failed to load summary runtime settings: {}. Using defaults.",
+                    error
+                );
+                SummaryRuntimeConfig::default()
+            }
+        };
+        let request_timeout = runtime_config.request_timeout();
+        info!(
+            "Summary model call timeout: {} seconds",
+            request_timeout.as_secs()
+        );
+
         let client = reqwest::Client::new();
         let stream_app = app.clone();
         let stream_meeting_id = meeting_id.clone();
@@ -664,6 +681,7 @@ impl SummaryService {
             custom_openai_max_tokens,
             custom_openai_temperature,
             custom_openai_top_p,
+            request_timeout,
             app_data_dir.as_ref(),
             Some(&cancellation_token),
             summary_language.as_deref(),

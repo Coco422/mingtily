@@ -159,6 +159,7 @@ pub async fn generate_with_builtin(
         user_prompt,
         cancellation_token,
         None,
+        Duration::from_secs(models::GENERATION_TIMEOUT_SECS),
     )
     .await
 }
@@ -170,6 +171,7 @@ pub async fn generate_with_builtin_streaming(
     user_prompt: &str,
     cancellation_token: Option<&CancellationToken>,
     stream_callback: Option<&SummaryTextStreamCallback>,
+    request_timeout: Duration,
 ) -> Result<String> {
     // Check cancellation at start
     if let Some(token) = cancellation_token {
@@ -233,17 +235,17 @@ pub async fn generate_with_builtin_streaming(
 
     let request_json = serde_json::to_string(&request)?;
 
-    // Send request with timeout
-    let timeout = Duration::from_secs(models::GENERATION_TIMEOUT_SECS);
-
-    log::info!("Sending generation request to sidecar");
+    log::info!(
+        "Sending generation request to sidecar (timeout: {}s)",
+        request_timeout.as_secs()
+    );
 
     // Race between send_request and cancellation token
     let mut streamed_text = String::new();
     let request_future = async {
         if let Some(callback) = stream_callback {
             manager
-                .send_streaming_request(request_json, timeout, |message| {
+                .send_streaming_request(request_json, request_timeout, |message| {
                     let response: Response = serde_json::from_str(message)
                         .with_context(|| format!("Failed to parse stream message: {message}"))?;
                     if let Response::Token { text } = response {
@@ -254,7 +256,7 @@ pub async fn generate_with_builtin_streaming(
                 })
                 .await
         } else {
-            manager.send_request(request_json, timeout).await
+            manager.send_request(request_json, request_timeout).await
         }
     };
 

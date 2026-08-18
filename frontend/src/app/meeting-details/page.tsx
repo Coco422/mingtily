@@ -7,8 +7,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
-import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
+import { useMeetingTranscripts } from '@/hooks/useMeetingTranscripts';
 import { useSummaryJobs } from '@/contexts/SummaryJobsContext';
+import { useTranslation } from 'react-i18next';
 
 interface MeetingDetailsResponse {
   id: string;
@@ -20,6 +21,7 @@ interface MeetingDetailsResponse {
 }
 
 function MeetingDetailsContent() {
+  const { t } = useTranslation('meeting');
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
   const source = searchParams.get('source'); // Check if navigated from recording
@@ -35,20 +37,15 @@ function MeetingDetailsContent() {
   const [hasCheckedAutoGen, setHasCheckedAutoGen] = useState<boolean>(false);
   const summaryJob = meetingId ? getJob(meetingId) : undefined;
 
-  // Use pagination hook for efficient transcript loading
+  // Load a complete snapshot so the scroll timeline is stable from first paint.
   const {
     metadata,
     segments,
     transcripts,
     isLoading: isLoadingTranscripts,
-    isLoadingMore,
-    hasMore,
-    totalCount,
-    loadedCount,
-    loadMore,
     refetch,
     error: transcriptError,
-  } = usePaginatedTranscripts({ meetingId: meetingId || '' });
+  } = useMeetingTranscripts({ meetingId: meetingId || '' });
 
   // Check if gemma3:1b model is available in Ollama
   const checkForGemmaModel = useCallback(async (): Promise<boolean> => {
@@ -118,7 +115,7 @@ function MeetingDetailsContent() {
     setHasCheckedAutoGen(true);
   }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary]);
 
-  // Sync meeting metadata from pagination hook to meeting details state
+  // Sync the complete meeting snapshot to the details state.
   useEffect(() => {
     if (metadata && (!meetingId || meetingId === 'intro-call')) {
       // If invalid meeting ID, don't sync
@@ -128,13 +125,13 @@ function MeetingDetailsContent() {
     if (metadata) {
       console.log('Meeting metadata loaded:', metadata);
 
-      // Build meeting details from metadata and paginated transcripts
+      // Build meeting details from metadata and the complete transcript snapshot.
       setMeetingDetails({
         id: metadata.id,
         title: metadata.title,
         created_at: metadata.created_at,
         updated_at: metadata.updated_at,
-        transcripts: transcripts, // Paginated transcripts from hook
+        transcripts,
         folder_path: metadata.folder_path, // For retranscription feature
       });
 
@@ -157,9 +154,9 @@ function MeetingDetailsContent() {
       return;
     }
 
-    // The usePaginatedTranscripts hook automatically refetches when meetingId changes
+    // The transcript hook automatically refetches when meetingId changes.
     // This function is kept for compatibility with onMeetingUpdated callback
-    console.log('fetchMeetingDetails called - pagination hook will handle refetch');
+    console.log('fetchMeetingDetails called - transcript snapshot hook will handle refetch');
   }, [meetingId]);
 
   // Reset states when meetingId changes (prevent race conditions)
@@ -178,7 +175,7 @@ function MeetingDetailsContent() {
 
     if (!meetingId || meetingId === 'intro-call') {
       console.warn('No valid meeting ID in URL - meetingId:', meetingId);
-      setError("No meeting selected");
+      setError(t('noMeetingSelected'));
       setIsLoading(false);
       return;
     }
@@ -214,7 +211,7 @@ function MeetingDetailsContent() {
     };
 
     loadData();
-  }, [acknowledgeJob, meetingId, refreshJob]);
+  }, [acknowledgeJob, meetingId, refreshJob, t]);
 
   // Auto-generation check: runs when meeting is loaded with no summary
   useEffect(() => {
@@ -250,7 +247,7 @@ function MeetingDetailsContent() {
             onClick={() => router.push('/')}
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
           >
-            Go Back
+            {t('goBack')}
           </button>
         </div>
       </div>
@@ -276,13 +273,7 @@ function MeetingDetailsContent() {
       await refetchMeetings();
     }}
     onRefetchTranscripts={refetch}
-    // Pagination props for efficient transcript loading
     segments={segments}
-    hasMore={hasMore}
-    isLoadingMore={isLoadingMore}
-    totalCount={totalCount}
-    loadedCount={loadedCount}
-    onLoadMore={loadMore}
   />;
 }
 
