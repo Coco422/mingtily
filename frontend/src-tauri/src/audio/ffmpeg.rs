@@ -38,7 +38,24 @@ fn find_ffmpeg_path_internal() -> Option<PathBuf> {
     }
 
     // ============================================================
-    // PRIORITY 2: Fallback to Existing Logic
+    // PRIORITY 2: Build-time sidecar (development and tests)
+    // ============================================================
+    // build.rs downloads the target-specific FFmpeg sidecar into this directory before
+    // compiling the crate. Debug binaries and CI tests run outside the final app bundle,
+    // so current_exe() cannot see it beside the executable yet.
+    #[cfg(debug_assertions)]
+    if let Some(sidecar_name) = development_ffmpeg_sidecar_name() {
+        let bundled = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("binaries")
+            .join(sidecar_name);
+        if bundled.is_file() {
+            debug!("Found development FFmpeg sidecar: {:?}", bundled);
+            return Some(bundled);
+        }
+    }
+
+    // ============================================================
+    // PRIORITY 3: Fallback to Existing Logic
     // ============================================================
 
     // Check if `ffmpeg` is in the PATH environment variable
@@ -163,6 +180,21 @@ fn find_ffmpeg_path_internal() -> Option<PathBuf> {
     None // Return None if ffmpeg is not found
 }
 
+#[cfg(debug_assertions)]
+fn development_ffmpeg_sidecar_name() -> Option<&'static str> {
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        Some("ffmpeg-aarch64-apple-darwin")
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        Some("ffmpeg-x86_64-apple-darwin")
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        Some("ffmpeg-x86_64-unknown-linux-gnu")
+    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        Some("ffmpeg-x86_64-pc-windows-msvc.exe")
+    } else {
+        None
+    }
+}
+
 fn handle_ffmpeg_installation() -> Result<(), anyhow::Error> {
     if ffmpeg_is_installed() {
         debug!("ffmpeg is already installed");
@@ -231,4 +263,22 @@ fn get_ffmpeg_install_dir() -> Result<PathBuf, anyhow::Error> {
 fn get_ffmpeg_install_dir() -> Result<PathBuf, anyhow::Error> {
     // Your existing logic for other platforms
     sidecar_dir().map_err(|e| anyhow::anyhow!(e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn development_sidecar_name_matches_supported_test_target() {
+        let name = development_ffmpeg_sidecar_name().expect("supported CI/development target");
+        assert!(name.starts_with("ffmpeg-"));
+        assert_eq!(name.ends_with(".exe"), cfg!(windows));
+    }
+
+    #[test]
+    fn build_time_sidecar_is_discoverable_in_tests() {
+        let path = find_ffmpeg_path().expect("build.rs should prepare the FFmpeg sidecar");
+        assert!(path.is_file());
+    }
 }
