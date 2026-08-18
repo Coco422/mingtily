@@ -4,9 +4,15 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing version tag to build, for example v0.7.4"
+        required: true
+        type: string
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -15,6 +21,7 @@ permissions:
 env:
   RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
 
 jobs:
   validate:
@@ -25,6 +32,8 @@ jobs:
       release_id: ${{ steps.draft_release.outputs.release_id }}
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Verify local and release app identities
         run: node frontend/scripts/check-app-identity.mjs
@@ -34,7 +43,7 @@ jobs:
         shell: bash
         run: |
           version=$(grep -o '"version": "[^"]*"' frontend/src-tauri/tauri.conf.json | cut -d'"' -f4)
-          test "${GITHUB_REF_NAME}" = "v${version}"
+          test "${RELEASE_TAG}" = "v${version}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Require a maintainer-authored draft release
@@ -45,7 +54,7 @@ jobs:
         run: |
           release_json=""
           for attempt in 1 2 3 4 5 6; do
-            if release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" 2>/dev/null); then
+            if release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" 2>/dev/null | jq -c --arg tag "${RELEASE_TAG}" '.[] | select(.tag_name == $tag)' | head -n 1) && [[ -n "$release_json" ]]; then
               break
             fi
             sleep 5
@@ -184,12 +193,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          assets=$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name')
+          assets=$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name')
           grep -qx 'latest.json' <<< "$assets"
           test "$(grep -c '\.sig$' <<< "$assets")" -ge 2
           manifest_dir=$(mktemp -d)
           trap 'rm -rf "$manifest_dir"' EXIT
-          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --pattern latest.json --dir "$manifest_dir"
+          gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --pattern latest.json --dir "$manifest_dir"
           jq -e '.platforms["darwin-aarch64"].signature | length > 0' "$manifest_dir/latest.json"
           jq -e '.platforms["windows-x86_64"].signature | length > 0' "$manifest_dir/latest.json"
-          gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
+          gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
