@@ -256,7 +256,7 @@ This command also produces Mingtily Dev. Only a tagged Release workflow overlays
 - `Validation` runs app-identity, frontend, i18n, network-boundary, formatting, Rust test, and Rust check gates.
 - `Build and Test - Linux` also builds an unsigned Linux package on relevant pull requests and checks cold-start network connections under `strace`.
 - The manual `Build and Test - DevTest`, macOS, Windows, and Linux workflows produce unsigned development artifacts without repository secrets.
-- Pushing a matching `vX.Y.Z` tag creates a draft, builds the macOS Apple Silicon and Windows x64 release targets, uploads signed updater archives and `latest.json`, then publishes after both platforms succeed. Linux remains a separate unsigned development-build target for now.
+- After `main` passes Validation, a maintainer creates a draft release for a new `vX.Y.Z` tag with their authenticated GitHub account. Creating that draft also creates the tag and triggers the workflow; the workflow rejects bot-authored drafts, builds the macOS Apple Silicon and Windows x64 release targets, uploads signed updater archives and `latest.json`, then publishes after both platforms succeed. Linux remains a separate unsigned development-build target for now.
 - Apple notarization and operating-system installer signing remain deferred.
 
 On Linux, install the WebKitGTK, app-indicator, ALSA, X11, and packaging dependencies shown in [`.github/workflows/build-linux.yml`](.github/workflows/build-linux.yml). See the official [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for platform setup.

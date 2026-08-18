@@ -52,7 +52,20 @@ Manual semantic-version and branch summary. It does not build the application.
 
 ### `release.yml`
 
-Pushing a matching `vX.Y.Z` tag builds macOS Apple Silicon and Windows x64 bundles. The workflow creates a draft release, uploads installers plus signed updater archives and `latest.json`, then publishes only after both platforms succeed. Linux remains available through unsigned development workflows until its Silero/ORT and static Sherpa-ONNX runtime conflict is resolved. The repository secret `TAURI_SIGNING_PRIVATE_KEY` signs updater payloads; it is unrelated to Apple or Windows platform signing.
+A maintainer must create a draft release with their authenticated GitHub account after Validation succeeds on `main`. Creating the draft for a new `vX.Y.Z` tag also creates that tag and triggers this workflow; do not push the tag first. The workflow rejects a missing, published, prerelease, or bot-authored draft, then builds macOS Apple Silicon and Windows x64 bundles, uploads installers plus signed updater archives and `latest.json`, and publishes only after both platforms succeed. Keeping the draft author as a maintainer lets GitHub attribute the published `ReleaseEvent` to that maintainer instead of `github-actions[bot]`.
+
+From a clean, up-to-date `main` checkout, use release notes prepared outside the repository:
+
+```bash
+version=0.7.4
+gh release create "v${version}" \
+  --draft \
+  --target "$(git rev-parse HEAD)" \
+  --title "Mingtily v${version}" \
+  --notes-file /path/to/release-notes.md
+```
+
+Linux remains available through unsigned development workflows until its Silero/ORT and static Sherpa-ONNX runtime conflict is resolved. The repository secret `TAURI_SIGNING_PRIVATE_KEY` signs updater payloads; it is unrelated to Apple or Windows platform signing.
 
 The base Tauri configuration is deliberately isolated as `Mingtily Dev` / `com.mingcheng.mingtily.dev`. `release.yml` is the only supported path that overlays `tauri.release.conf.json` to produce the production `Mingtily` / `com.mingcheng.mingtily` application.
 
@@ -61,4 +74,4 @@ The base Tauri configuration is deliberately isolated as `Mingtily Dev` / `com.m
 1. Let `ci.yml` validate every pull request.
 2. Let `build-linux.yml` validate the unsigned Linux bundle and cold-start network boundary.
 3. Use `build-devtest.yml` or a standalone platform workflow when a downloadable development artifact is needed.
-4. Push a matching version tag only after Validation succeeds on `main`; the tag workflow publishes the GitHub Release used by the opt-in updater.
+4. After Validation succeeds on `main`, create the maintainer-authored draft release as shown above; its tag triggers the workflow that publishes the GitHub Release used by the opt-in updater.

@@ -76,4 +76,19 @@ Prefer focused commits using this format:
 
 Common types include `feat`, `fix`, `docs`, `refactor`, `test`, `build`, and `chore`.
 
+## Maintainer releases
+
+After the release commit is on `main` and Validation succeeds, create the draft release with an authenticated maintainer account. Do not push the version tag first: creating the draft for a new tag also creates the tag and triggers the Release workflow.
+
+```bash
+version=0.7.4
+gh release create "v${version}" \
+  --draft \
+  --target "$(git rev-parse HEAD)" \
+  --title "Mingtily v${version}" \
+  --notes-file /path/to/release-notes.md
+```
+
+The workflow verifies that the draft is stable and maintainer-authored, builds both supported release targets, validates updater signatures and `latest.json`, and only then publishes it. This preserves the maintainer identity on GitHub's release event while keeping artifact publication gated on successful builds.
+
 By contributing, you agree that your contribution is licensed under the repository's MIT License.
