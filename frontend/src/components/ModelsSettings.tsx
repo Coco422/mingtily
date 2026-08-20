@@ -240,7 +240,6 @@ function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
           <ModelProviderGroup
             title={t('sections.providerGroups.whisper')}
             description={t('sections.providerGroups.whisperDescription')}
-            defaultOpen={transcriptModelConfig.provider === 'localWhisper'}
           >
             <ModelManager
               mode="manage"

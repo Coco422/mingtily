@@ -549,19 +549,7 @@ export function ModelManager({
   if (mode === 'manage') {
     return (
       <div className={`space-y-2 ${className}`}>
-        {featuredModels.map(renderManagedModel)}
-        {advancedModels.length > 0 && (
-          <Accordion type="single" collapsible className="w-full">
-            <AccordionItem value="advanced-whisper-models" className="border-0">
-              <AccordionTrigger className="rounded-md px-1 py-2 text-xs font-semibold text-gray-600 hover:no-underline">
-                {t('sections.advanced')}
-              </AccordionTrigger>
-              <AccordionContent>
-                <div className="space-y-2 pt-1">{advancedModels.map(renderManagedModel)}</div>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
-        )}
+        {[...featuredModels, ...advancedModels].map(renderManagedModel)}
       </div>
     );
   }
