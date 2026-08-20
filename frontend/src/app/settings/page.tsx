@@ -25,8 +25,21 @@ export default function SettingsPage() {
 
   // Animation state for tabs
   const [activeTab, setActiveTab] = useState('general');
+  const [mountedTabs, setMountedTabs] = useState<Set<string>>(() => new Set());
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [underlineStyle, setUnderlineStyle] = useState({ left: 0, width: 0 });
+
+  const activateTab = (value: string) => {
+    if (value === 'models' || value === 'services') {
+      setMountedTabs((current) => {
+        if (current.has(value)) return current;
+        const next = new Set(current);
+        next.add(value);
+        return next;
+      });
+    }
+    setActiveTab(value);
+  };
 
   // Update underline position when active tab changes
   useLayoutEffect(() => {
@@ -61,7 +74,7 @@ export default function SettingsPage() {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-6xl mx-auto p-8 pt-6">
           {/* Tabs */}
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <Tabs value={activeTab} onValueChange={activateTab}>
             <TabsList className="sticky top-0 z-30 h-auto w-full justify-start overflow-x-auto overflow-y-hidden rounded-none border-b border-gray-200 bg-gray-50/95 p-0 shadow-[0_1px_0_rgba(15,23,42,0.04)] backdrop-blur supports-[backdrop-filter]:bg-gray-50/85">
               {tabs.map((tab, index) => {
                 const Icon = tab.icon;
@@ -92,12 +105,16 @@ export default function SettingsPage() {
             <TabsContent value="recording">
               <RecordingSettings />
             </TabsContent>
-            <TabsContent value="models">
-              <ModelsSettings onOpenServices={() => setActiveTab('services')} />
-            </TabsContent>
-            <TabsContent value="services">
-              <ServicesSettings onOpenModels={() => setActiveTab('models')} />
-            </TabsContent>
+            {mountedTabs.has('models') && (
+              <TabsContent value="models" forceMount>
+                <ModelsSettings onOpenServices={() => activateTab('services')} />
+              </TabsContent>
+            )}
+            {mountedTabs.has('services') && (
+              <TabsContent value="services" forceMount>
+                <ServicesSettings onOpenModels={() => activateTab('models')} />
+              </TabsContent>
+            )}
             <TabsContent value="beta" className="mt-6">
               <BetaSettings />
             </TabsContent>

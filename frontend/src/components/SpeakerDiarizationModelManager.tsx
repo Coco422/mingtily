@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { useTranslation } from 'react-i18next';
 import { ModelAssetRow, type ModelAssetState } from './ModelAssetRow';
+import { notifyModelAssetsChanged } from '@/lib/model-assets-events';
 
 interface SpeakerModelStatus {
   id: string;
@@ -77,6 +78,7 @@ export function SpeakerDiarizationModelManager({
     setProgress(0);
     try {
       await invoke('speaker_diarization_download_model');
+      notifyModelAssetsChanged('speaker-diarization');
     } catch (error) {
       setBusy(false);
       setProgress(null);
@@ -88,6 +90,7 @@ export function SpeakerDiarizationModelManager({
     setBusy(true);
     try {
       await invoke('speaker_diarization_delete_model');
+      notifyModelAssetsChanged('speaker-diarization');
       await refresh();
       toast.success(t('speaker.removed'));
     } catch (error) {

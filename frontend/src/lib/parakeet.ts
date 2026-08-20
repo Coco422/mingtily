@@ -148,6 +148,7 @@ export function getRecommendedModel(systemSpecs?: { ram: number; cores: number }
 
 // Tauri command wrappers for Parakeet backend
 import { invoke } from '@tauri-apps/api/core';
+import { notifyModelAssetsChanged } from '@/lib/model-assets-events';
 
 export class ParakeetAPI {
   private static initPromise: Promise<void> | null = null;
@@ -188,6 +189,7 @@ export class ParakeetAPI {
 
   static async downloadModel(modelName: string): Promise<void> {
     await invoke('parakeet_download_model', { modelName });
+    notifyModelAssetsChanged('parakeet');
   }
 
   static async cancelDownload(modelName: string): Promise<void> {
@@ -195,7 +197,9 @@ export class ParakeetAPI {
   }
 
   static async deleteCorruptedModel(modelName: string): Promise<string> {
-    return await invoke('parakeet_delete_corrupted_model', { modelName });
+    const result = await invoke<string>('parakeet_delete_corrupted_model', { modelName });
+    notifyModelAssetsChanged('parakeet');
+    return result;
   }
 
   static async hasAvailableModels(): Promise<boolean> {

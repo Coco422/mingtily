@@ -21,7 +21,9 @@ pub fn speaker_diarization_save_config<R: Runtime>(
 pub async fn speaker_diarization_get_status<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<SpeakerModelStatus, String> {
-    models::get_status(&app).map_err(|error| error.to_string())
+    tokio::task::spawn_blocking(move || models::get_status(&app).map_err(|error| error.to_string()))
+        .await
+        .map_err(|error| format!("Speaker model scan failed: {error}"))?
 }
 
 #[tauri::command]

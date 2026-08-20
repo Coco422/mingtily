@@ -278,6 +278,7 @@ export function getRecommendedModel(systemSpecs?: { ram: number; cores: number }
 
 // Tauri command wrappers for whisper-rs backend
 import { invoke } from '@tauri-apps/api/core';
+import { notifyModelAssetsChanged } from '@/lib/model-assets-events';
 
 export class WhisperAPI {
   private static initPromise: Promise<void> | null = null;
@@ -318,6 +319,7 @@ export class WhisperAPI {
 
   static async downloadModel(modelName: string): Promise<void> {
     await invoke('whisper_download_model', { modelName });
+    notifyModelAssetsChanged('localWhisper');
   }
 
   static async cancelDownload(modelName: string): Promise<void> {
@@ -325,7 +327,9 @@ export class WhisperAPI {
   }
 
   static async deleteCorruptedModel(modelName: string): Promise<string> {
-    return await invoke('whisper_delete_corrupted_model', { modelName });
+    const result = await invoke<string>('whisper_delete_corrupted_model', { modelName });
+    notifyModelAssetsChanged('localWhisper');
+    return result;
   }
 
   static async hasAvailableModels(): Promise<boolean> {

@@ -223,7 +223,7 @@ function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
           <ModelProviderGroup
             title={t('sections.providerGroups.sherpa')}
             description={t('sections.providerGroups.sherpaDescription')}
-            defaultOpen
+            defaultOpen={transcriptModelConfig.provider === 'sherpa-onnx'}
           >
             <SherpaAsrModelManager
               selectedModel={
@@ -240,7 +240,7 @@ function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
           <ModelProviderGroup
             title={t('sections.providerGroups.whisper')}
             description={t('sections.providerGroups.whisperDescription')}
-            defaultOpen
+            defaultOpen={transcriptModelConfig.provider === 'localWhisper'}
           >
             <ModelManager
               mode="manage"
@@ -250,6 +250,7 @@ function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
           <ModelProviderGroup
             title={t('sections.providerGroups.parakeet')}
             description={t('sections.providerGroups.parakeetDescription')}
+            defaultOpen={transcriptModelConfig.provider === 'parakeet'}
           >
             <ParakeetModelManager
               mode="manage"

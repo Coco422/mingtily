@@ -125,10 +125,14 @@ pub fn sherpa_asr_delete_homophone_rule<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn sherpa_asr_list_models<R: Runtime>(
+pub async fn sherpa_asr_list_models<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<Vec<SherpaAsrModelStatus>, String> {
-    models::list_status(&app).map_err(|error| error.to_string())
+    tokio::task::spawn_blocking(move || {
+        models::list_status(&app).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Sherpa ASR model scan failed: {error}"))?
 }
 
 #[tauri::command]

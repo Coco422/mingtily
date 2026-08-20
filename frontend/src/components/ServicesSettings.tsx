@@ -29,6 +29,10 @@ import {
 } from '@/lib/sherpa-asr';
 import { capabilityConfigService } from '@/services/capabilityConfigService';
 import {
+  MODEL_ASSETS_CHANGED_EVENT,
+  type ModelAssetProvider,
+} from '@/lib/model-assets-events';
+import {
   DEFAULT_SPEAKER_DIARIZATION_CONFIG,
   SpeakerDiarizationConfig,
   TranscriptProviderId,
@@ -97,6 +101,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
   const [parakeetModels, setParakeetModels] = useState<string[]>([]);
   const [sherpaModels, setSherpaModels] = useState<SherpaAsrModelStatus[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
+  const [loadingStreamingModels, setLoadingStreamingModels] = useState(false);
   const [savingTranscript, setSavingTranscript] = useState(false);
   const [enhancementConfig, setEnhancementConfig] = useState<SherpaAsrEnhancementConfig>(
     DEFAULT_SHERPA_ASR_ENHANCEMENT_CONFIG
@@ -109,9 +114,11 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
     DEFAULT_SPEAKER_DIARIZATION_CONFIG
   );
   const [speakerInstalled, setSpeakerInstalled] = useState(false);
+  const [speakerStatusLoaded, setSpeakerStatusLoaded] = useState(false);
   const [savingSpeaker, setSavingSpeaker] = useState(false);
 
   const providerLoadRef = useRef<Partial<Record<TranscriptProviderId, Promise<string[]>>>>({});
+  const loadedProviderRef = useRef<Partial<Record<TranscriptProviderId, boolean>>>({});
 
   const loadProviderModels = useCallback((provider: TranscriptProviderId): Promise<string[]> => {
     const inFlight = providerLoadRef.current[provider];
@@ -125,6 +132,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
           .filter((model) => model.status === 'Available')
           .map((model) => model.name);
         setWhisperModels(available);
+        loadedProviderRef.current[provider] = true;
         return available;
       }
 
@@ -135,11 +143,13 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
           .filter((model) => model.status === 'Available')
           .map((model) => model.name);
         setParakeetModels(available);
+        loadedProviderRef.current[provider] = true;
         return available;
       }
 
       const models = await SherpaAsrAPI.listModels();
       setSherpaModels(models);
+      loadedProviderRef.current[provider] = true;
       return models
         .filter((model) => model.status === 'available' && model.streaming_mode !== 'continuous')
         .map((model) => model.id);
@@ -155,21 +165,16 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
   }, []);
 
   const loadSettings = useCallback(async () => {
-    const sherpaModelsPromise = loadProviderModels('sherpa-onnx');
     const [
-      ,
       streamingResult,
       terminologyResult,
       homophoneResult,
       speakerResult,
-      speakerInstalledResult,
     ] = await Promise.allSettled([
-      sherpaModelsPromise,
       capabilityConfigService.getStreamingTranscription(),
       SherpaAsrAPI.getTerminologyConfig(),
       SherpaAsrAPI.getHomophoneStatus(),
       capabilityConfigService.getSpeakerDiarization(),
-      invoke<{ status: string }>('speaker_diarization_get_status'),
     ]);
 
     if (streamingResult.status === 'fulfilled') {
@@ -187,12 +192,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
     }
     if (homophoneResult.status === 'fulfilled') setHomophoneStatus(homophoneResult.value);
     if (speakerResult.status === 'fulfilled') setSpeakerConfig(speakerResult.value);
-    if (speakerInstalledResult.status === 'fulfilled') {
-      setSpeakerInstalled(speakerInstalledResult.value.status === 'available');
-    } else {
-      setSpeakerInstalled(false);
-    }
-  }, [loadProviderModels]);
+  }, []);
 
   useEffect(() => {
     void loadSettings();
@@ -212,6 +212,69 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
       active = false;
     };
   }, [loadProviderModels, transcriptProvider]);
+
+  useEffect(() => {
+    if (recognitionMode !== 'beta-live') return;
+    if (loadedProviderRef.current['sherpa-onnx']) return;
+
+    let active = true;
+    setLoadingStreamingModels(true);
+    void loadProviderModels('sherpa-onnx')
+      .catch((error) => {
+        console.warn('[ServicesSettings] Unable to load streaming models', error);
+      })
+      .finally(() => {
+        if (active) setLoadingStreamingModels(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadProviderModels, recognitionMode]);
+
+  useEffect(() => {
+    if (!speakerConfig.enabled || speakerStatusLoaded) return;
+
+    let active = true;
+    void invoke<{ status: string }>('speaker_diarization_get_status')
+      .then((result) => {
+        if (active) setSpeakerInstalled(result.status === 'available');
+      })
+      .catch((error) => {
+        console.warn('[ServicesSettings] Unable to load speaker model status', error);
+        if (active) setSpeakerInstalled(false);
+      })
+      .finally(() => {
+        if (active) setSpeakerStatusLoaded(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [speakerConfig.enabled, speakerStatusLoaded]);
+
+  useEffect(() => {
+    const handleModelAssetsChanged = (event: Event) => {
+      const { provider } = (event as CustomEvent<{ provider: ModelAssetProvider }>).detail;
+      if (provider === 'speaker-diarization') {
+        setSpeakerStatusLoaded(false);
+        return;
+      }
+      if (
+        provider === transcriptProvider ||
+        (provider === 'sherpa-onnx' && recognitionMode === 'beta-live')
+      ) {
+        loadedProviderRef.current[provider] = false;
+        void loadProviderModels(provider).catch((error) => {
+          console.warn(`[ServicesSettings] Unable to refresh ${provider} models`, error);
+        });
+      }
+    };
+
+    window.addEventListener(MODEL_ASSETS_CHANGED_EVENT, handleModelAssetsChanged);
+    return () => {
+      window.removeEventListener(MODEL_ASSETS_CHANGED_EVENT, handleModelAssetsChanged);
+    };
+  }, [loadProviderModels, recognitionMode, transcriptProvider]);
 
   useEffect(() => {
     setTranscriptProvider(transcriptModelConfig.provider);
@@ -428,7 +491,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
                 <Select
                   value={streamingModel}
                   onValueChange={setStreamingModel}
-                  disabled={loadingModels || installedStreamingModels.length === 0}
+                  disabled={loadingStreamingModels || installedStreamingModels.length === 0}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder={t('settings:services.selectInstalledModel')} />
@@ -441,7 +504,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
                 </Select>
               </div>
             </div>
-            {installedStreamingModels.length === 0 && !loadingModels && (
+            {installedStreamingModels.length === 0 && !loadingStreamingModels && (
               <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                 <span>{t('settings:services.transcription.streamingModelMissing')}</span>
                 <Button variant="outline" size="sm" onClick={onOpenModels}>
@@ -684,7 +747,7 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
           />
         </div>
 
-        {speakerConfig.enabled && !speakerInstalled && (
+        {speakerConfig.enabled && speakerStatusLoaded && !speakerInstalled && (
           <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
             <span>{t('settings:services.speaker.modelMissing')}</span>
             <Button variant="outline" size="sm" onClick={onOpenModels}>{t('settings:tabs.models')}</Button>
@@ -730,7 +793,13 @@ export function ServicesSettings({ onOpenModels }: ServicesSettingsProps) {
           </div>
         )}
         <div className="mt-5 flex justify-end">
-          <Button onClick={saveSpeaker} disabled={savingSpeaker || (speakerConfig.enabled && !speakerInstalled)}>
+          <Button
+            onClick={saveSpeaker}
+            disabled={
+              savingSpeaker ||
+              (speakerConfig.enabled && (!speakerStatusLoaded || !speakerInstalled))
+            }
+          >
             {savingSpeaker ? t('settings:actions.saving') : t('settings:actions.save')}
           </Button>
         </div>

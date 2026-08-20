@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { notifyModelAssetsChanged } from '@/lib/model-assets-events';
 
 export type SherpaAsrModelState = 'available' | 'missing' | 'corrupt';
 
@@ -119,14 +120,24 @@ export const SherpaAsrAPI = {
     invoke<HomophoneRuleStatus[]>('sherpa_asr_import_homophone_rules'),
   deleteHomophoneRule: (ruleId: string) =>
     invoke<HomophoneRuleStatus[]>('sherpa_asr_delete_homophone_rule', { ruleId }),
-  downloadModel: (modelId: string) =>
-    invoke<void>('sherpa_asr_download_model', { modelId }),
-  importModelArchive: () =>
-    invoke<ImportedSherpaModel | null>('sherpa_asr_import_model_archive'),
-  importModelDirectory: () =>
-    invoke<ImportedSherpaModel | null>('sherpa_asr_import_model_directory'),
-  deleteModel: (modelId: string) =>
-    invoke<void>('sherpa_asr_delete_model', { modelId }),
+  downloadModel: async (modelId: string) => {
+    await invoke<void>('sherpa_asr_download_model', { modelId });
+    notifyModelAssetsChanged('sherpa-onnx');
+  },
+  importModelArchive: async () => {
+    const result = await invoke<ImportedSherpaModel | null>('sherpa_asr_import_model_archive');
+    if (result) notifyModelAssetsChanged('sherpa-onnx');
+    return result;
+  },
+  importModelDirectory: async () => {
+    const result = await invoke<ImportedSherpaModel | null>('sherpa_asr_import_model_directory');
+    if (result) notifyModelAssetsChanged('sherpa-onnx');
+    return result;
+  },
+  deleteModel: async (modelId: string) => {
+    await invoke<void>('sherpa_asr_delete_model', { modelId });
+    notifyModelAssetsChanged('sherpa-onnx');
+  },
 };
 
 export function supportedLanguageCodes(
