@@ -17,7 +17,7 @@ import { TranscriptProvider } from '@/contexts/TranscriptContext'
 import { ConfigProvider, useConfig } from '@/contexts/ConfigContext'
 import { OnboardingProvider } from '@/contexts/OnboardingContext'
 import { OnboardingFlow } from '@/components/onboarding'
-import { loadBetaFeatures } from '@/types/betaFeatures'
+import { BETA_FEATURES_CHANGED_EVENT, BetaFeatures, DISABLED_BETA_FEATURES, readLegacyImportAndRetranscribe } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcessingProvider'
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
@@ -27,6 +27,7 @@ import { I18nProvider } from '@/i18n/I18nProvider'
 import { useTranslation } from 'react-i18next'
 import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
 import { SummaryJobsProvider } from '@/contexts/SummaryJobsContext'
+import { MeetingProcessingJobsProvider } from '@/contexts/MeetingProcessingJobsContext'
 
 
 const sourceSans3 = Source_Sans_3({
@@ -74,11 +75,32 @@ export default function RootLayout({
   const { t, i18n } = useTranslation(['recording', 'errors']);
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [onboardingCompleted, setOnboardingCompleted] = useState(false)
+  const [betaFeatures, setBetaFeatures] = useState<BetaFeatures>(() => ({ ...DISABLED_BETA_FEATURES }))
 
   // Import audio state
   const [showDropOverlay, setShowDropOverlay] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [importFilePath, setImportFilePath] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    void invoke<BetaFeatures>('pipeline_migrate_legacy_beta_features', {
+      legacyImportAndRetranscribe: readLegacyImportAndRetranscribe(),
+    })
+      .then((features) => {
+        localStorage.removeItem('betaFeatures')
+        if (active) setBetaFeatures(features)
+      })
+      .catch((error) => console.warn('[Layout] Unable to load Beta gates:', error))
+    const handleChanged = (event: Event) => {
+      setBetaFeatures((event as CustomEvent<BetaFeatures>).detail)
+    }
+    window.addEventListener(BETA_FEATURES_CHANGED_EVENT, handleChanged)
+    return () => {
+      active = false
+      window.removeEventListener(BETA_FEATURES_CHANGED_EVENT, handleChanged)
+    }
+  }, [])
 
   useEffect(() => {
     // Check onboarding status first
@@ -133,9 +155,6 @@ export default function RootLayout({
 
   // Handle file drop for audio import
   const handleFileDrop = useCallback((paths: string[]) => {
-    // Check if beta features are enabled (read from localStorage directly since we're outside ConfigProvider)
-    const betaFeatures = loadBetaFeatures();
-
     if (!betaFeatures.importAndRetranscribe) {
       toast.error(t('betaDisabled'), {
         description: t('enableImport')
@@ -158,7 +177,7 @@ export default function RootLayout({
         description: t('supportedFormats', { formats: getAudioFormatsDisplayList() })
       });
     }
-  }, []);
+  }, [betaFeatures.importAndRetranscribe, t]);
 
   // Listen for drag-drop events
   useEffect(() => {
@@ -170,7 +189,7 @@ export default function RootLayout({
     const setupListeners = async () => {
       // Drag enter/over - show overlay only if beta feature is enabled
       const unlistenDragEnter = await listen('tauri://drag-enter', () => {
-        if (loadBetaFeatures().importAndRetranscribe) {
+        if (betaFeatures.importAndRetranscribe) {
           setShowDropOverlay(true);
         }
       });
@@ -210,7 +229,7 @@ export default function RootLayout({
       cleanedUpRef.current = true;
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [showOnboarding, handleFileDrop]);
+  }, [showOnboarding, handleFileDrop, betaFeatures.importAndRetranscribe]);
 
   // Handle import dialog close
   const handleImportDialogClose = useCallback((open: boolean) => {
@@ -244,6 +263,7 @@ export default function RootLayout({
                 <OllamaDownloadProvider>
                   <OnboardingProvider>
                     <SummaryJobsProvider>
+                    <MeetingProcessingJobsProvider>
                     <SidebarProvider>
                         <TooltipProvider>
                           <RecordingPostProcessingProvider>
@@ -272,6 +292,7 @@ export default function RootLayout({
                           </RecordingPostProcessingProvider>
                         </TooltipProvider>
                     </SidebarProvider>
+                    </MeetingProcessingJobsProvider>
                     </SummaryJobsProvider>
                   </OnboardingProvider>
 

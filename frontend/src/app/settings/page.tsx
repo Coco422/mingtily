@@ -106,12 +106,12 @@ export default function SettingsPage() {
               <RecordingSettings />
             </TabsContent>
             {mountedTabs.has('models') && (
-              <TabsContent value="models" forceMount>
+              <TabsContent value="models" forceMount className="data-[state=inactive]:hidden">
                 <ModelsSettings onOpenServices={() => activateTab('services')} />
               </TabsContent>
             )}
             {mountedTabs.has('services') && (
-              <TabsContent value="services" forceMount>
+              <TabsContent value="services" forceMount className="data-[state=inactive]:hidden">
                 <ServicesSettings onOpenModels={() => activateTab('models')} />
               </TabsContent>
             )}

@@ -6,6 +6,12 @@ use tauri::{AppHandle, Runtime};
 pub fn speaker_diarization_get_config<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<SpeakerDiarizationConfig, String> {
+    if let Ok(Some(pipeline)) = crate::pipeline::load_config_if_present(&app) {
+        let mut config = configuration::load_config(&app).unwrap_or_default();
+        config.enabled = pipeline.speaker.live_enabled;
+        config.speaker_count = pipeline.speaker.speaker_count;
+        return Ok(config);
+    }
     configuration::load_config(&app).map_err(|error| error.to_string())
 }
 
@@ -14,7 +20,9 @@ pub fn speaker_diarization_save_config<R: Runtime>(
     app: AppHandle<R>,
     config: SpeakerDiarizationConfig,
 ) -> Result<(), String> {
-    configuration::save_config(&app, &config).map_err(|error| error.to_string())
+    configuration::save_config(&app, &config).map_err(|error| error.to_string())?;
+    crate::pipeline::sync_legacy_speaker(&app, config.enabled, config.speaker_count)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

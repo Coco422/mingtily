@@ -1,8 +1,9 @@
 use crate::config::WHISPER_MODEL_CATALOG;
-use crate::whisper_engine::{ModelInfo, WhisperEngine};
+use crate::whisper_engine::{ImportedWhisperModel, ModelInfo, WhisperEngine};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{command, AppHandle, Emitter, Manager, Runtime};
+use tauri_plugin_dialog::DialogExt;
 
 // Global whisper engine
 pub static WHISPER_ENGINE: Mutex<Option<Arc<WhisperEngine>>> = Mutex::new(None);
@@ -70,6 +71,32 @@ pub async fn whisper_get_available_models() -> Result<Vec<ModelInfo>, String> {
         log::info!("Whisper engine not initialized, scanning models directory directly");
         discover_models_standalone()
     }
+}
+
+#[command]
+pub async fn whisper_import_model_file<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Option<ImportedWhisperModel>, String> {
+    let app_for_dialog = app.clone();
+    let selected = tokio::task::spawn_blocking(move || {
+        app_for_dialog
+            .dialog()
+            .file()
+            .add_filter("Whisper GGML model", &["bin"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| format!("Whisper model dialog failed: {error}"))?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let source = selected.into_path().map_err(|error| error.to_string())?;
+    let models_dir =
+        get_models_directory().ok_or_else(|| "Models directory not initialized".to_string())?;
+    crate::whisper_engine::import_registered_whisper_file(&models_dir, &source)
+        .await
+        .map(Some)
+        .map_err(|error| error.to_string())
 }
 
 /// Discover Whisper models by scanning the models directory directly

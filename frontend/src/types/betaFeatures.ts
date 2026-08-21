@@ -22,10 +22,21 @@ export interface BetaFeatures {
    * @since v0.3.0
    */
   importAndRetranscribe: boolean;
+  customTranscriptionPipelines: boolean;
+  experimentalAsrModels: boolean;
 }
 
 export const DEFAULT_BETA_FEATURES: BetaFeatures = {
   importAndRetranscribe: true, // Default: enabled
+  customTranscriptionPipelines: true,
+  experimentalAsrModels: false,
+};
+
+/** Safe pre-load state: gated UI stays unreachable until Rust returns its store value. */
+export const DISABLED_BETA_FEATURES: BetaFeatures = {
+  importAndRetranscribe: false,
+  customTranscriptionPipelines: true,
+  experimentalAsrModels: false,
 };
 
 
@@ -34,6 +45,8 @@ export const DEFAULT_BETA_FEATURES: BetaFeatures = {
  */
 export const BETA_FEATURE_NAMES: Record<keyof BetaFeatures, string> = {
   importAndRetranscribe: 'Import Audio & Retranscribe',
+  customTranscriptionPipelines: 'Custom transcription pipelines',
+  experimentalAsrModels: 'Experimental ASR models',
 };
 
 /**
@@ -41,6 +54,8 @@ export const BETA_FEATURE_NAMES: Record<keyof BetaFeatures, string> = {
  */
 export const BETA_FEATURE_DESCRIPTIONS: Record<keyof BetaFeatures, string> = {
   importAndRetranscribe: 'Import audio files to transcribe or retranscribe existing meetings with different language settings.',
+  customTranscriptionPipelines: 'Choose live, finalized, and post-meeting processing paths.',
+  experimentalAsrModels: 'Show experimental streaming and high-resource speech recognition models.',
 };
 
 /**
@@ -49,41 +64,18 @@ export const BETA_FEATURE_DESCRIPTIONS: Record<keyof BetaFeatures, string> = {
  */
 export type BetaFeatureKey = keyof BetaFeatures;
 
-/**
- * Load beta features from localStorage
- *
- * @returns BetaFeatures object with values from localStorage or defaults
- */
-export function loadBetaFeatures(): BetaFeatures {
-  if (typeof window === 'undefined') {
-    return { ...DEFAULT_BETA_FEATURES };
-  }
+export const BETA_FEATURES_CHANGED_EVENT = 'mingtily-beta-features-changed';
 
+export function readLegacyImportAndRetranscribe(): boolean | null {
+  if (typeof window === 'undefined') return null;
   try {
     const saved = localStorage.getItem('betaFeatures');
-    if (saved) {
-      const parsed = JSON.parse(saved) as Partial<BetaFeatures>;
-      // Merge with defaults to handle missing keys (graceful degradation)
-      return { ...DEFAULT_BETA_FEATURES, ...parsed };
-    }
-  } catch (error) {
-    console.error('[BetaFeatures] Failed to load from localStorage:', error);
-  }
-
-  return { ...DEFAULT_BETA_FEATURES };
-}
-
-/**
- * Save beta features to localStorage
- *
- * @param features - BetaFeatures object to save
- */
-export function saveBetaFeatures(features: BetaFeatures): void {
-  if (typeof window === 'undefined') return;
-
-  try {
-    localStorage.setItem('betaFeatures', JSON.stringify(features));
-  } catch (error) {
-    console.error('[BetaFeatures] Failed to save to localStorage:', error);
+    if (!saved) return null;
+    const parsed = JSON.parse(saved) as { importAndRetranscribe?: unknown };
+    return typeof parsed.importAndRetranscribe === 'boolean'
+      ? parsed.importAndRetranscribe
+      : null;
+  } catch {
+    return null;
   }
 }

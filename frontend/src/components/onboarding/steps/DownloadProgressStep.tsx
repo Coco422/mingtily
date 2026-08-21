@@ -1,5 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import React, { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { Mic, Sparkles, Check, Loader2, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,12 +9,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getSummaryModelSizeLabel, getSummaryModelSizeMb } from '@/lib/onboarding-summary-model';
 import { useTranslation } from 'react-i18next';
 import {
-  SherpaAsrAPI,
-  type SherpaAsrDownloadProgress,
-  SENSEVOICE_MODEL_ID,
-} from '@/lib/sherpa-asr';
-
-const SENSEVOICE_DOWNLOAD_SIZE_MIB = 165_783_878 / 1024 / 1024;
+  applyRecommendedPipeline,
+  downloadPipelineAsset,
+  loadPipelineAssetRequirements,
+  type PipelineAssetRequirement,
+} from '@/lib/pipeline-recommendations';
+import { pipelineService } from '@/services/pipelineService';
 
 type DownloadStatus = 'waiting' | 'downloading' | 'completed' | 'error';
 
@@ -32,6 +31,7 @@ export function DownloadProgressStep() {
   const { t } = useTranslation(['onboarding', 'common']);
   const {
     goNext,
+    selectedPipelinePreset,
     selectedSummaryModel,
     recommendedSummaryModel,
     transcriptionModelDownloaded,
@@ -48,7 +48,7 @@ export function DownloadProgressStep() {
     status: transcriptionModelDownloaded ? 'completed' : 'waiting',
     progress: transcriptionModelDownloaded ? 100 : 0,
     downloadedMb: 0,
-    totalMb: SENSEVOICE_DOWNLOAD_SIZE_MIB,
+    totalMb: 0,
     speedMbps: 0,
   });
 
@@ -61,99 +61,32 @@ export function DownloadProgressStep() {
   });
 
   const [isCompleting, setIsCompleting] = useState(false);
-  const retryingRef = useRef(false);
-  const retryingSummaryRef = useRef(false);
+  const [pipelineAssets, setPipelineAssets] = useState<PipelineAssetRequirement[]>([]);
 
-  // Retry download handler
-  const handleRetryDownload = async () => {
-    // Prevent multiple simultaneous retries
-    if (retryingRef.current) {
-      console.log('[DownloadProgressStep] Retry already in progress, ignoring');
-      return;
-    }
-
-    console.log('[DownloadProgressStep] Retrying SenseVoice download');
-    retryingRef.current = true;
-
-    // Reset error state
-    setTranscriptionState((prev) => ({
-      ...prev,
-      status: 'waiting',
+  const refreshPipelineAssets = async () => {
+    const assets = await loadPipelineAssetRequirements(selectedPipelinePreset);
+    setPipelineAssets(assets);
+    const totalMb = assets.reduce((sum, asset) => sum + asset.downloadSizeMiB, 0);
+    const downloadedMb = assets.filter((asset) => asset.installed)
+      .reduce((sum, asset) => sum + asset.downloadSizeMiB, 0);
+    const ready = assets.length > 0 && assets.every((asset) => asset.installed);
+    setTranscriptionState((previous) => ({
+      ...previous,
+      status: ready ? 'completed' : previous.status === 'downloading' ? 'downloading' : 'waiting',
+      progress: totalMb > 0 ? downloadedMb / totalMb * 100 : 0,
+      downloadedMb,
+      totalMb,
       error: undefined,
-      progress: 0,
-      downloadedMb: 0,
-      speedMbps: 0,
     }));
-
-    try {
-      await SherpaAsrAPI.downloadModel(SENSEVOICE_MODEL_ID);
-      // Progress events will update state
-    } catch (error) {
-      console.error('[DownloadProgressStep] Retry failed:', error);
-      setTranscriptionState((prev) => ({
-        ...prev,
-        status: 'error',
-        error: error instanceof Error ? error.message : t('onboarding:retryFailed'),
-      }));
-
-      toast.error(t('onboarding:downloadRetryFailed'), {
-        description: t('onboarding:connectionHint'),
-      });
-    } finally {
-      // Allow retry again after 2 seconds
-      setTimeout(() => {
-        retryingRef.current = false;
-      }, 2000);
-    }
+    setTranscriptionModelDownloaded(ready);
+    return { assets, ready };
   };
 
-  // Retry summary download handler
-  const handleRetrySummaryDownload = async () => {
-    // Prevent multiple simultaneous retries
-    if (retryingSummaryRef.current) {
-      console.log('[DownloadProgressStep] Summary retry already in progress, ignoring');
-      return;
-    }
-
-    console.log('[DownloadProgressStep] Retrying summary model download');
-    retryingSummaryRef.current = true;
-
-    // Reset error state
-    setSummaryState((prev) => ({
-      ...prev,
-      status: 'downloading',
-      error: undefined,
-      progress: 0,
-      downloadedMb: 0,
-      totalMb: getSummaryModelSizeMb(selectedSummaryModel || recommendedSummaryModel),
-      speedMbps: 0,
-    }));
-
-    try {
-      // Call download command directly (no retry command exists for built-in AI)
-      const modelName = selectedSummaryModel;
-      if (!modelName) {
-        throw new Error(t('onboarding:summaryRecommendationUnavailable'));
-      }
-      await invoke('builtin_ai_download_model', { modelName });
-    } catch (error) {
-      console.error('[DownloadProgressStep] Summary retry failed:', error);
-      setSummaryState((prev) => ({
-        ...prev,
-        status: 'error',
-        error: error instanceof Error ? error.message : t('onboarding:retryFailed'),
-      }));
-
-      toast.error(t('onboarding:summaryDownloadRetryFailed'), {
-        description: t('onboarding:connectionHint'),
-      });
-    } finally {
-      // Allow retry again after 2 seconds
-      setTimeout(() => {
-        retryingSummaryRef.current = false;
-      }, 2000);
-    }
-  };
+  useEffect(() => {
+    void refreshPipelineAssets().catch((error) => {
+      setTranscriptionState((previous) => ({ ...previous, status: 'error', error: String(error) }));
+    });
+  }, [selectedPipelinePreset]);
 
   // Detect platform on mount
   useEffect(() => {
@@ -168,59 +101,6 @@ export function DownloadProgressStep() {
 
     checkPlatform();
   }, []);
-
-  // Listen to SenseVoice download progress.
-  useEffect(() => {
-    const unlistenProgress = listen<SherpaAsrDownloadProgress>(
-      'sherpa-asr-model-download-progress',
-      (event) => {
-        const { model_id, progress, downloaded_mb, total_mb, status } = event.payload;
-        if (model_id === SENSEVOICE_MODEL_ID) {
-          setTranscriptionState((prev) => ({
-            ...prev,
-            status: status === 'complete' ? 'completed' : 'downloading',
-            progress,
-            downloadedMb: downloaded_mb ?? prev.downloadedMb,
-            totalMb: total_mb ?? prev.totalMb,
-            speedMbps: 0,
-          }));
-
-          if (status === 'complete' || progress >= 100) {
-            setTranscriptionModelDownloaded(true);
-          }
-        }
-      }
-    );
-
-    const unlistenComplete = listen<{ model_id: string }>(
-      'sherpa-asr-model-download-complete',
-      (event) => {
-        if (event.payload.model_id === SENSEVOICE_MODEL_ID) {
-          setTranscriptionState((prev) => ({ ...prev, status: 'completed', progress: 100 }));
-          setTranscriptionModelDownloaded(true);
-        }
-      }
-    );
-
-    const unlistenError = listen<{ model_id: string; error: string }>(
-      'sherpa-asr-model-download-error',
-      (event) => {
-        if (event.payload.model_id === SENSEVOICE_MODEL_ID) {
-          setTranscriptionState((prev) => ({
-            ...prev,
-            status: 'error',
-            error: event.payload.error,
-          }));
-        }
-      }
-    );
-
-    return () => {
-      unlistenProgress.then((fn) => fn());
-      unlistenComplete.then((fn) => fn());
-      unlistenError.then((fn) => fn());
-    };
-  }, [setTranscriptionModelDownloaded]);
 
   // Listen to Summary Model download progress (always downloading for builtin-ai)
   useEffect(() => {
@@ -305,12 +185,33 @@ export function DownloadProgressStep() {
 
     try {
       setTranscriptionState((prev) => ({ ...prev, status: 'downloading', error: undefined }));
-      await startBackgroundDownloads({
-        includeTranscription: true,
-        includeSummary: false,
-      });
+      if (selectedPipelinePreset === 'quality') {
+        const beta = await pipelineService.getBetaFeatures();
+        if (!beta.experimentalAsrModels) {
+          await pipelineService.saveBetaFeatures({ ...beta, experimentalAsrModels: true });
+        }
+      }
+      let assets = pipelineAssets;
+      if (assets.length === 0) {
+        assets = (await refreshPipelineAssets()).assets;
+      }
+      const totalMb = assets.reduce((sum, asset) => sum + asset.downloadSizeMiB, 0);
+      let downloadedMb = assets.filter((asset) => asset.installed)
+        .reduce((sum, asset) => sum + asset.downloadSizeMiB, 0);
+      for (const asset of assets.filter((item) => !item.installed)) {
+        await downloadPipelineAsset(asset);
+        downloadedMb += asset.downloadSizeMiB;
+        setTranscriptionState((previous) => ({
+          ...previous,
+          status: 'downloading',
+          downloadedMb,
+          totalMb,
+          progress: totalMb > 0 ? downloadedMb / totalMb * 100 : 0,
+        }));
+      }
+      await refreshPipelineAssets();
     } catch (error) {
-      console.error('Failed to start SenseVoice download:', error);
+      console.error('Failed to download recommended Pipeline assets:', error);
       setTranscriptionState((prev) => ({ ...prev, status: 'error', error: String(error) }));
     }
   };
@@ -318,25 +219,23 @@ export function DownloadProgressStep() {
   const handleContinue = async () => {
     let transcriptionReady = transcriptionModelDownloaded;
 
-    // Verify actual model availability (catches state drift)
+    // Verify the complete recommended setup on disk (catches state drift).
     try {
-      const models = await SherpaAsrAPI.listModels();
-      const actuallyAvailable = models.some(
-        (model) => model.id === SENSEVOICE_MODEL_ID && model.status === 'available'
-      );
-      transcriptionReady = actuallyAvailable;
+      const verified = await refreshPipelineAssets();
+      transcriptionReady = verified.ready;
 
-      if (actuallyAvailable && !transcriptionModelDownloaded) {
-        console.log('[DownloadProgressStep] Model available but state not updated');
-        setTranscriptionModelDownloaded(true);
-        setTranscriptionState((prev) => ({
-          ...prev,
-          status: 'completed',
-          progress: 100,
-        }));
+      if (transcriptionReady) {
+        if (selectedPipelinePreset === 'quality') {
+          const beta = await pipelineService.getBetaFeatures();
+          if (!beta.experimentalAsrModels) {
+            await pipelineService.saveBetaFeatures({ ...beta, experimentalAsrModels: true });
+          }
+        }
+        const current = await pipelineService.getConfig();
+        await pipelineService.save(applyRecommendedPipeline(current, selectedPipelinePreset));
       }
     } catch (error) {
-      console.warn('[DownloadProgressStep] Failed to verify model:', error);
+      console.warn('[DownloadProgressStep] Failed to verify or save Pipeline:', error);
     }
 
     if (transcriptionState.status === 'downloading' || summaryState.status === 'downloading') {
@@ -443,7 +342,7 @@ export function DownloadProgressStep() {
           <p className="text-xs text-red-500 mt-1">{state.error}</p>
           {onDownload && (
             <button
-              onClick={title === t('onboarding:transcriptionEngine') ? handleRetryDownload : handleRetrySummaryDownload}
+              onClick={onDownload}
               className="mt-3 w-full h-9 px-4 bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -469,10 +368,10 @@ export function DownloadProgressStep() {
         {/* Download Cards */}
         <div className="w-full max-w-lg space-y-4">
           {renderDownloadCard(
-            t('onboarding:transcriptionEngine'),
+            t('onboarding:pipelineBundle', { preset: t(`onboarding:pipelinePresets.${selectedPipelinePreset}.name`) }),
             <Mic className="w-5 h-5 text-gray-600" />,
             transcriptionState,
-            `SenseVoice Small int8 · ~${Math.round(SENSEVOICE_DOWNLOAD_SIZE_MIB)} MiB`,
+            pipelineAssets.map((asset) => asset.name).join(' · '),
             'MiB',
             startTranscriptionDownload,
             t('onboarding:downloadTranscription')

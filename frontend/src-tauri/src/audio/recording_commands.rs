@@ -3,10 +3,6 @@
 // Slim Tauri command layer for recording functionality.
 // Delegates to transcription and recording modules for actual implementation.
 
-use crate::speaker_diarization::engine::diarize_audio_file_in_windows_with_progress;
-use crate::speaker_diarization::{
-    installed_model_paths, refine_speaker_labels, SpeakerDiarizationConfig, SpeakerLabelUpdate,
-};
 use anyhow::Result;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -116,14 +112,14 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         meeting_name.is_some()
     );
 
-    let engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
-
     // Check if already recording
     let current_recording_state = IS_RECORDING.load(Ordering::SeqCst);
     info!("🔍 IS_RECORDING state check: {}", current_recording_state);
     if current_recording_state {
         return Err("Recording already in progress".to_string());
     }
+    let _recording_priority = crate::processing_jobs::prepare_for_recording().await?;
+    let engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
@@ -317,6 +313,9 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
             // Parse the transcript update from the event payload
             if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
+                if update.is_partial {
+                    return;
+                }
                 // Create structured transcript segment
                 let segment = crate::audio::recording_saver::TranscriptSegment {
                     id: format!("seg_{}", update.sequence_id),
@@ -386,14 +385,14 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         meeting_name.is_some()
     );
 
-    let engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
-
     // Check if already recording
     let current_recording_state = IS_RECORDING.load(Ordering::SeqCst);
     info!("🔍 IS_RECORDING state check: {}", current_recording_state);
     if current_recording_state {
         return Err("Recording already in progress".to_string());
     }
+    let _recording_priority = crate::processing_jobs::prepare_for_recording().await?;
+    let engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
@@ -500,6 +499,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
             // Parse the transcript update from the event payload
             if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
+                if update.is_partial {
+                    return;
+                }
                 // Create structured transcript segment
                 let segment = crate::audio::recording_saver::TranscriptSegment {
                     id: format!("seg_{}", update.sequence_id),
@@ -810,7 +812,7 @@ pub async fn stop_recording<R: Runtime>(
         let meeting_folder = manager.get_meeting_folder();
         let meeting_name = manager.get_meeting_name();
 
-        let final_audio_path = match tokio::time::timeout(
+        let _final_audio_path = match tokio::time::timeout(
             tokio::time::Duration::from_secs(300), // 5 minutes max for file I/O
             manager.save_recording_only(&app),
         )
@@ -833,13 +835,9 @@ pub async fn stop_recording<R: Runtime>(
             }
         };
 
-        let speaker_updates = refine_recording_speakers(
-            &app,
-            manager.get_transcript_segments(),
-            final_audio_path.as_deref(),
-        )
-        .await;
-        manager.apply_speaker_updates(&speaker_updates);
+        // Global speaker refinement is intentionally decoupled from stop. The frontend
+        // enqueues a durable meeting-processing job after SQLite assigns the meeting ID.
+        // Realtime labels remain available immediately and are refined in the background.
         let _ = app.emit(
             "recording-shutdown-progress",
             serde_json::json!({
@@ -911,6 +909,10 @@ pub async fn stop_recording<R: Runtime>(
     )
     .map_err(|e| e.to_string())?;
 
+    // Resume any older automatic task that yielded to this recording. New jobs for
+    // the meeting that just stopped are enqueued after the frontend saves its ID.
+    crate::processing_jobs::dispatch_pending(app.clone()).await;
+
     // Update tray menu to reflect stopped state
     crate::tray::update_tray_menu(&app);
 
@@ -918,131 +920,12 @@ pub async fn stop_recording<R: Runtime>(
     Ok(())
 }
 
-async fn refine_recording_speakers<R: Runtime>(
-    app: &AppHandle<R>,
-    transcripts: Vec<crate::audio::recording_saver::TranscriptSegment>,
-    audio_path: Option<&str>,
-) -> Vec<SpeakerLabelUpdate> {
-    if transcripts.is_empty() {
-        return Vec::new();
-    }
-
-    let fallback = || {
-        transcripts
-            .iter()
-            .map(|segment| SpeakerLabelUpdate {
-                sequence_id: segment.sequence_id,
-                speaker: segment.speaker.clone(),
-            })
-            .collect::<Vec<_>>()
-    };
-
-    let speaker_config = match crate::speaker_diarization::configuration::load_config(app) {
-        Ok(config) => config,
-        Err(error) => {
-            warn!(
-                "Unable to read speaker diarization settings during stop refinement; using compatible defaults: {}",
-                error
-            );
-            SpeakerDiarizationConfig::default()
-        }
-    };
-    if !speaker_config.enabled {
-        info!("Speaker diarization disabled; skipping global label refinement");
-        return fallback();
-    }
-
-    let Some(audio_path) = audio_path else {
-        return fallback();
-    };
-    let paths = match installed_model_paths(app) {
-        Ok(Some(paths)) => paths,
-        Ok(None) => return fallback(),
-        Err(error) => {
-            warn!(
-                "Unable to inspect speaker model during stop refinement: {}",
-                error
-            );
-            return fallback();
-        }
-    };
-
-    let transcript_ranges = transcripts
-        .iter()
-        .map(|segment| {
-            (
-                segment.sequence_id,
-                segment.audio_start_time,
-                segment.audio_end_time,
-                segment.speaker.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let diarization_ranges = transcript_ranges
-        .iter()
-        .map(|(_, start, end, _)| (*start, *end))
-        .collect::<Vec<_>>();
-    let audio_path = audio_path.to_string();
-    let progress_app = app.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        let turns = diarize_audio_file_in_windows_with_progress(
-            std::path::Path::new(&audio_path),
-            &paths,
-            &diarization_ranges,
-            speaker_config.speaker_count,
-            |window| {
-                let progress =
-                    speaker_refinement_progress(window.completed_windows, window.total_windows);
-                let _ = progress_app.emit(
-                    "recording-shutdown-progress",
-                    serde_json::json!({
-                        "stage": "refining_speakers",
-                        "message": "Refining speaker labels...",
-                        "progress": progress,
-                        "current_window": window.current_window,
-                        "completed_windows": window.completed_windows,
-                        "total_windows": window.total_windows
-                    }),
-                );
-            },
-        )?;
-        Ok::<_, anyhow::Error>(refine_speaker_labels(&transcript_ranges, &turns))
-    })
-    .await;
-
-    match result {
-        Ok(Ok(updates)) => updates,
-        Ok(Err(error)) => {
-            warn!(
-                "Global speaker refinement failed; keeping realtime labels: {}",
-                error
-            );
-            fallback()
-        }
-        Err(error) => {
-            warn!(
-                "Global speaker refinement task failed; keeping realtime labels: {}",
-                error
-            );
-            fallback()
-        }
-    }
-}
-
-fn speaker_refinement_progress(completed_windows: usize, total_windows: usize) -> u8 {
-    const START: usize = 65;
-    const SPAN: usize = 30;
-
-    if total_windows == 0 {
-        return START as u8;
-    }
-
-    let completed = completed_windows.min(total_windows);
-    (START + completed * SPAN / total_windows) as u8
-}
-
 /// Check if recording is active
 pub async fn is_recording() -> bool {
+    IS_RECORDING.load(Ordering::SeqCst)
+}
+
+pub(crate) fn is_recording_now() -> bool {
     IS_RECORDING.load(Ordering::SeqCst)
 }
 
@@ -1366,19 +1249,5 @@ pub async fn attempt_device_reconnect(
             error!("Manual reconnection error: {}", e);
             Err(e.to_string())
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::speaker_refinement_progress;
-
-    #[test]
-    fn speaker_refinement_progress_is_bounded_and_monotonic() {
-        assert_eq!(speaker_refinement_progress(0, 12), 65);
-        assert_eq!(speaker_refinement_progress(6, 12), 80);
-        assert_eq!(speaker_refinement_progress(12, 12), 95);
-        assert_eq!(speaker_refinement_progress(20, 12), 95);
-        assert_eq!(speaker_refinement_progress(0, 0), 65);
     }
 }

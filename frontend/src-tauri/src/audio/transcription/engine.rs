@@ -2,7 +2,7 @@ use super::{ParakeetProvider, TranscriptionProvider, WhisperProvider};
 use crate::config::{DEFAULT_PARAKEET_MODEL, DEFAULT_WHISPER_MODEL};
 use log::{info, warn};
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 
 pub const WHISPER_PROVIDER_ID: &str = "localWhisper";
 pub const PARAKEET_PROVIDER_ID: &str = "parakeet";
@@ -16,7 +16,7 @@ pub struct TranscriptionSelection {
 pub async fn validate_transcription_model_ready<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<(), String> {
-    let selection = resolve_transcription_selection(app, None, None).await;
+    let selection = resolve_transcription_selection(app, None, None).await?;
     if selection.provider == crate::sherpa_asr::PROVIDER_ID
         && crate::sherpa_asr::is_online_model(&selection.model)
     {
@@ -43,42 +43,37 @@ pub async fn validate_transcription_model_ready<R: Runtime>(
 pub async fn resolve_configured_streaming_model<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<Option<crate::sherpa_asr::models::InstalledSherpaModel>, String> {
-    let selection = resolve_transcription_selection(app, None, None).await;
-    match crate::sherpa_asr::streaming_config::load_config_if_present(app)
-        .map_err(|error| error.to_string())?
-    {
-        Some(config) => {
-            if !config.enabled {
-                return Ok(None);
-            }
-            if selection.provider == config.provider && selection.model == config.model {
-                return Err(
-                    "Beta live transcription requires a separate finalized model. Select an offline finalized model in Services."
-                        .to_string(),
-                );
-            }
-            crate::sherpa_asr::installed_model(app, &config.model)
-                .map_err(|error| error.to_string())?
-                .map(Some)
-                .ok_or_else(|| {
-                    format!(
-                        "Streaming transcription model '{}' is missing or damaged. Download or repair it in Models.",
-                        config.model
-                    )
-                })
-        }
-        None => {
-            // v0.6 compatibility: an Online Paraformer selected as the only ASR model
-            // keeps its previous live + finalized behavior until the new strategy is saved.
-            if selection.provider != crate::sherpa_asr::PROVIDER_ID
-                || !crate::sherpa_asr::is_online_model(&selection.model)
-            {
-                return Ok(None);
-            }
-            crate::sherpa_asr::installed_model(app, &selection.model)
-                .map_err(|error| error.to_string())
-        }
+    let resolved = crate::pipeline::resolve_loaded(app)
+        .await
+        .map_err(|error| error.to_string())?;
+    let config = resolved.runtime_config();
+    if config.live.mode != crate::pipeline::LiveMode::ContinuousPreview {
+        return Ok(None);
     }
+    let provider = config
+        .live
+        .streaming_provider
+        .as_deref()
+        .unwrap_or(crate::sherpa_asr::PROVIDER_ID);
+    if provider != crate::sherpa_asr::PROVIDER_ID {
+        return Err(format!(
+            "Streaming Provider '{provider}' is not implemented by the current recording path"
+        ));
+    }
+    let model = config
+        .live
+        .streaming_model
+        .as_deref()
+        .ok_or_else(|| "A streaming model is required".to_string())?;
+    crate::sherpa_asr::installed_model(app, model)
+        .map_err(|error| error.to_string())?
+        .map(Some)
+        .ok_or_else(|| {
+            format!(
+                "Streaming transcription model '{}' is missing or damaged. Download or repair it in Models.",
+                model
+            )
+        })
 }
 
 pub async fn get_or_init_transcription_engine<R: Runtime>(
@@ -92,14 +87,40 @@ pub async fn load_transcription_provider<R: Runtime>(
     requested_provider: Option<&str>,
     requested_model: Option<&str>,
 ) -> Result<Arc<dyn TranscriptionProvider>, String> {
-    let selection = resolve_transcription_selection(app, requested_provider, requested_model).await;
+    let resolved = resolve_requested_pipeline(app, requested_provider, requested_model).await?;
+    load_resolved_transcription_provider(app, resolved).await
+}
+
+pub(crate) async fn load_transcription_provider_for_config<R: Runtime>(
+    app: &AppHandle<R>,
+    config: crate::pipeline::PipelineConfig,
+    requested_provider: Option<&str>,
+    requested_model: Option<&str>,
+) -> Result<Arc<dyn TranscriptionProvider>, String> {
+    let resolved =
+        resolve_pipeline_request(app, config, requested_provider, requested_model).await?;
+    load_resolved_transcription_provider(app, resolved).await
+}
+
+async fn load_resolved_transcription_provider<R: Runtime>(
+    app: &AppHandle<R>,
+    resolved: crate::pipeline::ResolvedPipeline,
+) -> Result<Arc<dyn TranscriptionProvider>, String> {
+    let runtime_config = resolved.runtime_config();
+    let selection = TranscriptionSelection {
+        provider: normalize_provider_id(&runtime_config.finalized.provider),
+        model: runtime_config.finalized.model.clone(),
+    };
     info!(
         "Loading transcription provider '{}' with model '{}'",
         selection.provider, selection.model
     );
 
-    let terminology = crate::sherpa_asr::enhancement::load_terminology_config(app)
+    let mut terminology = crate::sherpa_asr::enhancement::load_terminology_config(app)
         .map_err(|error| format!("Failed to load terminology settings: {error}"))?;
+    if runtime_config.enhancements.terminology == "off" {
+        terminology = crate::sherpa_asr::enhancement::TerminologyConfig::default();
+    }
     if selection.provider == crate::sherpa_asr::PROVIDER_ID
         && terminology.homophone_replacer_enabled
         && terminology.homophone_rule_fsts.len() > 1
@@ -115,7 +136,7 @@ pub async fn load_transcription_provider<R: Runtime>(
             Arc::new(WhisperProvider::new(engine, terminology.terms.clone()))
         }
         PARAKEET_PROVIDER_ID => {
-            let engine = load_parakeet_model(&selection.model).await?;
+            let engine = load_parakeet_model(&selection.model, resolved.thread_count).await?;
             Arc::new(ParakeetProvider::new(engine))
         }
         crate::sherpa_asr::PROVIDER_ID => {
@@ -141,12 +162,13 @@ pub async fn load_transcription_provider<R: Runtime>(
                 if crate::sherpa_asr::is_online_model(&selection.model) {
                     Arc::new(crate::sherpa_asr::SherpaOnlineAsrProvider::new(installed))
                 } else {
-                    Arc::new(crate::sherpa_asr::SherpaOfflineAsrProvider::new(
+                    Arc::new(crate::sherpa_asr::SherpaOfflineAsrProvider::new_with_threads(
                         installed,
                         enhancements,
+                        resolved.thread_count,
                     ))
                 };
-            if selection.model == crate::sherpa_asr::models::SENSEVOICE_MODEL_ID {
+            if resolved.punctuation_enabled {
                 crate::punctuation::wrap_if_available(app, provider)
             } else {
                 provider
@@ -166,51 +188,51 @@ pub async fn resolve_transcription_selection<R: Runtime>(
     app: &AppHandle<R>,
     requested_provider: Option<&str>,
     requested_model: Option<&str>,
-) -> TranscriptionSelection {
-    let configured = configured_transcription_selection(app).await;
-    let provider = requested_provider
-        .filter(|provider| !provider.trim().is_empty())
-        .map(normalize_provider_id)
-        .unwrap_or_else(|| configured.provider.clone());
-    let model = requested_model
-        .filter(|model| !model.trim().is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            (provider == configured.provider && !configured.model.is_empty())
-                .then_some(configured.model)
-        })
-        .unwrap_or_else(|| default_model_for_provider(&provider).to_string());
-
-    TranscriptionSelection { provider, model }
+) -> Result<TranscriptionSelection, String> {
+    let resolved = resolve_requested_pipeline(app, requested_provider, requested_model).await?;
+    let config = resolved.runtime_config();
+    Ok(TranscriptionSelection {
+        provider: normalize_provider_id(&config.finalized.provider),
+        model: config.finalized.model.clone(),
+    })
 }
 
-async fn configured_transcription_selection<R: Runtime>(
+pub(crate) async fn resolve_requested_pipeline<R: Runtime>(
     app: &AppHandle<R>,
-) -> TranscriptionSelection {
-    match crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None).await {
-        Ok(Some(config)) => TranscriptionSelection {
-            provider: normalize_provider_id(&config.provider),
-            model: config.model,
-        },
-        Ok(None) => {
-            info!("No transcription configuration found; using the SenseVoice default");
-            default_selection()
-        }
-        Err(error) => {
-            warn!(
-                "Unable to read transcription configuration; using the SenseVoice default: {}",
-                error
-            );
-            default_selection()
-        }
+    requested_provider: Option<&str>,
+    requested_model: Option<&str>,
+) -> Result<crate::pipeline::ResolvedPipeline, String> {
+    if requested_provider.is_none() && requested_model.is_none() {
+        return crate::pipeline::resolve_loaded(app)
+            .await
+            .map_err(|error| error.to_string());
     }
+    let config = crate::pipeline::initialize_from_legacy(app)
+        .await
+        .map_err(|error| error.to_string())?;
+    resolve_pipeline_request(app, config, requested_provider, requested_model).await
 }
 
-fn default_selection() -> TranscriptionSelection {
-    TranscriptionSelection {
-        provider: crate::sherpa_asr::PROVIDER_ID.to_string(),
-        model: crate::sherpa_asr::models::SENSEVOICE_MODEL_ID.to_string(),
+async fn resolve_pipeline_request<R: Runtime>(
+    app: &AppHandle<R>,
+    mut config: crate::pipeline::PipelineConfig,
+    requested_provider: Option<&str>,
+    requested_model: Option<&str>,
+) -> Result<crate::pipeline::ResolvedPipeline, String> {
+    if let Some(provider) = requested_provider.filter(|provider| !provider.trim().is_empty()) {
+        let provider = normalize_provider_id(provider);
+        let provider_changed = provider != normalize_provider_id(&config.finalized.provider);
+        config.finalized.provider = provider.clone();
+        if provider_changed && requested_model.is_none() {
+            config.finalized.model = default_model_for_provider(&provider).to_string();
+        }
     }
+    if let Some(model) = requested_model.filter(|model| !model.trim().is_empty()) {
+        config.finalized.model = model.to_string();
+    }
+    crate::pipeline::resolve_for_app(app, config)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 fn normalize_provider_id(provider: &str) -> String {
@@ -260,6 +282,7 @@ async fn load_whisper_model(
 
 async fn load_parakeet_model(
     target_model: &str,
+    num_threads: usize,
 ) -> Result<Arc<crate::parakeet_engine::ParakeetEngine>, String> {
     crate::parakeet_engine::commands::parakeet_init()
         .await
@@ -279,11 +302,11 @@ async fn load_parakeet_model(
             .discover_models()
             .await
             .map_err(|error| format!("Failed to inspect Parakeet models: {error}"))?;
-        engine
-            .load_model(target_model)
-            .await
-            .map_err(|error| format!("Failed to load Parakeet model '{target_model}': {error}"))?;
     }
+    engine
+        .load_model_with_threads(target_model, Some(num_threads))
+        .await
+        .map_err(|error| format!("Failed to load Parakeet model '{target_model}': {error}"))?;
     Ok(engine)
 }
 
@@ -301,15 +324,6 @@ mod tests {
     fn sherpa_defaults_to_sense_voice() {
         assert_eq!(
             default_model_for_provider(crate::sherpa_asr::PROVIDER_ID),
-            crate::sherpa_asr::models::SENSEVOICE_MODEL_ID
-        );
-    }
-
-    #[test]
-    fn app_defaults_to_sense_voice() {
-        assert_eq!(default_selection().provider, crate::sherpa_asr::PROVIDER_ID);
-        assert_eq!(
-            default_selection().model,
             crate::sherpa_asr::models::SENSEVOICE_MODEL_ID
         );
     }

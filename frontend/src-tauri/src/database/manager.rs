@@ -182,6 +182,7 @@ mod tests {
     use sqlx::{migrate::Migrate, Connection, Executor, Row, SqliteConnection};
 
     const V0_6_2_LAST_MIGRATION: i64 = 20251229000000;
+    const V0_7_7_LAST_MIGRATION: i64 = 20260818000000;
     const V0_6_2_MIGRATION_CHECKSUMS: &[(i64, &str)] = &[
         (
             20250916100000,
@@ -224,19 +225,29 @@ mod tests {
             "f24ee2cf9a10d33141258f0edfc59bdd3354dfb0bd4307e82b5a0d9aede013df91252ce84f2382613e3f04e4f61c331b",
         ),
     ];
+    const V0_7_7_MIGRATION_CHECKSUMS: &[(i64, &str)] = &[
+        (
+            20260817000000,
+            "9150f2d67f19ea12e2417aaad3d87e4d9bc0111ae4a5380a9faa7e27770b853f14b176a430006a3bb18cc1bb58322082",
+        ),
+        (
+            20260818000000,
+            "f00924e9283f9e608830a7f7a90baa63095b782cfbd3de6f6b7b2a84f3f35f1aeb918d32b66bef015bbef4a4a07df550",
+        ),
+    ];
 
     fn checksum_hex(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
-    async fn create_v0_6_2_database(path: &str) {
+    async fn create_database_at_version(path: &str, last_migration: i64) {
         Sqlite::create_database(path).await.unwrap();
         let mut connection = SqliteConnection::connect(path).await.unwrap();
         connection.ensure_migrations_table().await.unwrap();
 
         for migration in MIGRATOR
             .iter()
-            .filter(|migration| migration.version <= V0_6_2_LAST_MIGRATION)
+            .filter(|migration| migration.version <= last_migration)
         {
             connection.apply(migration).await.unwrap();
         }
@@ -244,9 +255,24 @@ mod tests {
         connection.close().await.unwrap();
     }
 
+    async fn create_v0_6_2_database(path: &str) {
+        create_database_at_version(path, V0_6_2_LAST_MIGRATION).await;
+    }
+
     #[test]
     fn v0_6_2_migrations_keep_their_published_checksums() {
         for (version, expected_checksum) in V0_6_2_MIGRATION_CHECKSUMS {
+            let migration = MIGRATOR
+                .iter()
+                .find(|migration| migration.version == *version)
+                .unwrap_or_else(|| panic!("published migration {version} is missing"));
+            assert_eq!(checksum_hex(&migration.checksum), *expected_checksum);
+        }
+    }
+
+    #[test]
+    fn v0_7_7_migrations_keep_their_published_checksums() {
+        for (version, expected_checksum) in V0_7_7_MIGRATION_CHECKSUMS {
             let migration = MIGRATOR
                 .iter()
                 .find(|migration| migration.version == *version)
@@ -283,6 +309,13 @@ mod tests {
         .await
         .unwrap()
         .get(0);
+        let processing_jobs_table: String = sqlx::query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meeting_processing_jobs'",
+        )
+        .fetch_one(manager.pool())
+        .await
+        .unwrap()
+        .get(0);
         let transcript_query_plan = sqlx::query(
             "EXPLAIN QUERY PLAN
              SELECT * FROM transcripts
@@ -294,7 +327,8 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(latest_version, 20260818000000);
+        assert_eq!(latest_version, 20260820000000);
+        assert_eq!(processing_jobs_table, "meeting_processing_jobs");
         assert_eq!(speaker_map_table, "meeting_speaker_maps");
         assert_eq!(
             transcript_timeline_index,
@@ -304,6 +338,47 @@ mod tests {
             row.get::<String, _>("detail")
                 .contains("idx_transcripts_meeting_timeline")
         }));
+        manager.cleanup().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn upgrades_v0_7_7_database_to_latest_without_losing_meetings() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = directory.path().join("meeting_minutes.sqlite");
+        let database_path = database_path.to_string_lossy().to_string();
+        create_database_at_version(&database_path, V0_7_7_LAST_MIGRATION).await;
+
+        let mut connection = SqliteConnection::connect(&database_path).await.unwrap();
+        sqlx::query("INSERT INTO meetings (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
+            .bind("meeting-v0.7.7")
+            .bind("Upgrade fixture")
+            .bind("2026-08-18T00:00:00Z")
+            .bind("2026-08-18T00:00:00Z")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        connection.close().await.unwrap();
+
+        let manager = DatabaseManager::new(&database_path).await.unwrap();
+        let latest_version: i64 = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
+            .fetch_one(manager.pool())
+            .await
+            .unwrap();
+        let meeting_title: String = sqlx::query_scalar("SELECT title FROM meetings WHERE id = ?")
+            .bind("meeting-v0.7.7")
+            .fetch_one(manager.pool())
+            .await
+            .unwrap();
+        let processing_jobs_table: String = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meeting_processing_jobs'",
+        )
+        .fetch_one(manager.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(latest_version, 20260820000000);
+        assert_eq!(meeting_title, "Upgrade fixture");
+        assert_eq!(processing_jobs_table, "meeting_processing_jobs");
         manager.cleanup().await.unwrap();
     }
 

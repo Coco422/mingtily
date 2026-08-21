@@ -230,6 +230,9 @@ class IndexedDBService {
    * Save a transcript segment
    */
   async saveTranscript(meetingId: string, transcript: any): Promise<void> {
+    // Recovery storage is durable state. Streaming/provisional hypotheses are
+    // display-only and must never be recoverable as meeting transcript data.
+    if (transcript?.is_partial === true) return;
     try {
       if (!this.db) await this.init();
 
@@ -324,7 +327,10 @@ class IndexedDBService {
       return new Promise((resolve, reject) => {
         const request = index.getAll(meetingId);
         request.onsuccess = () => {
-          const transcripts = request.result as StoredTranscript[];
+          // Ignore provisional rows written by older builds. They were never
+          // valid recovery data and must not be promoted into a saved meeting.
+          const transcripts = (request.result as StoredTranscript[])
+            .filter((transcript) => transcript.is_partial !== true);
           // Sort by sequence ID
           transcripts.sort((a, b) => a.sequenceId - b.sequenceId);
           resolve(transcripts);

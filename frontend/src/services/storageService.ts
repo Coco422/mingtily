@@ -41,9 +41,10 @@ export class StorageService {
     transcripts: Transcript[],
     folderPath: string | null
   ): Promise<SaveMeetingResponse> {
+    const finalizedTranscripts = transcripts.filter((transcript) => !transcript.is_partial);
     return invoke<SaveMeetingResponse>('api_save_transcript', {
       meetingTitle,
-      transcripts,
+      transcripts: finalizedTranscripts,
       folderPath,
     });
   }

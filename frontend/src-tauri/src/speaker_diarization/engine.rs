@@ -2,6 +2,7 @@ use super::models::SpeakerModelPaths;
 use super::types::{DiarizationTurn, SpeakerAudioSegment, SpeakerLabelUpdate};
 use crate::audio::vad::SpeechSegment;
 use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use sherpa_onnx::{
     FastClusteringConfig, OfflineSpeakerDiarization, OfflineSpeakerDiarizationConfig,
     OfflineSpeakerSegmentationModelConfig, OfflineSpeakerSegmentationPyannoteModelConfig,
@@ -137,17 +138,25 @@ impl DiarizationEngine {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SpeakerCentroid {
     name: String,
     embedding: Vec<f32>,
     weight: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SpeakerTracker {
     centroids: Vec<SpeakerCentroid>,
     max_speakers: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DiarizationCheckpoint {
+    pub completed_windows: usize,
+    turns: Vec<DiarizationTurn>,
+    tracker: Option<SpeakerTracker>,
 }
 
 impl Default for SpeakerTracker {
@@ -367,6 +376,53 @@ pub(crate) fn diarize_audio_file_in_windows_with_progress<F>(
 where
     F: FnMut(DiarizationWindowProgress),
 {
+    diarize_audio_file_in_windows_controlled(
+        audio_path,
+        paths,
+        transcript_ranges,
+        num_speakers,
+        |progress| {
+            on_progress(progress);
+            true
+        },
+    )
+}
+
+/// Windowed diarization variant used by durable background jobs. Returning
+/// `false` from the callback stops before decoding the next window, so pause
+/// and cancellation never discard a completed window or require a full-file
+/// PCM buffer.
+pub(crate) fn diarize_audio_file_in_windows_controlled<F>(
+    audio_path: &Path,
+    paths: &SpeakerModelPaths,
+    transcript_ranges: &[(f64, f64)],
+    num_speakers: Option<usize>,
+    mut should_continue: F,
+) -> Result<Vec<DiarizationTurn>>
+where
+    F: FnMut(DiarizationWindowProgress) -> bool,
+{
+    diarize_audio_file_in_windows_resumable(
+        audio_path,
+        paths,
+        transcript_ranges,
+        num_speakers,
+        None,
+        |progress, _| should_continue(progress),
+    )
+}
+
+pub(crate) fn diarize_audio_file_in_windows_resumable<F>(
+    audio_path: &Path,
+    paths: &SpeakerModelPaths,
+    transcript_ranges: &[(f64, f64)],
+    num_speakers: Option<usize>,
+    checkpoint: Option<DiarizationCheckpoint>,
+    mut on_boundary: F,
+) -> Result<Vec<DiarizationTurn>>
+where
+    F: FnMut(DiarizationWindowProgress, &DiarizationCheckpoint) -> bool,
+{
     let total_duration = transcript_ranges
         .iter()
         .map(|(_, end)| *end)
@@ -385,15 +441,29 @@ where
         })
         .collect::<Vec<_>>();
     let total_windows = windows.len();
+    let checkpoint = checkpoint.unwrap_or_default();
+    let start_window = checkpoint.completed_windows.min(total_windows);
     let mut session = RealtimeSpeakerSession::new_for_final_refinement(paths, num_speakers)?;
-    let mut turns = Vec::new();
+    if let Some(tracker) = checkpoint.tracker {
+        session.tracker = tracker;
+    }
+    let mut state = DiarizationCheckpoint {
+        completed_windows: start_window,
+        turns: checkpoint.turns,
+        tracker: Some(session.tracker.clone()),
+    };
 
-    for (index, window) in windows.into_iter().enumerate() {
-        on_progress(DiarizationWindowProgress {
-            current_window: index + 1,
-            total_windows,
-            completed_windows: index,
-        });
+    for (index, window) in windows.into_iter().enumerate().skip(start_window) {
+        if !on_boundary(
+            DiarizationWindowProgress {
+                current_window: index + 1,
+                total_windows,
+                completed_windows: index,
+            },
+            &state,
+        ) {
+            return Err(anyhow::anyhow!("processing-interrupted"));
+        }
         log::info!(
             "Final speaker correction window {}/{}: {:.1}s-{:.1}s",
             index + 1,
@@ -414,7 +484,7 @@ where
                     continue;
                 }
                 if let Some(speaker) = segment.speaker {
-                    turns.push(DiarizationTurn {
+                    state.turns.push(DiarizationTurn {
                         start,
                         end,
                         speaker,
@@ -422,19 +492,26 @@ where
                 }
             }
         }
-        on_progress(DiarizationWindowProgress {
-            current_window: index + 1,
-            total_windows,
-            completed_windows: index + 1,
-        });
+        state.completed_windows = index + 1;
+        state.tracker = Some(session.tracker.clone());
+        if !on_boundary(
+            DiarizationWindowProgress {
+                current_window: index + 1,
+                total_windows,
+                completed_windows: index + 1,
+            },
+            &state,
+        ) {
+            return Err(anyhow::anyhow!("processing-interrupted"));
+        }
     }
 
-    turns.sort_by(|left, right| {
+    state.turns.sort_by(|left, right| {
         left.start
             .partial_cmp(&right.start)
             .unwrap_or(Ordering::Equal)
     });
-    Ok(stabilize_turns(&turns))
+    Ok(stabilize_turns(&state.turns))
 }
 
 fn plan_diarization_windows(total_duration: f64) -> Vec<DiarizationWindow> {
@@ -892,6 +969,26 @@ mod tests {
         assert!(tracker.centroids[0].embedding[0] > 0.95);
         assert!(tracker.centroids[0].embedding[1] > 0.0);
         assert_eq!(tracker.centroids[0].weight, 4.0);
+    }
+
+    #[test]
+    fn diarization_checkpoint_preserves_completed_windows_and_speaker_centroids() {
+        let mut tracker = SpeakerTracker::new(Some(2));
+        tracker.assign(&[1.0, 0.0], 3.0);
+        let checkpoint = DiarizationCheckpoint {
+            completed_windows: 3,
+            turns: vec![DiarizationTurn {
+                start: 0.0,
+                end: 1.0,
+                speaker: "speaker_00".into(),
+            }],
+            tracker: Some(tracker),
+        };
+        let encoded = serde_json::to_string(&checkpoint).unwrap();
+        let restored: DiarizationCheckpoint = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(restored.completed_windows, 3);
+        assert_eq!(restored.turns.len(), 1);
+        assert_eq!(restored.tracker.unwrap().centroids.len(), 1);
     }
 
     #[test]

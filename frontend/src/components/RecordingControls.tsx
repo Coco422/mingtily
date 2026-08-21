@@ -11,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { RecordingStatus, useRecordingState } from '@/contexts/RecordingStateContext';
 import { formatRecordingDuration } from '@/lib/recordingDuration';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 
 interface RecordingControlsProps {
   isRecording: boolean;
@@ -84,7 +85,10 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         console.log('Tauri is initialized and ready, is_recording result:', result);
       } catch (error) {
         console.error('Tauri initialization error:', error);
-        alert(t('initializationFailed'));
+        toast.error(t('initializationFailed'), {
+          id: 'tauri-initialization-failed',
+          description: error instanceof Error ? error.message : String(error),
+        });
       }
     };
     checkTauri();

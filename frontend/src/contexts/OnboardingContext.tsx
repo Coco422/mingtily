@@ -10,6 +10,7 @@ import {
   type SherpaAsrDownloadProgress,
   SENSEVOICE_MODEL_ID,
 } from '@/lib/sherpa-asr';
+import type { RecommendedPipelinePreset } from '@/lib/pipeline-recommendations';
 
 interface OnboardingStatus {
   version: string;
@@ -39,6 +40,7 @@ interface TranscriptionProgressInfo {
 
 interface OnboardingContextType {
   currentStep: number;
+  selectedPipelinePreset: RecommendedPipelinePreset;
   transcriptionModelDownloaded: boolean;
   transcriptionProgress: number;
   transcriptionProgressInfo: TranscriptionProgressInfo;
@@ -60,6 +62,7 @@ interface OnboardingContextType {
   setTranscriptionModelDownloaded: (value: boolean) => void;
   setSummaryModelDownloaded: (value: boolean) => void;
   setSelectedSummaryModel: (value: string) => void;
+  setSelectedPipelinePreset: (value: RecommendedPipelinePreset) => void;
   setDatabaseExists: (value: boolean) => void;
   setPermissionStatus: (permission: keyof OnboardingPermissions, status: PermissionStatus) => void;
   setPermissionsSkipped: (skipped: boolean) => void;
@@ -78,6 +81,11 @@ const OnboardingContext = createContext<OnboardingContextType | undefined>(undef
 
 export function OnboardingProvider({ children }: { children: React.ReactNode }) {
   const [currentStep, setCurrentStep] = useState(1);
+  const [selectedPipelinePreset, setSelectedPipelinePresetState] = useState<RecommendedPipelinePreset>(() => {
+    if (typeof window === 'undefined') return 'balanced';
+    const saved = window.localStorage.getItem('mingtily-onboarding-pipeline');
+    return saved === 'fast' || saved === 'quality' ? saved : 'balanced';
+  });
   const [completed, setCompleted] = useState(false);
   const [transcriptionModelDownloaded, setTranscriptionModelDownloaded] = useState(false);
   const [transcriptionProgress, setTranscriptionProgress] = useState(0);
@@ -99,6 +107,11 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   const [recommendedSummaryModel, setRecommendedSummaryModel] = useState<string>('');
   const [databaseExists, setDatabaseExists] = useState(false);
   const [isBackgroundDownloading, setIsBackgroundDownloading] = useState(false);
+
+  const setSelectedPipelinePreset = useCallback((value: RecommendedPipelinePreset) => {
+    setSelectedPipelinePresetState(value);
+    window.localStorage.setItem('mingtily-onboarding-pipeline', value);
+  }, []);
 
   // Permissions state
   const [permissions, setPermissions] = useState<OnboardingPermissions>({
@@ -529,6 +542,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     <OnboardingContext.Provider
       value={{
         currentStep,
+        selectedPipelinePreset,
         transcriptionModelDownloaded,
         transcriptionProgress,
         transcriptionProgressInfo,
@@ -547,6 +561,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         setTranscriptionModelDownloaded,
         setSummaryModelDownloaded,
         setSelectedSummaryModel,
+        setSelectedPipelinePreset,
         setDatabaseExists,
         setPermissionStatus,
         setPermissionsSkipped,

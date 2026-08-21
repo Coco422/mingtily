@@ -14,6 +14,7 @@ export interface ModelOption {
   name: string;
   displayName: string;
   size_mb: number;
+  inputMode: 'continuous' | 'vad-segmented' | 'whole-file';
 }
 
 /**
@@ -25,7 +26,11 @@ export interface ModelOption {
  * @param transcriptModelConfig - User's saved model configuration from context
  * @returns Object containing available models, selected model key, loading state, and fetch function
  */
-export function useTranscriptionModels(transcriptModelConfig: Partial<TranscriptModelConfig> | undefined) {
+export function useTranscriptionModels(
+  transcriptModelConfig: Partial<TranscriptModelConfig> | undefined,
+  includeExperimental = false,
+  includeContinuous = false
+) {
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState<string>('');
   const [loadingModels, setLoadingModels] = useState(false);
@@ -52,6 +57,7 @@ export function useTranscriptionModels(transcriptModelConfig: Partial<Transcript
           name: m.name,
           displayName: `🏠 Whisper: ${m.name}`,
           size_mb: m.size_mb,
+          inputMode: 'vad-segmented' as const,
         }));
       allModels.push(...availableWhisper);
     } catch (err) {
@@ -60,6 +66,7 @@ export function useTranscriptionModels(transcriptModelConfig: Partial<Transcript
 
     // Fetch Parakeet models
     try {
+      await invoke('parakeet_init');
       const parakeetModels = await invoke<RawModelInfo[]>('parakeet_get_available_models');
       const availableParakeet = parakeetModels
         .filter((m) => m.status === 'Available')
@@ -68,6 +75,7 @@ export function useTranscriptionModels(transcriptModelConfig: Partial<Transcript
           name: m.name,
           displayName: `⚡ Parakeet: ${m.name}`,
           size_mb: m.size_mb,
+          inputMode: 'vad-segmented' as const,
         }));
       allModels.push(...availableParakeet);
     } catch (err) {
@@ -77,19 +85,25 @@ export function useTranscriptionModels(transcriptModelConfig: Partial<Transcript
     try {
       const sherpaModels = await SherpaAsrAPI.listModels();
       const availableSherpa = sherpaModels
-        .filter((model) => model.status === 'available')
+        .filter((model) => model.status === 'available' && (includeExperimental || !model.beta))
         .map((model) => ({
           provider: 'sherpa-onnx' as const,
           name: model.id,
           displayName: `🀄 Sherpa ONNX: ${model.name}`,
           size_mb: model.installed_size / 1024 / 1024,
+          inputMode: model.streaming_mode === 'continuous'
+            ? 'continuous' as const
+            : 'vad-segmented' as const,
         }));
       allModels.push(...availableSherpa);
     } catch (err) {
       console.error('Failed to fetch Sherpa ONNX models:', err);
     }
 
-    setAvailableModels(allModels);
+    const selectableModels = includeContinuous
+      ? allModels
+      : allModels.filter((model) => model.inputMode !== 'continuous');
+    setAvailableModels(selectableModels);
 
     // Set default model based on user's saved configuration
     const configuredProvider = transcriptModelConfig?.provider || '';
@@ -97,7 +111,7 @@ export function useTranscriptionModels(transcriptModelConfig: Partial<Transcript
 
     // Try to match the configured model
     // Note: 'localWhisper' in config maps to 'whisper' provider in model list
-    const configuredMatch = allModels.find(
+    const configuredMatch = selectableModels.find(
       (m) =>
         (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
         (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel) ||
@@ -109,14 +123,14 @@ export function useTranscriptionModels(transcriptModelConfig: Partial<Transcript
       if (configuredMatch) {
         // Use the configured model if available
         setSelectedModelKey(`${configuredMatch.provider}:${configuredMatch.name}`);
-      } else if (allModels.length > 0) {
+      } else if (selectableModels.length > 0) {
         // Fall back to first available model
-        setSelectedModelKey(`${allModels[0].provider}:${allModels[0].name}`);
+        setSelectedModelKey(`${selectableModels[0].provider}:${selectableModels[0].name}`);
       }
     }
 
     setLoadingModels(false);
-  }, [transcriptModelConfig]);
+  }, [includeContinuous, includeExperimental, transcriptModelConfig]);
 
   // Reset user selection tracking (call when dialog opens fresh)
   const resetSelection = useCallback(() => {

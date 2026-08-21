@@ -4,7 +4,8 @@ export type ModelAssetProvider =
   | 'localWhisper'
   | 'parakeet'
   | 'sherpa-onnx'
-  | 'speaker-diarization';
+  | 'speaker-diarization'
+  | 'punctuation';
 
 export function notifyModelAssetsChanged(provider: ModelAssetProvider) {
   if (typeof window === 'undefined') return;

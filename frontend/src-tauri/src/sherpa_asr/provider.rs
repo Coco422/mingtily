@@ -22,14 +22,24 @@ struct CachedRecognizer {
 pub struct SherpaOfflineAsrProvider {
     model: InstalledSherpaModel,
     enhancements: RuntimeEnhancements,
+    num_threads: usize,
     recognizer: Arc<Mutex<Option<CachedRecognizer>>>,
 }
 
 impl SherpaOfflineAsrProvider {
     pub fn new(model: InstalledSherpaModel, enhancements: RuntimeEnhancements) -> Self {
+        Self::new_with_threads(model, enhancements, 2)
+    }
+
+    pub fn new_with_threads(
+        model: InstalledSherpaModel,
+        enhancements: RuntimeEnhancements,
+        num_threads: usize,
+    ) -> Self {
         Self {
             model,
             enhancements,
+            num_threads: num_threads.max(1),
             recognizer: Arc::new(Mutex::new(None)),
         }
     }
@@ -37,6 +47,7 @@ impl SherpaOfflineAsrProvider {
     fn transcribe_blocking(
         model: &InstalledSherpaModel,
         enhancements: &RuntimeEnhancements,
+        num_threads: usize,
         cache: &Mutex<Option<CachedRecognizer>>,
         audio: &[f32],
         language: Option<&str>,
@@ -52,7 +63,12 @@ impl SherpaOfflineAsrProvider {
             .map_err(|_| TranscriptionError::EngineFailed("Sherpa ASR lock poisoned".into()))?;
 
         if guard.as_ref().is_none_or(|cached| cached.key != cache_key) {
-            let recognizer = create_recognizer(model, &normalized_language, enhancements)?;
+            let recognizer = create_recognizer_with_threads(
+                model,
+                &normalized_language,
+                enhancements,
+                num_threads,
+            )?;
             *guard = Some(CachedRecognizer {
                 key: cache_key,
                 recognizer,
@@ -100,11 +116,13 @@ impl TranscriptionProvider for SherpaOfflineAsrProvider {
 
         let model = self.model.clone();
         let enhancements = self.enhancements.clone();
+        let num_threads = self.num_threads;
         let recognizer = self.recognizer.clone();
         let result = tokio::task::spawn_blocking(move || {
             Self::transcribe_blocking(
                 &model,
                 &enhancements,
+                num_threads,
                 &recognizer,
                 &audio,
                 language.as_deref(),
@@ -135,12 +153,22 @@ impl TranscriptionProvider for SherpaOfflineAsrProvider {
     }
 }
 
+#[cfg(test)]
 fn create_recognizer(
     model: &InstalledSherpaModel,
     language: &str,
     enhancements: &RuntimeEnhancements,
 ) -> Result<OfflineRecognizer, TranscriptionError> {
-    let config = build_recognizer_config(model, language, enhancements)?;
+    create_recognizer_with_threads(model, language, enhancements, 2)
+}
+
+fn create_recognizer_with_threads(
+    model: &InstalledSherpaModel,
+    language: &str,
+    enhancements: &RuntimeEnhancements,
+    num_threads: usize,
+) -> Result<OfflineRecognizer, TranscriptionError> {
+    let config = build_recognizer_config_with_threads(model, language, enhancements, num_threads)?;
     OfflineRecognizer::create(&config).ok_or_else(|| {
         TranscriptionError::EngineFailed(format!(
             "Unable to initialize Sherpa ONNX model '{}'",
@@ -149,13 +177,23 @@ fn create_recognizer(
     })
 }
 
+#[cfg(test)]
 fn build_recognizer_config(
     model: &InstalledSherpaModel,
     language: &str,
     enhancements: &RuntimeEnhancements,
 ) -> Result<OfflineRecognizerConfig, TranscriptionError> {
+    build_recognizer_config_with_threads(model, language, enhancements, 2)
+}
+
+fn build_recognizer_config_with_threads(
+    model: &InstalledSherpaModel,
+    language: &str,
+    enhancements: &RuntimeEnhancements,
+    num_threads: usize,
+) -> Result<OfflineRecognizerConfig, TranscriptionError> {
     let mut config = OfflineRecognizerConfig::default();
-    config.model_config.num_threads = 2;
+    config.model_config.num_threads = num_threads.max(1) as i32;
     config.model_config.provider = Some("cpu".to_string());
 
     match model.backend {
@@ -398,6 +436,18 @@ mod tests {
             config.hr.rule_fsts.as_deref(),
             Some("/tmp/rule-a.fst,/tmp/rule-b.fst")
         );
+    }
+
+    #[test]
+    fn resolved_thread_budget_is_applied_to_offline_recognizer() {
+        let config = build_recognizer_config_with_threads(
+            &test_model(SherpaAsrBackend::SenseVoice),
+            "zh",
+            &RuntimeEnhancements::default(),
+            1,
+        )
+        .unwrap();
+        assert_eq!(config.model_config.num_threads, 1);
     }
 
     #[test]

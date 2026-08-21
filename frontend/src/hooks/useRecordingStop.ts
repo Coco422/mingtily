@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
-import { waitForSpeakerLabelRefinement } from '@/lib/speaker-label-refinement';
 import {
   applyPinnedSummaryLanguageToMeeting,
   detectAndCacheSummaryLanguage,
@@ -204,9 +204,8 @@ export function useRecordingStop(
         console.warn('⏰ Transcription wait timeout reached after', elapsedTime, 'ms');
       } else {
         console.log('✅ Transcription completed after', elapsedTime, 'ms');
-        // Wait longer for any late transcript segments (increased from 1s to 4s)
-        console.log('⏳ Waiting for late transcript segments...');
-        await new Promise(resolve => setTimeout(resolve, 4000));
+        // Rust has already joined the finalized ASR worker before this callback.
+        // Transcript refs update synchronously, so no fixed multi-second delay is needed.
       }
 
       // Final buffer flush: process ALL remaining transcripts regardless of timing
@@ -238,13 +237,10 @@ export function useRecordingStop(
 
         setStatus(RecordingStatus.SAVING, t('recording:savingMeeting'));
 
-        // The backend emits speaker-labels-refined before recording-stopped.
-        // Wait until the frontend state and IndexedDB have applied that event
-        // before taking the final snapshot for SQLite persistence.
-        await waitForSpeakerLabelRefinement();
-
         // Get fresh transcript state (ALL transcripts including late ones)
-        const freshTranscripts = [...transcriptsRef.current];
+        // Provisional streaming hypotheses are display-only and must not cross
+        // the meeting persistence boundary even if a late UI revision remains.
+        const freshTranscripts = transcriptsRef.current.filter((transcript) => !transcript.is_partial);
 
         // Get folder_path and meeting_name from recording-stopped event
         const folderPath = sessionStorage.getItem('last_recording_folder_path');
@@ -298,6 +294,14 @@ export function useRecordingStop(
           console.log('✅ Successfully saved COMPLETE meeting with ID:', meetingId);
           console.log('   Transcripts:', freshTranscripts.length);
           console.log('   folder_path:', folderPath);
+
+          // Post-meeting work is durable and must never make stopping the recording wait.
+          // Enqueue failures are non-fatal because the finalized transcript is already saved.
+          void invoke('processing_enqueue_meeting_jobs', {
+            request: { meetingId, kind: null }
+          }).catch((error) => {
+            console.warn('Unable to enqueue post-meeting processing:', error);
+          });
 
           // Mark meeting as saved in IndexedDB (for recovery system)
           await markMeetingAsSaved();

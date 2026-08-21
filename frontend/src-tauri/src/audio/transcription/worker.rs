@@ -4,9 +4,7 @@
 
 use super::provider::{TranscriptionError, TranscriptionProvider};
 use crate::audio::AudioChunk;
-use crate::speaker_diarization::{
-    installed_model_paths, RealtimeSpeakerSession, SpeakerDiarizationConfig,
-};
+use crate::speaker_diarization::{installed_model_paths, RealtimeSpeakerSession};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -85,18 +83,20 @@ pub fn start_transcription_task<R: Runtime>(
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
-        let speaker_config = match crate::speaker_diarization::configuration::load_config(&app) {
-            Ok(config) => config,
+        let (speaker_enabled, speaker_count) = match crate::pipeline::resolve_loaded(&app).await {
+            Ok(resolved) => {
+                let speaker = &resolved.runtime_config().speaker;
+                (speaker.live_enabled, speaker.speaker_count)
+            }
             Err(error) => {
                 warn!(
-                    "Unable to read speaker diarization settings; using compatible defaults: {}",
+                    "Unable to resolve speaker diarization settings; disabling live speaker labels: {}",
                     error
                 );
-                SpeakerDiarizationConfig::default()
+                (false, None)
             }
         };
-        let speaker_count = speaker_config.speaker_count;
-        let speaker_model_paths = if speaker_config.enabled {
+        let speaker_model_paths = if speaker_enabled {
             let paths = installed_model_paths(&app).ok().flatten();
             if paths.is_none() {
                 let _ = app.emit(

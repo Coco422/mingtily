@@ -31,10 +31,10 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     checkPlatform();
   }, []);
 
-  // 4-Step Onboarding Flow (System-Recommended Models):
+  // 4-Step Onboarding Flow (Pipeline-first setup):
   // Step 1: Welcome - Introduce Mingtily features
-  // Step 2: Setup Overview - Database initialization + show recommended downloads
-  // Step 3: Download Progress - Download SenseVoice + Summary Model (auto-selected based on RAM)
+  // Step 2: Choose Fast, Balanced, or High quality
+  // Step 3: Download that Pipeline's model bundle and an optional Summary Model
   // Step 4: Permissions - Request mic + system audio (macOS only)
 
   return (

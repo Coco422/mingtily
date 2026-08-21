@@ -23,8 +23,8 @@ class CapabilityConfigService {
     return configService.getTranscriptConfig();
   }
 
-  saveTranscription(config: TranscriptModelConfig): Promise<void> {
-    return invoke('api_save_transcript_config', {
+  async saveTranscription(config: TranscriptModelConfig): Promise<void> {
+    await invoke('api_save_transcript_config', {
       provider: config.provider,
       model: config.model,
       apiKey: config.apiKey ?? null,

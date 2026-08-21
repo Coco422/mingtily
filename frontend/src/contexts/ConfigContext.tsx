@@ -5,8 +5,9 @@ import { TranscriptModelConfig } from '@/types/capabilities';
 import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
-import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
+import { BETA_FEATURES_CHANGED_EVENT, BetaFeatures, BetaFeatureKey, DISABLED_BETA_FEATURES, readLegacyImportAndRetranscribe } from '@/types/betaFeatures';
 import { SENSEVOICE_MODEL_ID, SHERPA_ASR_PROVIDER_ID } from '@/lib/sherpa-asr';
+import { pipelineService } from '@/services/pipelineService';
 
 export interface OllamaModel {
   name: string;
@@ -67,7 +68,7 @@ interface ConfigContextType {
 
   // Beta features
   betaFeatures: BetaFeatures;
-  toggleBetaFeature: (featureKey: BetaFeatureKey, enabled: boolean) => void;
+  toggleBetaFeature: (featureKey: BetaFeatureKey, enabled: boolean) => Promise<void>;
 
   // Ollama models
   models: OllamaModel[];
@@ -165,10 +166,22 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     return false;
   });
 
-  // Beta features state (localStorage)
-  const [betaFeatures, setBetaFeatures] = useState<BetaFeatures>(() => {
-    return loadBetaFeatures();
-  });
+  // Rust/Tauri Store is the sole source of truth for Beta gates. Start from
+  // safe defaults so a stale browser cache can never expose a gated entry.
+  const [betaFeatures, setBetaFeatures] = useState<BetaFeatures>(() => ({
+    ...DISABLED_BETA_FEATURES,
+  }));
+
+  useEffect(() => {
+    const legacyImportAndRetranscribe = readLegacyImportAndRetranscribe();
+    void pipelineService.migrateLegacyBetaFeatures(legacyImportAndRetranscribe).then((backend) => {
+      localStorage.removeItem('betaFeatures');
+      setBetaFeatures(backend);
+      window.dispatchEvent(new CustomEvent(BETA_FEATURES_CHANGED_EVENT, { detail: backend }));
+    }).catch((error) => {
+      console.warn('[Config] Unable to load backend Beta gates:', error);
+    });
+  }, []);
 
   // Preference settings state (lazy loaded)
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null);
@@ -391,14 +404,20 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Toggle beta feature with localStorage persistence
-  const toggleBetaFeature = useCallback((featureKey: BetaFeatureKey, enabled: boolean) => {
-    setBetaFeatures(prev => {
-      const updated = { ...prev, [featureKey]: enabled };
-      saveBetaFeatures(updated);
-      return updated;
-    });
-  }, []);
+  // Toggle Beta gates through the Rust/Tauri Store source of truth.
+  const toggleBetaFeature = useCallback(async (featureKey: BetaFeatureKey, enabled: boolean) => {
+    const previous = betaFeatures;
+    const updated = { ...previous, [featureKey]: enabled };
+    setBetaFeatures(updated);
+    try {
+      await pipelineService.saveBetaFeatures(updated);
+      window.dispatchEvent(new CustomEvent(BETA_FEATURES_CHANGED_EVENT, { detail: updated }));
+    } catch (error) {
+      setBetaFeatures(previous);
+      window.dispatchEvent(new CustomEvent(BETA_FEATURES_CHANGED_EVENT, { detail: previous }));
+      throw error;
+    }
+  }, [betaFeatures]);
 
   // Update individual provider API key
   const updateProviderApiKey = useCallback((provider: string, apiKey: string | null) => {

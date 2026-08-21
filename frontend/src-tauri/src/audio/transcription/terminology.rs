@@ -66,7 +66,9 @@ impl TranscriptionProvider for TerminologyCorrectionProvider {
         language: Option<String>,
     ) -> Result<TranscriptResult, TranscriptionError> {
         let mut result = self.inner.transcribe(audio, language).await?;
-        result.text = apply_literal_replacements(&result.text, &self.replacements);
+        if !result.is_partial {
+            result.text = apply_literal_replacements(&result.text, &self.replacements);
+        }
         Ok(result)
     }
 
@@ -86,6 +88,37 @@ impl TranscriptionProvider for TerminologyCorrectionProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FixedProvider {
+        partial: bool,
+    }
+
+    #[async_trait]
+    impl TranscriptionProvider for FixedProvider {
+        async fn transcribe(
+            &self,
+            _audio: Vec<f32>,
+            _language: Option<String>,
+        ) -> Result<TranscriptResult, TranscriptionError> {
+            Ok(TranscriptResult {
+                text: "明天力".into(),
+                confidence: None,
+                is_partial: self.partial,
+            })
+        }
+
+        async fn is_model_loaded(&self) -> bool {
+            true
+        }
+
+        async fn get_current_model(&self) -> Option<String> {
+            Some("test".into())
+        }
+
+        fn provider_name(&self) -> &'static str {
+            "test"
+        }
+    }
 
     fn rule(source: &str, target: &str) -> TerminologyReplacement {
         TerminologyReplacement {
@@ -116,5 +149,27 @@ mod tests {
             apply_literal_replacements("Meetily meetily 明天力", &rules),
             "Meetily Mingtily Mingtily"
         );
+    }
+
+    #[tokio::test]
+    async fn provisional_results_bypass_terminology_replacement() {
+        let provider = TerminologyCorrectionProvider::wrap(
+            Arc::new(FixedProvider { partial: true }),
+            vec![rule("明天力", "Mingtily")],
+        );
+        let result = provider.transcribe(Vec::new(), None).await.unwrap();
+        assert_eq!(result.text, "明天力");
+        assert!(result.is_partial);
+    }
+
+    #[tokio::test]
+    async fn finalized_results_apply_terminology_replacement() {
+        let provider = TerminologyCorrectionProvider::wrap(
+            Arc::new(FixedProvider { partial: false }),
+            vec![rule("明天力", "Mingtily")],
+        );
+        let result = provider.transcribe(Vec::new(), None).await.unwrap();
+        assert_eq!(result.text, "Mingtily");
+        assert!(!result.is_partial);
     }
 }

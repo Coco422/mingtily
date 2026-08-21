@@ -8,6 +8,18 @@ use tauri_plugin_dialog::DialogExt;
 pub async fn sherpa_asr_get_streaming_config<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<StreamingTranscriptionConfig, String> {
+    if let Ok(Some(pipeline)) = crate::pipeline::load_config_if_present(&app) {
+        return Ok(StreamingTranscriptionConfig {
+            enabled: pipeline.live.mode == crate::pipeline::LiveMode::ContinuousPreview,
+            provider: pipeline
+                .live
+                .streaming_provider
+                .unwrap_or_else(|| PROVIDER_ID.to_string()),
+            model: pipeline.live.streaming_model.unwrap_or_else(|| {
+                crate::sherpa_asr::models::PARAFORMER_ONLINE_MODEL_ID.to_string()
+            }),
+        });
+    }
     match streaming_config::load_config_if_present(&app).map_err(|error| error.to_string())? {
         Some(config) => Ok(config),
         None => {
@@ -33,7 +45,21 @@ pub fn sherpa_asr_save_streaming_config<R: Runtime>(
     app: AppHandle<R>,
     config: StreamingTranscriptionConfig,
 ) -> Result<(), String> {
-    streaming_config::save_config(&app, &config).map_err(|error| error.to_string())
+    if config.enabled
+        && !crate::pipeline::load_beta(&app)
+            .map_err(|error| error.to_string())?
+            .experimental_asr_models
+    {
+        return Err("Experimental ASR models are disabled in Beta settings".into());
+    }
+    streaming_config::save_config(&app, &config).map_err(|error| error.to_string())?;
+    crate::pipeline::sync_legacy_streaming(
+        &app,
+        config.enabled,
+        config.provider.clone(),
+        config.model.clone(),
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -140,6 +166,13 @@ pub async fn sherpa_asr_download_model<R: Runtime>(
     app: AppHandle<R>,
     model_id: String,
 ) -> Result<(), String> {
+    if crate::pipeline::is_experimental_model(&model_id)
+        && !crate::pipeline::load_beta(&app)
+            .map_err(|error| error.to_string())?
+            .experimental_asr_models
+    {
+        return Err("Experimental ASR models are disabled in Beta settings".into());
+    }
     models::download_model(&app, &model_id)
         .await
         .map_err(|error| error.to_string())
@@ -193,21 +226,23 @@ pub async fn sherpa_asr_delete_model<R: Runtime>(
     app: AppHandle<R>,
     model_id: String,
 ) -> Result<(), String> {
+    if let Ok(Some(config)) = crate::pipeline::load_config_if_present(&app) {
+        let selected = (config.finalized.provider == PROVIDER_ID
+            && config.finalized.model == model_id)
+            || (config.live.streaming_provider.as_deref() == Some(PROVIDER_ID)
+                && config.live.streaming_model.as_deref() == Some(model_id.as_str()))
+            || (config.post_meeting_asr.provider.as_deref() == Some(PROVIDER_ID)
+                && config.post_meeting_asr.model.as_deref() == Some(model_id.as_str()));
+        if selected {
+            return Err("This model is selected by the transcription pipeline. Select another model before deleting it.".into());
+        }
+    }
     if let Ok(Some(config)) =
         crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None).await
     {
         if config.provider == PROVIDER_ID && config.model == model_id {
             return Err(
                 "This model is currently selected for transcription. Select another model before deleting it."
-                    .to_string(),
-            );
-        }
-    }
-
-    if let Ok(Some(config)) = streaming_config::load_config_if_present(&app) {
-        if config.enabled && config.provider == PROVIDER_ID && config.model == model_id {
-            return Err(
-                "This model is currently selected for Beta live transcription. Disable the mode or select another streaming model before deleting it."
                     .to_string(),
             );
         }

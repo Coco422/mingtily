@@ -87,16 +87,18 @@ impl MeetingsRepository {
             transaction.commit().await?;
 
             // Convert Transcript to MeetingTranscript
+            let speaker_overrides =
+                crate::speaker_mapping::load_speaker_overrides(pool, meeting_id).await?;
             let meeting_transcripts = transcripts
                 .into_iter()
                 .map(|t| MeetingTranscript {
+                    speaker: speaker_overrides.get(&t.id).cloned().or(t.speaker),
                     id: t.id,
                     text: t.transcript,
                     timestamp: t.timestamp,
                     audio_start_time: t.audio_start_time,
                     audio_end_time: t.audio_end_time,
                     duration: t.duration,
-                    speaker: t.speaker,
                 })
                 .collect::<Vec<_>>();
 
@@ -145,14 +147,21 @@ impl MeetingsRepository {
             ));
         }
 
-        sqlx::query_as::<_, Transcript>(
+        let mut transcripts = sqlx::query_as::<_, Transcript>(
             "SELECT * FROM transcripts
              WHERE meeting_id = ?
              ORDER BY audio_start_time ASC, id ASC",
         )
         .bind(meeting_id)
         .fetch_all(pool)
-        .await
+        .await?;
+        let overrides = crate::speaker_mapping::load_speaker_overrides(pool, meeting_id).await?;
+        for transcript in &mut transcripts {
+            if let Some(speaker) = overrides.get(&transcript.id) {
+                transcript.speaker = Some(speaker.clone());
+            }
+        }
+        Ok(transcripts)
     }
 
     /// Get meeting transcripts with pagination support.
@@ -175,7 +184,7 @@ impl MeetingsRepository {
             .await?;
 
         // Get paginated transcripts in the same stable order as the full snapshot.
-        let transcripts = sqlx::query_as::<_, Transcript>(
+        let mut transcripts = sqlx::query_as::<_, Transcript>(
             "SELECT * FROM transcripts
              WHERE meeting_id = ?
              ORDER BY audio_start_time ASC, id ASC
@@ -186,6 +195,12 @@ impl MeetingsRepository {
         .bind(offset)
         .fetch_all(pool)
         .await?;
+        let overrides = crate::speaker_mapping::load_speaker_overrides(pool, meeting_id).await?;
+        for transcript in &mut transcripts {
+            if let Some(speaker) = overrides.get(&transcript.id) {
+                transcript.speaker = Some(speaker.clone());
+            }
+        }
 
         Ok((transcripts, total.0))
     }
@@ -280,6 +295,19 @@ mod tests {
                 audio_end_time REAL,
                 duration REAL,
                 speaker TEXT
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE meeting_speaker_maps (
+                meeting_id TEXT PRIMARY KEY NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1,
+                mapping_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             )
             "#,
         )

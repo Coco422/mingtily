@@ -51,6 +51,8 @@ pub mod onboarding;
 pub mod openai;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod pipeline;
+pub mod processing_jobs;
 pub mod punctuation;
 pub mod sherpa_asr;
 pub mod speaker_diarization;
@@ -541,6 +543,18 @@ pub fn run() {
                     Ok(_) => {}
                     Err(error) => log::error!("Failed to recover unfinished summary jobs: {error}"),
                 }
+
+                let app_for_processing_jobs = _app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = pipeline::initialize_from_legacy(&app_for_processing_jobs).await {
+                        log::error!("Failed to initialize transcription pipeline settings: {error}");
+                    }
+                    if let Err(error) =
+                        processing_jobs::recover_jobs(app_for_processing_jobs).await
+                    {
+                        log::error!("Failed to recover meeting processing jobs: {error}");
+                    }
+                });
             }
 
             // Initialize bundled templates directory for dynamic template discovery
@@ -579,6 +593,7 @@ pub fn run() {
             save_transcript,
             whisper_engine::commands::whisper_init,
             whisper_engine::commands::whisper_get_available_models,
+            whisper_engine::commands::whisper_import_model_file,
             whisper_engine::commands::whisper_load_model,
             whisper_engine::commands::whisper_get_current_model,
             whisper_engine::commands::whisper_is_model_loaded,
@@ -625,6 +640,17 @@ pub fn run() {
             punctuation::commands::punctuation_get_status,
             punctuation::commands::punctuation_download_model,
             punctuation::commands::punctuation_delete_model,
+            pipeline::pipeline_get_config,
+            pipeline::pipeline_resolve_config,
+            pipeline::pipeline_save_config,
+            pipeline::pipeline_get_beta_features,
+            pipeline::pipeline_migrate_legacy_beta_features,
+            pipeline::pipeline_save_beta_features,
+            processing_jobs::processing_enqueue_meeting_jobs,
+            processing_jobs::processing_list_jobs,
+            processing_jobs::processing_cancel_job,
+            processing_jobs::processing_pause_job,
+            processing_jobs::processing_resume_job,
             // Speaker diarization model commands
             speaker_diarization::commands::speaker_diarization_get_config,
             speaker_diarization::commands::speaker_diarization_save_config,

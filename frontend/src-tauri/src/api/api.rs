@@ -248,6 +248,21 @@ pub struct TranscriptSegment {
     pub speaker: Option<String>,
 }
 
+fn parse_finalized_transcripts(
+    transcripts: Vec<serde_json::Value>,
+) -> Result<Vec<TranscriptSegment>, serde_json::Error> {
+    transcripts
+        .into_iter()
+        .filter(|segment| {
+            !segment
+                .get("is_partial")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        })
+        .map(serde_json::from_value)
+        .collect()
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Profile {
     pub id: String,
@@ -660,12 +675,28 @@ pub async fn api_get_api_key<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_get_transcript_config<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     _auth_token: Option<String>,
 ) -> Result<Option<TranscriptConfig>, String> {
     log_info!("api_get_transcript_config called (native)");
     let pool = state.db_manager.pool();
+
+    match crate::pipeline::load_config_if_present(&app) {
+        Ok(Some(config)) => {
+            let api_key =
+                SettingsRepository::get_transcript_api_key(pool, &config.finalized.provider)
+                    .await
+                    .map_err(|error| error.to_string())?;
+            return Ok(Some(TranscriptConfig {
+                provider: config.finalized.provider,
+                model: config.finalized.model,
+                api_key,
+            }));
+        }
+        Ok(None) => {}
+        Err(error) => return Err(error.to_string()),
+    }
 
     match SettingsRepository::get_transcript_config(pool).await {
         Ok(Some(config)) => {
@@ -710,13 +741,20 @@ pub async fn api_get_transcript_config<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_save_transcript_config<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     provider: String,
     model: String,
     api_key: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    if crate::pipeline::is_experimental_model(&model)
+        && !crate::pipeline::load_beta(&app)
+            .map_err(|error| error.to_string())?
+            .experimental_asr_models
+    {
+        return Err("Experimental ASR models are disabled in Beta settings".into());
+    }
     log_info!(
         "api_save_transcript_config called (native) for provider '{}'",
         &provider
@@ -727,6 +765,8 @@ pub async fn api_save_transcript_config<R: Runtime>(
         log_error!("Failed to save transcript config: {}", e);
         return Err(e.to_string());
     }
+    crate::pipeline::sync_legacy_finalized(&app, provider.clone(), model.clone())
+        .map_err(|error| error.to_string())?;
 
     if let Some(key) = api_key {
         if !key.is_empty() {
@@ -1036,17 +1076,13 @@ pub async fn api_save_transcript<R: Runtime>(
     );
 
     // Convert serde_json::Value to TranscriptSegment
-    let transcripts_to_save: Vec<TranscriptSegment> = transcripts
-        .into_iter()
-        .map(serde_json::from_value)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
-            log_error!("Failed to parse transcript segments: {}", e);
-            format!(
-                "Invalid transcript data format: {}. Please check the data structure.",
-                e
-            )
-        })?;
+    let transcripts_to_save = parse_finalized_transcripts(transcripts).map_err(|e| {
+        log_error!("Failed to parse transcript segments: {}", e);
+        format!(
+            "Invalid transcript data format: {}. Please check the data structure.",
+            e
+        )
+    })?;
 
     // Log parsed segment timing without recording transcript content.
     if let Some(first_seg) = transcripts_to_save.first() {
@@ -1085,6 +1121,32 @@ pub async fn api_save_transcript<R: Runtime>(
             log_error!("Error saving transcript: {}", e);
             Err(format!("Failed to save transcript: {}", e))
         }
+    }
+}
+
+#[cfg(test)]
+mod transcript_persistence_tests {
+    use super::*;
+
+    #[test]
+    fn provisional_transcripts_are_rejected_at_the_native_storage_boundary() {
+        let transcripts = vec![
+            serde_json::json!({
+                "id": "partial",
+                "text": "draft",
+                "timestamp": "12:00:00",
+                "is_partial": true
+            }),
+            serde_json::json!({
+                "id": "final",
+                "text": "final text",
+                "timestamp": "12:00:01",
+                "is_partial": false
+            }),
+        ];
+        let parsed = parse_finalized_transcripts(transcripts).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].id, "final");
     }
 }
 

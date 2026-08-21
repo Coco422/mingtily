@@ -7,13 +7,30 @@ import {
   BetaFeatureKey,
 } from "@/types/betaFeatures"
 import { useTranslation } from "react-i18next"
+import { useState } from "react"
+import { toast } from "sonner"
 
 export function BetaSettings() {
   const { t } = useTranslation('settings');
   const { betaFeatures, toggleBetaFeature } = useConfig();
+  const [savingFeature, setSavingFeature] = useState<BetaFeatureKey | null>(null);
+
+  const toggleFeature = async (featureKey: BetaFeatureKey, checked: boolean) => {
+    setSavingFeature(featureKey);
+    try {
+      await toggleBetaFeature(featureKey, checked);
+    } catch (error) {
+      toast.error(t('beta.saveFailed'), { description: String(error) });
+    } finally {
+      setSavingFeature(null);
+    }
+  };
 
   // Define feature order for display (allows custom ordering)
-  const featureOrder: BetaFeatureKey[] = ['importAndRetranscribe'];
+  const featureOrder: BetaFeatureKey[] = [
+    'importAndRetranscribe',
+    'experimentalAsrModels',
+  ];
 
   return (
     <div className="space-y-6">
@@ -53,7 +70,8 @@ export function BetaSettings() {
             <div className="ml-6">
               <Switch
                 checked={betaFeatures[featureKey]}
-                onCheckedChange={(checked) => toggleBetaFeature(featureKey, checked)}
+                disabled={savingFeature !== null}
+                onCheckedChange={(checked) => { void toggleFeature(featureKey, checked); }}
               />
             </div>
           </div>

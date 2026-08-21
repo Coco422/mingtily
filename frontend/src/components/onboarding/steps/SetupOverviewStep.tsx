@@ -1,19 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Info } from 'lucide-react';
+import { Check, Gauge, Scale, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useTranslation } from 'react-i18next';
+import type { RecommendedPipelinePreset } from '@/lib/pipeline-recommendations';
 
 export function SetupOverviewStep() {
   const { t } = useTranslation('onboarding');
-  const { goNext } = useOnboarding();
+  const { goNext, selectedPipelinePreset, setSelectedPipelinePreset } = useOnboarding();
   const [isMac, setIsMac] = useState(false);
 
   useEffect(() => {
@@ -28,17 +23,10 @@ export function SetupOverviewStep() {
     checkPlatform();
   }, []);
 
-  const steps = [
-    {
-      number: 1,
-      type: 'transcription',
-      title: t('setupTranscription'),
-    },
-    {
-      number: 2,
-      type: 'summarization',
-      title: t('setupSummary'),
-    },
+  const presets: Array<{ id: RecommendedPipelinePreset; icon: typeof Gauge }> = [
+    { id: 'fast', icon: Gauge },
+    { id: 'balanced', icon: Scale },
+    { id: 'quality', icon: Sparkles },
   ];
 
   const handleContinue = () => {
@@ -52,41 +40,25 @@ export function SetupOverviewStep() {
       step={2}
       totalSteps={isMac ? 4 : 3}
     >
-      <div className="flex flex-col items-center space-y-10">
-        {/* Steps Card */}
-        <div className="w-full max-w-md bg-white rounded-lg border border-gray-200 p-4">
-          <div className="space-y-4">
-            {steps.map((step, idx) => {
-              return (
-                <div
-                  key={step.number}
-                  className={`flex items-start gap-4 p-1`}
-                >
-                  <div className="flex-1 ml-1">
-                    <h3 className="font-medium text-gray-900 flex items-center gap-2">
-                        {t('step', { number: step.number })}: {step.title}
-
-                        {step.type === "summarization" && (
-                            <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                <button className="text-gray-400 hover:text-gray-600">
-                                    <Info className="w-4 h-4" />
-                                </button>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs text-sm">
-                                {t('setupSummaryProviderHint')}
-                                </TooltipContent>
-                            </Tooltip>
-                            </TooltipProvider>
-                        )}
-                        </h3>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      <div className="flex flex-col items-center space-y-8">
+        <div className="grid w-full max-w-3xl gap-3 md:grid-cols-3">
+          {presets.map(({ id, icon: Icon }) => {
+            const selected = selectedPipelinePreset === id;
+            return <button
+              key={id}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => setSelectedPipelinePreset(id)}
+              className={`rounded-xl border p-5 text-left transition ${selected ? 'border-sky-500 bg-sky-50 ring-1 ring-sky-500' : 'border-gray-200 bg-white hover:border-sky-300'}`}
+            >
+              <div className="flex items-center justify-between"><Icon className="h-5 w-5 text-sky-700" />{selected && <Check className="h-4 w-4 text-sky-700" />}</div>
+              <h3 className="mt-3 font-semibold text-gray-900">{t(`pipelinePresets.${id}.name`)}</h3>
+              <p className="mt-2 text-xs leading-5 text-gray-600">{t(`pipelinePresets.${id}.description`)}</p>
+              <p className="mt-3 text-xs font-medium text-sky-800">{t(`pipelinePresets.${id}.models`)}</p>
+            </button>;
+          })}
         </div>
+        <p className="max-w-xl text-center text-xs leading-5 text-gray-500">{t('pipelineCustomLater')}</p>
 
 
         {/* CTA Section */}

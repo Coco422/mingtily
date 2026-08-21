@@ -38,10 +38,12 @@ impl TranscriptionProvider for WhisperProvider {
             )
             .await
         {
-            Ok((text, confidence, is_partial)) => Ok(TranscriptResult {
+            Ok((text, confidence, _legacy_partial_hint)) => Ok(TranscriptResult {
                 text: text.trim().to_string(),
                 confidence: Some(confidence),
-                is_partial,
+                // This provider is invoked for finalized VAD segments. Keep the
+                // boundary explicit even when an older engine returns a hint.
+                is_partial: false,
             }),
             Err(e) => Err(TranscriptionError::EngineFailed(e.to_string())),
         }

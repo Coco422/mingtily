@@ -112,6 +112,28 @@ fn whisper_download_spec(model_name: &str) -> Option<WhisperDownloadSpec> {
         .copied()
 }
 
+pub fn registered_whisper_memory_mib(model_name: &str) -> Option<(u64, u64)> {
+    let spec = whisper_download_spec(model_name)?;
+    let fixed = spec.size.div_ceil(1024 * 1024);
+    // Decoder/KV/compute buffers follow the model architecture rather than the
+    // quantized file size. Values include headroom over observed whisper.cpp
+    // allocations so the Pipeline budget is not just the weight-file size.
+    let worker = if model_name.starts_with("tiny") {
+        192
+    } else if model_name.starts_with("base") {
+        256
+    } else if model_name.starts_with("small") {
+        384
+    } else if model_name.starts_with("medium") {
+        512
+    } else if model_name.contains("turbo") {
+        512
+    } else {
+        640
+    };
+    Some((fixed, worker))
+}
+
 fn whisper_model_urls(spec: WhisperDownloadSpec) -> [String; 2] {
     [
         format!(
@@ -126,13 +148,22 @@ fn whisper_model_urls(spec: WhisperDownloadSpec) -> [String; 2] {
 }
 
 fn verify_whisper_file(path: &Path, spec: WhisperDownloadSpec) -> Result<()> {
+    verify_file_integrity(path, spec.file_name, spec.size, spec.sha256)
+}
+
+fn verify_file_integrity(
+    path: &Path,
+    display_name: &str,
+    expected_size: u64,
+    expected_sha256: &str,
+) -> Result<()> {
     let metadata = std::fs::metadata(path)?;
-    if metadata.len() != spec.size {
+    if metadata.len() != expected_size {
         return Err(anyhow!(
             "{} has {} bytes; expected {}",
-            spec.file_name,
+            display_name,
             metadata.len(),
-            spec.size
+            expected_size
         ));
     }
     let mut file = File::open(path)?;
@@ -146,15 +177,88 @@ fn verify_whisper_file(path: &Path, spec: WhisperDownloadSpec) -> Result<()> {
         hasher.update(&buffer[..count]);
     }
     let actual = format!("{:x}", hasher.finalize());
-    if actual != spec.sha256 {
+    if actual != expected_sha256 {
         return Err(anyhow!(
             "{} checksum mismatch: expected {}, got {}",
-            spec.file_name,
-            spec.sha256,
+            display_name,
+            expected_sha256,
             actual
         ));
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedWhisperModel {
+    pub model_id: String,
+    pub name: String,
+    pub path: String,
+}
+
+pub async fn import_registered_whisper_file(
+    models_dir: &Path,
+    source: &Path,
+) -> Result<ImportedWhisperModel> {
+    let file_name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| anyhow!("The selected Whisper model has an invalid file name"))?;
+    let spec = WHISPER_DOWNLOAD_SPECS
+        .iter()
+        .find(|candidate| candidate.file_name == file_name)
+        .copied()
+        .ok_or_else(|| anyhow!("This file name does not match a registered Whisper model"))?;
+    let source_for_validation = source.to_path_buf();
+    tokio::task::spawn_blocking(move || verify_whisper_file(&source_for_validation, spec))
+        .await
+        .map_err(|error| anyhow!("Whisper model verification task failed: {error}"))??;
+
+    tokio::fs::create_dir_all(models_dir).await?;
+    let destination = models_dir.join(spec.file_name);
+    if source == destination {
+        return Ok(ImportedWhisperModel {
+            model_id: spec.model_name.into(),
+            name: spec.model_name.into(),
+            path: destination.to_string_lossy().into_owned(),
+        });
+    }
+    let transaction_id = uuid::Uuid::new_v4();
+    let staging = models_dir.join(format!(".{}.import-{transaction_id}", spec.file_name));
+    let backup = models_dir.join(format!(".{}.backup-{transaction_id}", spec.file_name));
+    let result = async {
+        tokio::fs::copy(source, &staging).await?;
+        let staging_for_validation = staging.clone();
+        tokio::task::spawn_blocking(move || verify_whisper_file(&staging_for_validation, spec))
+            .await
+            .map_err(|error| anyhow!("Whisper import verification task failed: {error}"))??;
+        if destination.exists() {
+            tokio::fs::rename(&destination, &backup).await?;
+        }
+        if let Err(error) = tokio::fs::rename(&staging, &destination).await {
+            if backup.exists() {
+                let _ = tokio::fs::rename(&backup, &destination).await;
+            }
+            return Err(error.into());
+        }
+        if backup.exists() {
+            tokio::fs::remove_file(&backup).await?;
+        }
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&staging).await;
+        if backup.exists() && !destination.exists() {
+            let _ = tokio::fs::rename(&backup, &destination).await;
+        }
+    }
+    result?;
+    Ok(ImportedWhisperModel {
+        model_id: spec.model_name.into(),
+        name: spec.model_name.into(),
+        path: destination.to_string_lossy().into_owned(),
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -767,9 +871,6 @@ impl WhisperEngine {
             // Removed debug log to reduce I/O overhead in transcription hot path
         }
 
-        let duration_seconds = audio_data.len() as f64 / 16000.0;
-        let is_partial = duration_seconds < 15.0; // Consider chunks under 15s as partial
-
         // PERFORMANCE: Suppress verbose C library logs during transcription
         // This hides whisper_full_with_state debug logs and beam search details
         let (num_segments, state) = {
@@ -821,7 +922,10 @@ impl WhisperEngine {
             0.0
         };
 
-        Ok((cleaned_result, avg_confidence, is_partial))
+        // Whisper runs once on an already-finalized VAD segment. Segment length
+        // is not a provisional/final signal; only continuous streaming sessions
+        // are allowed to emit provisional hypotheses.
+        Ok((cleaned_result, avg_confidence, false))
     }
 
     pub async fn transcribe_audio(
@@ -1694,6 +1798,65 @@ mod download_tests {
         assert_eq!(download_progress(100, 100), 99);
         assert_eq!(download_progress(200, 100), 99);
         assert_eq!(download_progress(10, 0), 0);
+    }
+
+    #[tokio::test]
+    async fn offline_import_rejects_unverified_content_without_replacing_the_installed_model() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let models_dir = tempfile::tempdir().unwrap();
+        let source = source_dir.path().join("ggml-tiny.bin");
+        let installed = models_dir.path().join("ggml-tiny.bin");
+        fs::write(&source, b"not a registered model").await.unwrap();
+        fs::write(&installed, b"existing model remains intact")
+            .await
+            .unwrap();
+
+        assert!(import_registered_whisper_file(models_dir.path(), &source)
+            .await
+            .is_err());
+        assert_eq!(
+            fs::read(&installed).await.unwrap(),
+            b"existing model remains intact"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires MINGTILY_WHISPER_MODEL_FILE pointing to a registered Whisper fixture"]
+    fn registered_offline_whisper_fixture_passes_exact_integrity_verification() {
+        let path = std::env::var("MINGTILY_WHISPER_MODEL_FILE").unwrap();
+        let path = PathBuf::from(path);
+        let file_name = path.file_name().and_then(|value| value.to_str()).unwrap();
+        let spec = WHISPER_DOWNLOAD_SPECS
+            .iter()
+            .find(|candidate| candidate.file_name == file_name)
+            .copied()
+            .unwrap();
+        verify_whisper_file(&path, spec).unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires MINGTILY_WHISPER_MODEL_FILE pointing to a registered Whisper fixture"]
+    async fn registered_offline_whisper_fixture_loads_and_runs_inference() {
+        let path = PathBuf::from(std::env::var("MINGTILY_WHISPER_MODEL_FILE").unwrap());
+        let file_name = path.file_name().and_then(|value| value.to_str()).unwrap();
+        let spec = WHISPER_DOWNLOAD_SPECS
+            .iter()
+            .find(|candidate| candidate.file_name == file_name)
+            .copied()
+            .unwrap();
+        let models_dir = path.parent().unwrap().to_path_buf();
+        let engine = WhisperEngine::new_with_models_dir(Some(models_dir)).unwrap();
+        engine.discover_models().await.unwrap();
+        engine.load_model(spec.model_name).await.unwrap();
+        assert!(engine.is_model_loaded().await);
+        let (text, confidence, partial) = engine
+            .transcribe_audio_with_confidence(vec![0.0; 32_000], Some("en".into()))
+            .await
+            .unwrap();
+        assert!(!partial);
+        assert!(confidence.is_finite());
+        assert!(text.len() < 10_000);
+        assert!(engine.unload_model().await);
     }
 
     #[tokio::test]

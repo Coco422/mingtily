@@ -5,13 +5,12 @@ import { listen } from '@tauri-apps/api/event';
 import {
   AudioLines,
   Download,
-  FileArchive,
-  FolderOpen,
   Loader2,
   Trash2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { useConfig } from '@/contexts/ConfigContext';
 import { Button } from '@/components/ui/button';
 import { ModelAssetRow, type ModelAssetState } from '@/components/ModelAssetRow';
 import {
@@ -19,6 +18,7 @@ import {
   SherpaAsrDownloadProgress,
   SherpaAsrModelStatus,
 } from '@/lib/sherpa-asr';
+import { MODEL_ASSETS_CHANGED_EVENT } from '@/lib/model-assets-events';
 
 interface SherpaAsrModelManagerProps {
   selectedModel?: string;
@@ -41,11 +41,11 @@ export function SherpaAsrModelManager({
   onModelSelect,
 }: SherpaAsrModelManagerProps) {
   const { t } = useTranslation('models');
+  const { betaFeatures } = useConfig();
   const [models, setModels] = useState<SherpaAsrModelStatus[]>([]);
   const [busyModels, setBusyModels] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
-  const [importing, setImporting] = useState<'archive' | 'directory' | null>(null);
 
   const refresh = useCallback(async () => {
     const nextModels = await SherpaAsrAPI.listModels();
@@ -65,6 +65,15 @@ export function SherpaAsrModelManager({
       )
       .finally(() => setLoading(false));
   }, [refresh, t]);
+
+  useEffect(() => {
+    const handleModelAssetsChanged = (event: Event) => {
+      const provider = (event as CustomEvent<{ provider?: string }>).detail?.provider;
+      if (provider === 'sherpa-onnx') void refresh();
+    };
+    window.addEventListener(MODEL_ASSETS_CHANGED_EVENT, handleModelAssetsChanged);
+    return () => window.removeEventListener(MODEL_ASSETS_CHANGED_EVENT, handleModelAssetsChanged);
+  }, [refresh]);
 
   useEffect(() => {
     const unlisteners: Array<() => void> = [];
@@ -161,25 +170,6 @@ export function SherpaAsrModelManager({
     }
   };
 
-  const importOffline = async (kind: 'archive' | 'directory') => {
-    setImporting(kind);
-    try {
-      const imported =
-        kind === 'archive'
-          ? await SherpaAsrAPI.importModelArchive()
-          : await SherpaAsrAPI.importModelDirectory();
-      if (!imported) return;
-      const modelName =
-        models.find((model) => model.id === imported.model_id)?.name ?? imported.model_id;
-      await refresh();
-      toast.success(t('sherpa.offlineImport.success', { model: modelName }));
-    } catch (error) {
-      toast.error(t('sherpa.offlineImport.failed'), { description: String(error) });
-    } finally {
-      setImporting(null);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -191,46 +181,7 @@ export function SherpaAsrModelManager({
 
   return (
     <div className="space-y-2">
-      {mode === 'manage' && (
-        <div className="rounded-lg border bg-muted/30 p-4">
-          <div className="text-sm font-medium">{t('sherpa.offlineImport.title')}</div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t('sherpa.offlineImport.description')}
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={importing !== null}
-              onClick={() => void importOffline('archive')}
-            >
-              {importing === 'archive' ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <FileArchive className="mr-2 h-4 w-4" />
-              )}
-              {t('sherpa.offlineImport.archive')}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={importing !== null}
-              onClick={() => void importOffline('directory')}
-            >
-              {importing === 'directory' ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <FolderOpen className="mr-2 h-4 w-4" />
-              )}
-              {t('sherpa.offlineImport.directory')}
-            </Button>
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            {t('sherpa.offlineImport.hint')}
-          </p>
-        </div>
-      )}
-      {models.map((model) => {
+      {models.filter((model) => !model.beta || betaFeatures.experimentalAsrModels).map((model) => {
         const installed = model.status === 'available';
         const inUse = installed && (
           selectedModel === model.id || additionalSelectedModels.includes(model.id)

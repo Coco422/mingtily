@@ -310,6 +310,7 @@ pub struct ParakeetEngine {
     models_dir: PathBuf,
     current_model: Arc<RwLock<Option<ParakeetModel>>>,
     current_model_name: Arc<RwLock<Option<String>>>,
+    current_model_threads: Arc<RwLock<Option<usize>>>,
     pub(crate) available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
     cancel_download_flag: Arc<RwLock<Option<String>>>, // Model name being cancelled
     // Active downloads tracking to prevent concurrent downloads
@@ -354,6 +355,7 @@ impl ParakeetEngine {
             models_dir,
             current_model: Arc::new(RwLock::new(None)),
             current_model_name: Arc::new(RwLock::new(None)),
+            current_model_threads: Arc::new(RwLock::new(None)),
             available_models: Arc::new(RwLock::new(HashMap::new())),
             cancel_download_flag: Arc::new(RwLock::new(None)),
             // Initialize active downloads tracking
@@ -601,6 +603,16 @@ impl ParakeetEngine {
 
     /// Load a Parakeet model
     pub async fn load_model(&self, model_name: &str) -> Result<()> {
+        self.load_model_with_threads(model_name, None).await
+    }
+
+    /// Load a Parakeet model with an explicit ONNX Runtime thread budget.
+    pub async fn load_model_with_threads(
+        &self,
+        model_name: &str,
+        num_threads: Option<usize>,
+    ) -> Result<()> {
+        let num_threads = num_threads.map(|threads| threads.max(1));
         let models = self.available_models.read().await;
         let model_info = models
             .get(model_name)
@@ -610,7 +622,8 @@ impl ParakeetEngine {
             ModelStatus::Available => {
                 // Check if this model is already loaded
                 if let Some(current_model) = self.current_model_name.read().await.as_ref() {
-                    if current_model == model_name {
+                    let current_threads = *self.current_model_threads.read().await;
+                    if current_model == model_name && current_threads == num_threads {
                         log::info!(
                             "Parakeet model {} is already loaded, skipping reload",
                             model_name
@@ -631,12 +644,16 @@ impl ParakeetEngine {
 
                 // Load model based on quantization type
                 let quantized = model_info.quantization == QuantizationType::Int8;
-                let model = ParakeetModel::new(&model_info.path, quantized)
-                    .map_err(|e| anyhow!("Failed to load Parakeet model {}: {}", model_name, e))?;
+                let model =
+                    ParakeetModel::new_with_threads(&model_info.path, quantized, num_threads)
+                        .map_err(|e| {
+                            anyhow!("Failed to load Parakeet model {}: {}", model_name, e)
+                        })?;
 
                 // Update current model and model name
                 *self.current_model.write().await = Some(model);
                 *self.current_model_name.write().await = Some(model_name.to_string());
+                *self.current_model_threads.write().await = num_threads;
 
                 log::info!(
                     "Successfully loaded Parakeet model: {} ({})",
@@ -670,6 +687,7 @@ impl ParakeetEngine {
 
         let mut model_name_guard = self.current_model_name.write().await;
         model_name_guard.take();
+        self.current_model_threads.write().await.take();
 
         unloaded
     }

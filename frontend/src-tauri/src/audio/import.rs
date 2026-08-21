@@ -2,11 +2,11 @@
 
 use crate::api::TranscriptSegment;
 use crate::audio::decoder::{decode_audio_file, decode_audio_file_with_progress};
+use crate::audio::transcription::engine::resolve_requested_pipeline;
 use crate::audio::transcription::load_transcription_provider;
 use crate::audio::vad::get_speech_chunks_with_progress;
 use crate::speaker_diarization::{
-    align_vad_with_turns, installed_model_paths, is_enabled as speaker_diarization_is_enabled,
-    DiarizationEngine, SpeakerAudioSegment,
+    align_vad_with_turns, installed_model_paths, DiarizationEngine, SpeakerAudioSegment,
 };
 use crate::state::AppState;
 use anyhow::{anyhow, Result};
@@ -188,7 +188,7 @@ pub fn validate_audio_file(path: &Path) -> Result<AudioFileInfo> {
 
 /// Extract duration from audio file metadata without full decode
 /// Returns error if metadata is unavailable, triggering fallback to full decode
-fn extract_duration_from_metadata(path: &Path) -> Result<f64> {
+pub(crate) fn extract_duration_from_metadata(path: &Path) -> Result<f64> {
     use symphonia::core::formats::FormatOptions;
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::MetadataOptions;
@@ -518,7 +518,12 @@ async fn run_import<R: Runtime>(
         return Err(anyhow!("Import cancelled"));
     }
 
-    let speaker_diarization_enabled = speaker_diarization_is_enabled(&app);
+    let resolved_pipeline = resolve_requested_pipeline(&app, provider.as_deref(), model.as_deref())
+        .await
+        .map_err(|error| anyhow!(error))?;
+    let runtime_speaker = &resolved_pipeline.runtime_config().speaker;
+    let speaker_diarization_enabled = runtime_speaker.live_enabled;
+    let speaker_count = speaker_count.or(runtime_speaker.speaker_count);
     if speaker_diarization_enabled {
         emit_progress(&app, "diarization", 30, "Detecting speakers...");
     }
@@ -974,6 +979,12 @@ pub async fn start_import_audio_command<R: Runtime>(
     provider: Option<String>,
     speaker_count: Option<usize>,
 ) -> Result<ImportStarted, String> {
+    if !crate::pipeline::load_beta(&app)
+        .map_err(|error| error.to_string())?
+        .import_and_retranscribe
+    {
+        return Err("Import and retranscription Beta feature is disabled".into());
+    }
     if speaker_count.is_some_and(|count| !(1..=10).contains(&count)) {
         return Err("Speaker count must be between 1 and 10".to_string());
     }

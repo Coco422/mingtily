@@ -1,7 +1,7 @@
 'use client';
 
 import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react';
-import { AlertTriangle, AudioLines, Bot, ChevronDown, FileCog, MessageSquareText, Users } from 'lucide-react';
+import { AlertTriangle, AudioLines, Bot, ChevronDown, FileCog, HardDriveDownload, MessageSquareText, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ModelManager } from '@/components/WhisperModelManager';
 import { ParakeetModelManager } from '@/components/ParakeetModelManager';
@@ -11,6 +11,7 @@ import { HomophoneReplacerManager } from '@/components/HomophoneReplacerManager'
 import { SpeakerDiarizationModelManager } from '@/components/SpeakerDiarizationModelManager';
 import { BuiltInModelManager } from '@/components/BuiltInModelManager';
 import { OllamaModelManager } from '@/components/OllamaModelManager';
+import { OfflineModelImport } from '@/components/OfflineModelImport';
 import { useConfig } from '@/contexts/ConfigContext';
 import {
   capabilityConfigService,
@@ -213,6 +214,14 @@ function ModelsSettingsContent({ onOpenServices }: ModelsSettingsProps) {
 
   return (
     <div className="space-y-4">
+      <ModelSection
+        icon={HardDriveDownload}
+        title={t('offlineImport.title')}
+        description={t('offlineImport.description')}
+      >
+        <OfflineModelImport />
+      </ModelSection>
+
       <ModelSection
         icon={AudioLines}
         title={t('sections.transcription')}

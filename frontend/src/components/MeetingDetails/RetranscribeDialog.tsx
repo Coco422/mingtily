@@ -66,12 +66,13 @@ export function RetranscribeDialog({
   onComplete,
 }: RetranscribeDialogProps) {
   const { t, i18n } = useTranslation('meeting');
-  const { selectedLanguage, transcriptModelConfig } = useConfig();
+  const { selectedLanguage, transcriptModelConfig, betaFeatures } = useConfig();
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<RetranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
   const [speakerCount, setSpeakerCount] = useState('auto');
+  const [resourceMode, setResourceMode] = useState<'eco' | 'balanced' | 'fast'>('balanced');
   const [speakerDiarizationEnabled, setSpeakerDiarizationEnabled] = useState(true);
   const localizedProgress = progress
     ? localizeAudioProgress(t, progress.stage, progress.message)
@@ -94,7 +95,7 @@ export function RetranscribeDialog({
     loadingModels,
     fetchModels,
     resetSelection,
-  } = useTranscriptionModels(transcriptModelConfig);
+  } = useTranscriptionModels(transcriptModelConfig, betaFeatures.experimentalAsrModels);
 
   // Stable refs for callbacks to avoid listener re-registration
   const onCompleteRef = useRef(onComplete);
@@ -244,17 +245,22 @@ export function RetranscribeDialog({
     try {
       const languageToSend =
         automaticLanguageOnly || selectedLang === 'auto' ? null : selectedLang;
-      await invoke('start_retranscription_command', {
-        meetingId,
-        meetingFolderPath,
-        language: languageToSend,
-        model: selectedModelDetails?.name || null,
-        provider: selectedModelDetails?.provider || null,
-        speakerCount:
-          !speakerDiarizationEnabled || speakerCount === 'auto'
-            ? null
-            : Number.parseInt(speakerCount, 10),
+      await invoke('processing_enqueue_meeting_jobs', {
+        request: {
+          meetingId,
+          kind: 'asr_recompute',
+          language: languageToSend,
+          model: selectedModelDetails?.name || null,
+          provider: selectedModelDetails?.provider || null,
+          speakerCount: !speakerDiarizationEnabled || speakerCount === 'auto' ? null : Number.parseInt(speakerCount, 10),
+          speakerRefinement: speakerDiarizationEnabled,
+          resourceMode,
+        },
       });
+      setIsProcessing(false);
+      toast.success(t('settings:pipelineJobQueued'));
+      onOpenChangeRef.current(false);
+      return;
     } catch (err: any) {
       setIsProcessing(false);
       const errorMsg = typeof err === 'string' ? err : (err?.message || String(err));
@@ -418,6 +424,18 @@ export function RetranscribeDialog({
                   ? t('speakerHint')
                   : t('speakerDisabledHint')}
               </p>
+            </div>
+          )}
+
+          {!isProcessing && !error && (
+            <div className="space-y-3">
+              <span className="text-sm font-medium">{t('settings:pipeline.resourceMode')}</span>
+              <Select value={resourceMode} onValueChange={(value) => setResourceMode(value as typeof resourceMode)}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(['eco', 'balanced', 'fast'] as const).map((mode) => <SelectItem key={mode} value={mode}>{t(`settings:pipeline.resources.${mode}`)}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           )}
 

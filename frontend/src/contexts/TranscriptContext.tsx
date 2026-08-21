@@ -305,31 +305,28 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
       if (allNewTranscripts.length > 0) {
         setTranscripts(prev => {
-          // Create a set of existing sequence_ids for deduplication
-          const existingSequenceIds = new Set(prev.map(t => t.sequence_id).filter(id => id !== undefined));
-
-          // Filter out any new transcripts that already exist
-          const uniqueNewTranscripts = allNewTranscripts.filter(transcript =>
-            transcript.sequence_id !== undefined && !existingSequenceIds.has(transcript.sequence_id)
+          // A finalized segment replaces any display-only provisional revision with
+          // the same sequence id. Never let an earlier partial block the final text.
+          const incomingSequences = new Set(
+            allNewTranscripts
+              .map((transcript) => transcript.sequence_id)
+              .filter((id): id is number => id !== undefined)
           );
-
-          // Only combine if we have unique new transcripts
-          if (uniqueNewTranscripts.length === 0) {
-            console.log('No unique transcripts to add - all were duplicates');
-            return prev; // No new unique transcripts to add
-          }
-
-          console.log(`Adding ${uniqueNewTranscripts.length} unique transcripts out of ${allNewTranscripts.length} received`);
-
-          // Merge with existing transcripts, maintaining chronological order
-          const combined = [...prev, ...uniqueNewTranscripts];
+          const combined = [
+            ...prev.filter((transcript) =>
+              transcript.sequence_id === undefined || !incomingSequences.has(transcript.sequence_id)
+            ),
+            ...allNewTranscripts,
+          ];
 
           // Sort by chunk_start_time first, then by sequence_id
-          return combined.sort((a, b) => {
+          const next = combined.sort((a, b) => {
             const chunkTimeDiff = (a.chunk_start_time || 0) - (b.chunk_start_time || 0);
             if (chunkTimeDiff !== 0) return chunkTimeDiff;
             return (a.sequence_id || 0) - (b.sequence_id || 0);
           });
+          transcriptsRef.current = next;
+          return next;
         });
 
         // Log the processing summary
@@ -357,12 +354,6 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             buffer_size_before: transcriptBuffer.size
           });
 
-          // Check for duplicate sequence_id before processing
-          if (transcriptBuffer.has(update.sequence_id)) {
-            console.log('🚫 MAIN LISTENER: Duplicate sequence_id, skipping buffer:', update.sequence_id);
-            return;
-          }
-
           // Create transcript for buffer with NEW timestamp fields
           const newTranscript: Transcript = {
             id: `${Date.now()}-${transcriptCounter++}`,
@@ -380,7 +371,25 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             speaker_is_provisional: update.speaker_is_provisional,
           };
 
-          // Add to buffer
+          if (update.is_partial) {
+            // Provisional hypotheses are display-only. Replace their previous
+            // revision in memory, but never buffer or persist them.
+            setTranscripts((current) => {
+              const next = [
+                ...current.filter((transcript) => transcript.sequence_id !== update.sequence_id),
+                newTranscript,
+              ].sort((a, b) => {
+                const chunkTimeDiff = (a.chunk_start_time || 0) - (b.chunk_start_time || 0);
+                if (chunkTimeDiff !== 0) return chunkTimeDiff;
+                return (a.sequence_id || 0) - (b.sequence_id || 0);
+              });
+              transcriptsRef.current = next;
+              return next;
+            });
+            return;
+          }
+
+          // Final revisions replace any buffered revision for this sequence.
           transcriptBuffer.set(update.sequence_id, newTranscript);
           console.log(`✅ MAIN LISTENER: Buffered transcript with sequence_id ${update.sequence_id}. Buffer size: ${transcriptBuffer.size}, Last processed: ${lastProcessedSequence}`);
 
@@ -401,7 +410,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
-        alert(t('errors:transcriptListenerFailed'));
+        toast.error(t('errors:transcriptListenerFailed'), {
+          id: 'transcript-listener-failed',
+          description: error instanceof Error ? error.message : String(error),
+        });
       }
     };
 
@@ -496,18 +508,14 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     setTranscripts(prev => {
       console.log('📊 Current transcripts count before update:', prev.length);
 
-      // Check if this transcript already exists
-      const exists = prev.some(
-        t => t.text === update.text && t.timestamp === update.timestamp
-      );
-      if (exists) {
-        console.log('🚫 Duplicate transcript detected, skipping:', update.text.substring(0, 30) + '...');
-        return prev;
-      }
-
-      // Add new transcript and sort by sequence_id to maintain order
-      const updated = [...prev, newTranscript];
+      // Revisions replace the previous item for the same sequence. This keeps
+      // provisional text visible without allowing it to shadow the final result.
+      const updated = [
+        ...prev.filter((transcript) => transcript.sequence_id !== update.sequence_id),
+        newTranscript,
+      ];
       const sorted = updated.sort((a, b) => (a.sequence_id || 0) - (b.sequence_id || 0));
+      transcriptsRef.current = sorted;
 
       console.log('✅ Added new transcript. New count:', sorted.length);
       console.log('📝 Latest transcript:', {
@@ -552,6 +560,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
   // Clear transcripts (used when starting new recording)
   const clearTranscripts = useCallback(() => {
+    transcriptsRef.current = [];
     setTranscripts([]);
     // Don't clear currentMeetingId here - it will be set by recording-started event
   }, []);

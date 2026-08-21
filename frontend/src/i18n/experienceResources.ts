@@ -51,6 +51,13 @@ export const experienceResources = {
     onboarding: {
       setupTitle: 'Setup overview',
       setupDescription: 'Download local models now, or skip and add them later in Settings. Recording requires a configured transcription model.',
+      pipelinePresets: {
+        fast: { name: 'Fast', description: 'Smallest download and lowest resource use for Chinese meetings.', models: 'Paraformer Small · about 78 MiB' },
+        balanced: { name: 'Balanced', description: 'Reliable Chinese transcription with speakers and restored punctuation.', models: 'SenseVoice + speakers + punctuation' },
+        quality: { name: 'High quality', description: 'Keeps a meeting-time transcript, then recomputes it with a larger terminology-aware model.', models: 'SenseVoice + Fun-ASR Nano + speakers + punctuation' },
+      },
+      pipelineCustomLater: 'You can skip downloads now or build a Custom Pipeline later in Settings → Services.',
+      pipelineBundle: '{{preset}} Pipeline models',
       setupTranscription: 'Set up a transcription model now or later',
       setupSummary: 'Optionally set up a local summary model',
       step: 'Step {{number}}',
@@ -339,6 +346,13 @@ export const experienceResources = {
     onboarding: {
       setupTitle: '开始设置',
       setupDescription: '可以现在下载本地模型，也可以跳过，稍后到“设置”中添加。录音前仍需配置转写模型。',
+      pipelinePresets: {
+        fast: { name: '快速', description: '面向中文会议，下载最小、资源占用最低。', models: 'Paraformer Small · 约 78 MiB' },
+        balanced: { name: '均衡', description: '稳定的中文转写，并补充说话人和标点。', models: 'SenseVoice + 说话人 + 标点' },
+        quality: { name: '高质量', description: '会议中保留可用稿，会后使用更大的术语增强模型重新计算。', models: 'SenseVoice + Fun-ASR Nano + 说话人 + 标点' },
+      },
+      pipelineCustomLater: '现在可以跳过下载，稍后也可以在“设置 → 服务”中设计自定义 Pipeline。',
+      pipelineBundle: '{{preset}} Pipeline 模型',
       setupTranscription: '现在或稍后配置转写模型',
       setupSummary: '可选：配置本地摘要模型',
       step: '第 {{number}} 步',

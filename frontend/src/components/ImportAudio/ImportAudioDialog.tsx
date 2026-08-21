@@ -81,7 +81,7 @@ export function ImportAudioDialog({
   const { t, i18n } = useTranslation('meeting');
   const router = useRouter();
   const { refetchMeetings } = useSidebar();
-  const { selectedLanguage, transcriptModelConfig } = useConfig();
+  const { selectedLanguage, transcriptModelConfig, betaFeatures } = useConfig();
 
   const [title, setTitle] = useState('');
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
@@ -103,7 +103,7 @@ export function ImportAudioDialog({
     loadingModels,
     fetchModels,
     resetSelection,
-  } = useTranscriptionModels(transcriptModelConfig);
+  } = useTranscriptionModels(transcriptModelConfig, betaFeatures.experimentalAsrModels);
 
   const handleImportComplete = useCallback((result: ImportResult) => {
     toast.success(t('importSuccess', { count: result.segments_count }));
